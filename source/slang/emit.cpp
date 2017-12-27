@@ -116,6 +116,10 @@ struct SharedEmitContext
 
     // Map used to tell AST lowering what decls are represented by IR.
     HashSet<Decl*>* irDeclSetForAST = nullptr;
+
+    // Are we doing IR-only emit, so that everything should get
+    // its mangled name?
+    bool isFullIRMode = false;
 };
 
 struct EmitContext
@@ -578,6 +582,7 @@ struct EmitVisitor
 
         std::ostringstream stream;
         stream.imbue(std::locale::classic());
+        stream.setf(std::ios::fixed,std::ios::floatfield);
         stream.precision(20);
         stream << value;
 
@@ -2995,10 +3000,21 @@ struct EmitVisitor
         }
     }
 
+    bool isBuiltinDecl(Decl* decl)
+    {
+        for (auto dd = decl; dd; dd = dd->ParentDecl)
+        {
+            if (dd->FindModifier<FromStdLibModifier>())
+                return true;
+        }
+        return false;
+    }
+
     void EmitDeclRef(DeclRef<Decl> declRef)
     {
         // Are we emitting an AST in a context where some declarations
         // are actually stored as IR code?
+
         if(auto irDeclSet = context->shared->irDeclSetForAST)
         {
             Decl* decl = declRef.getDecl();
@@ -3008,6 +3024,17 @@ struct EmitVisitor
                 return;
             }
         }
+
+        if (context->shared->isFullIRMode)
+        {
+            // Don't apply this to builting declarations
+            if (!isBuiltinDecl(declRef.getDecl()))
+            {
+                emit(getIRName(declRef));
+                return;
+            }
+        }
+
 
 
         // TODO: need to qualify a declaration name based on parent scopes/declarations
@@ -4452,26 +4479,34 @@ emitDeclImpl(decl, nullptr);
 
     String getIRName(DeclRefBase const& declRef)
     {
-        // It is a bit ugly, but we need a deterministic way
-        // to get a name for things when emitting from the IR
-        // that won't conflict with any keywords, builtins, etc.
-        // in the target language.
+        // In general, when referring to a declaration that has been lowered
+        // via the IR, we want to use its mangled name.
         //
-        // Eventually we should accomplish this by using
-        // mangled names everywhere, but that complicates things
-        // when we are also using direct comparison to fxc/glslang
-        // output for some of our tests.
+        // There are two main exceptions to this:
+        //
+        // 1. For debugging, we accept the `-no-mangle` flag which basically
+        //    instructs us to try to use the original name of all declarations,
+        //    to make the output more like what is expected to come out of
+        //    fxc pass-through. This case should get deprecated some day.
+        //
+        // 2. It is really annoying to have the fields of a `struct` type
+        //    get ridiculously lengthy mangled names, and this also messes
+        //    up stuff like specialization (since the mangled name of a field
+        //    would then include the mangled name of the outer type).
         //
 
         String name;
         if (context->shared->entryPoint->compileRequest->compileFlags & SLANG_COMPILE_FLAG_NO_MANGLING)
         {
+            // Special case (1):
             name.append(getText(declRef.GetName()));
+            return name;
         }
-        else
-        {
-            name.append(getMangledName(declRef));
-        }
+
+        // Special case (2): not implemented yet.
+
+        // General case:
+        name.append(getMangledName(declRef));
         return name;
     }
 
@@ -4874,6 +4909,7 @@ emitDeclImpl(decl, nullptr);
         case kIROp_FieldAddress:
         case kIROp_getElementPtr:
         case kIROp_specialize:
+        case kIROp_BufferElementRef:
             return true;
         }
 
@@ -5322,6 +5358,9 @@ emitDeclImpl(decl, nullptr);
         IRValue*        value)
     {
         IRInst* inst = (IRInst*) value;
+
+        advanceToSourceLocation(inst->sourceLoc);
+
         switch(value->op)
         {
         case kIROp_IntLit:
@@ -5512,6 +5551,7 @@ emitDeclImpl(decl, nullptr);
             break;
 
         case kIROp_BufferLoad:
+        case kIROp_BufferElementRef:
             emitIROperand(ctx, inst->getArg(0));
             emit("[");
             emitIROperand(ctx, inst->getArg(1));
@@ -5616,6 +5656,8 @@ emitDeclImpl(decl, nullptr);
         {
             return;
         }
+
+        advanceToSourceLocation(inst->sourceLoc);
 
         switch(inst->op)
         {
@@ -5779,6 +5821,8 @@ emitDeclImpl(decl, nullptr);
             }
 
             // Now look at the terminator instruction, which will tell us what we need to emit next.
+
+            advanceToSourceLocation(terminator->sourceLoc);
 
             switch (terminator->op)
             {
@@ -7030,6 +7074,24 @@ emitDeclImpl(decl, nullptr);
         {}
     }
 
+    void emitIRUsedTypesForGlobalValueWithCode(
+        EmitContext*            ctx,
+        IRGlobalValueWithCode*  value)
+    {
+        for( auto bb = value->getFirstBlock(); bb; bb = bb->getNextBlock() )
+        {
+            for( auto pp = bb->getFirstParam(); pp; pp = pp->getNextParam() )
+            {
+                emitIRUsedTypesForValue(ctx, pp);
+            }
+
+            for( auto ii = bb->getFirstInst(); ii; ii = ii->getNextInst() )
+            {
+                emitIRUsedTypesForValue(ctx, ii);
+            }
+        }
+    }
+
     void emitIRUsedTypesForValue(
         EmitContext*    ctx,
         IRValue*        value)
@@ -7040,19 +7102,23 @@ emitDeclImpl(decl, nullptr);
         case kIROp_Func:
             {
                 auto irFunc = (IRFunc*) value;
-                emitIRUsedType(ctx, irFunc->getResultType());
-                for( auto bb = irFunc->getFirstBlock(); bb; bb = bb->getNextBlock() )
-                {
-                    for( auto pp = bb->getFirstParam(); pp; pp = pp->getNextParam() )
-                    {
-                        emitIRUsedTypesForValue(ctx, pp);
-                    }
 
-                    for( auto ii = bb->getFirstInst(); ii; ii = ii->getNextInst() )
-                    {
-                        emitIRUsedTypesForValue(ctx, ii);
-                    }
-                }
+                // Don't emit anything for a generic function,
+                // since we only care about the types used by
+                // the actual specializations.
+                if (irFunc->genericDecl)
+                    return;
+
+                emitIRUsedType(ctx, irFunc->getResultType());
+
+                emitIRUsedTypesForGlobalValueWithCode(ctx, irFunc);
+            }
+            break;
+
+        case kIROp_global_var:
+            {
+                auto irGlobal = (IRGlobalVar*) value;
+                emitIRUsedTypesForGlobalValueWithCode(ctx, irGlobal);
             }
             break;
 
@@ -7361,6 +7427,8 @@ String emitEntryPoint(
             // has already been lowered to IR as part of the front-end
             // compilation work. We thus start by cloning any code needed
             // by the entry point over to our fresh IR module.
+
+            sharedContext.isFullIRMode = true;
 
             specializeIRForEntryPoint(
                 irSpecializationState,

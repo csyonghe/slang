@@ -44,8 +44,7 @@ struct StructuredBuffer
     T Load(int location);
     T Load(int location, out uint status);
 
-    __intrinsic_op(bufferLoad)
-    __subscript(uint index) -> T;
+    __subscript(uint index) -> T { __intrinsic_op(bufferLoad) get; };
 };
 
 __generic<T> __magic_type(HLSLConsumeStructuredBufferType) struct ConsumeStructuredBuffer
@@ -201,11 +200,8 @@ struct RWStructuredBuffer
 
 	__subscript(uint index) -> T
 	{
-		__intrinsic_op(bufferLoad)
-		get;
-
-		__intrinsic_op(bufferStore)
-		set;
+        __intrinsic_op(bufferElementRef)
+        ref;
 	}
 };
 
@@ -828,14 +824,14 @@ __generic<T : __BuiltinFloatingPointType>
 __specialized_for_target(glsl)
 T saturate(T x)
 {
-    return clamp(x, T(0), T(1));
+    return clamp<T>(x, T(0), T(1));
 }
 
 __generic<T : __BuiltinFloatingPointType, let N : int>
 __specialized_for_target(glsl)
 vector<T,N> saturate(vector<T,N> x)
 {
-    return clamp(x,
+    return clamp<T,N>(x,
         vector<T,N>(T(0)),
         vector<T,N>(T(1)));
 }
@@ -850,7 +846,7 @@ __generic<T : __BuiltinFloatingPointType, let N : int, let M : int>
 __specialized_for_target(glsl)
 matrix<T,N,M> saturate(matrix<T,N,M> x)
 {
-    return clamp(x,
+    return clamp<T,N,M>(x,
         __scalarToMatrix<T,N,M>(T(0)),
         __scalarToMatrix<T,N,M>(T(1)));
 }

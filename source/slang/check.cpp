@@ -3575,6 +3575,32 @@ namespace Slang
 
             decl->SetCheckState(DeclCheckState::CheckedHeader);
 
+            // If we have a subscript declaration with no accessor declarations,
+            // then we should create a single `GetterDecl` to represent
+            // the implicit meaning of their declaration, so:
+            //
+            //      subscript(uint index) -> T;
+            //
+            // becomes:
+            //
+            //      subscript(uint index) -> T { get; }
+            //
+
+            bool anyAccessors = false;
+            for(auto accessorDecl : decl->getMembersOfType<AccessorDecl>())
+            {
+                anyAccessors = true;
+            }
+
+            if(!anyAccessors)
+            {
+                RefPtr<GetterDecl> getterDecl = new GetterDecl();
+                getterDecl->loc = decl->loc;
+
+                getterDecl->ParentDecl = decl;
+                decl->Members.Add(getterDecl);
+            }
+
             for(auto mm : decl->Members)
             {
                 checkDecl(mm);
@@ -3652,8 +3678,23 @@ namespace Slang
         struct TypeWitnessBreadcrumb
         {
             TypeWitnessBreadcrumb*  prev;
+
+            RefPtr<Type>            sub;
+            RefPtr<Type>            sup;
             DeclRef<Decl>           declRef;
         };
+
+        // Crete a subtype witness based on the declared relationship
+        // found in a single breadcrumb
+        RefPtr<SubtypeWitness> createSimplSubtypeWitness(
+            TypeWitnessBreadcrumb*  breadcrumb)
+        {
+            RefPtr<DeclaredSubtypeWitness> witness = new DeclaredSubtypeWitness();
+            witness->sub = breadcrumb->sub;
+            witness->sup = breadcrumb->sup;
+            witness->declRef = breadcrumb->declRef;
+            return witness;
+        }
 
         RefPtr<Val> createTypeWitness(
             RefPtr<Type>            type,
@@ -3670,29 +3711,46 @@ namespace Slang
                 UNREACHABLE_RETURN(nullptr);
             }
 
-            auto breadcrumbs = inBreadcrumbs;
+            // We might have one or more steps in the breadcrumb trail, e.g.:
+            //
+            //      (A : B) (B : C) (C : D)
+            //
+            // The chain is stored as a reversed linked list, so that
+            // the first entry would be the `(C : D)` relationship
+            // above.
+            //
+            // We are going to walk the list and build up a suitable
+            // subtype witness.
+            auto bb = inBreadcrumbs;
 
-            auto bb = breadcrumbs;
-            breadcrumbs = breadcrumbs->prev;
+            // Create a witness for the last step in the chain
+            RefPtr<SubtypeWitness> witness = createSimplSubtypeWitness(bb);
+            bb = bb->prev;
 
-            if(breadcrumbs)
+            // Now, as long as we have more entries to deal with,
+            // we'll be in a situation like:
+            //
+            //      ... (B : C) <witness>
+            //
+            // and we want to wrap up one more link in our chain.
+
+            while (bb)
             {
-                // There are multiple steps in the proof, so
-                // we need a transitive witness to show that
-                // because `A : B` and `B : C` then `A : C`
-                //
-                SLANG_UNEXPECTED("transitive type witness");
-                UNREACHABLE_RETURN(nullptr);
+                // Create simple witness for the step in the chain
+                RefPtr<SubtypeWitness> link = createSimplSubtypeWitness(bb);
+
+                // Now join the link onto the existing chain represented
+                // by `witness`.
+                RefPtr<TransitiveSubtypeWitness> transitiveWitness = new TransitiveSubtypeWitness();
+                transitiveWitness->sub = link->sub;
+                transitiveWitness->sup = witness->sup;
+                transitiveWitness->subToMid = link;
+                transitiveWitness->midToSup = witness;
+
+                witness = transitiveWitness;
+                bb = bb->prev;
             }
 
-            // Simple case: we have a single declaration
-            // that shows that `type` conforms to `interfaceDeclRef`.
-            //
-
-            RefPtr<DeclaredSubtypeWitness> witness = new DeclaredSubtypeWitness();
-            witness->sub = type;
-            witness->sup = DeclRefType::Create(getSession(), interfaceDeclRef);
-            witness->declRef = bb->declRef;
             return witness;
         }
 
@@ -3746,6 +3804,9 @@ namespace Slang
                         // the inheritance declaration.
                         TypeWitnessBreadcrumb breadcrumb;
                         breadcrumb.prev = inBreadcrumbs;
+
+                        breadcrumb.sub = type;
+                        breadcrumb.sup = inheritedType;
                         breadcrumb.declRef = inheritanceDeclRef;
 
                         if(doesTypeConformToInterfaceImpl(originalType, inheritedType, interfaceDeclRef, outWitness, &breadcrumb))
@@ -3760,6 +3821,8 @@ namespace Slang
                         auto inheritedType = GetSup(genConstraintDeclRef);
                         TypeWitnessBreadcrumb breadcrumb;
                         breadcrumb.prev = inBreadcrumbs;
+                        breadcrumb.sub = type;
+                        breadcrumb.sup = inheritedType;
                         breadcrumb.declRef = genConstraintDeclRef;
                         if (doesTypeConformToInterfaceImpl(originalType, inheritedType, interfaceDeclRef, outWitness, &breadcrumb))
                         {
@@ -3792,6 +3855,8 @@ namespace Slang
 
                         TypeWitnessBreadcrumb breadcrumb;
                         breadcrumb.prev = inBreadcrumbs;
+                        breadcrumb.sub = sub;
+                        breadcrumb.sup = sup;
                         breadcrumb.declRef = constraintDeclRef;
 
                         if(doesTypeConformToInterfaceImpl(originalType, sup, interfaceDeclRef, outWitness, &breadcrumb))
@@ -3944,7 +4009,21 @@ namespace Slang
         {
             // For now the "solver" is going to be ridiculously simplistic.
 
-            // The generic itself will have some constraints, so we need to try and solve those too
+            // The generic itself will have some constraints, and for now we add these
+            // to the system of constrains we will use for solving for the type variables.
+            //
+            // TODO: we need to decide whether constraints are used like this to influence
+            // how we solve for type/value variables, or whether constraints in the parameter
+            // list just work as a validation step *after* we've solved for the types.
+            //
+            // That is, should we allow `<T : Int>` to be written, and cause us to "infer"
+            // that `T` should be the type `Int`? That seems a little silly.
+            //
+            // Eventually, though, we may want to support type identity constraints, especially
+            // on associated types, like `<C where C : IContainer && C.IndexType == Int>`
+            // These seem more reasonable to have influence constraint solving, since it could
+            // conceivably let us specialize a `X<T> : IContainer` to `X<Int>` if we find
+            // that `X<T>.IndexType == T`.
             for( auto constraintDeclRef : getMembersOfType<GenericTypeConstraintDecl>(genericDeclRef) )
             {
                 if(!TryUnifyTypes(*system, GetSub(constraintDeclRef), GetSup(constraintDeclRef)))
@@ -4036,6 +4115,57 @@ namespace Slang
                 }
             }
 
+            // After we've solved for the explicit arguments, we need to
+            // make a second pass and consider the implicit arguments,
+            // based on what we've already determined to be the values
+            // for the explicit arguments.
+
+            // Before we begin, we are going to go ahead and create the
+            // "solved" substitution that we will return if everything works.
+            // This is because we are going to use this substitution,
+            // partially filled in with the results we know so far,
+            // in order to specialize any constraints on the generic.
+            //
+            // E.g., if the generic parameters were `<T : ISidekick>`, and
+            // we've already decided that `T` is `Robin`, then we want to
+            // search for a conformance `Robin : ISidekick`, which involved
+            // apply the substitutions we already know...
+
+            RefPtr<GenericSubstitution> solvedSubst = new GenericSubstitution();
+            solvedSubst->genericDecl = genericDeclRef.getDecl();
+            solvedSubst->outer = genericDeclRef.substitutions;
+            solvedSubst->args = args;
+
+            for( auto constraintDecl : genericDeclRef.getDecl()->getMembersOfType<GenericTypeConstraintDecl>() )
+            {
+                DeclRef<GenericTypeConstraintDecl> constraintDeclRef(
+                    constraintDecl,
+                    solvedSubst);
+
+                // Extract the (substituted) sub- and super-type from the constraint.
+                auto sub = GetSub(constraintDeclRef);
+                auto sup = GetSup(constraintDeclRef);
+
+                // Search for a witness that shows the constraint is satisfied.
+                auto subTypeWitness = tryGetSubtypeWitness(sub, sup);
+                if(subTypeWitness)
+                {
+                    // We found a witness, so it will become an (implicit) argument.
+                    solvedSubst->args.Add(subTypeWitness);
+                }
+                else
+                {
+                    // No witness was found, so the inference will now fail.
+                    //
+                    // TODO: Ideally we should print an error message in
+                    // this case, to let the user know why things failed.
+                    return nullptr;
+                }
+
+                // TODO: We may need to mark some constrains in our constraint
+                // system as being solved now, as a result of the witness we found.
+            }
+
             // Make sure we haven't constructed any spurious constraints
             // that we aren't able to satisfy:
             for (auto c : system->constraints)
@@ -4045,13 +4175,6 @@ namespace Slang
                     return nullptr;
                 }
             }
-
-            // Consruct a reference to the extension with our constraint variables
-            // as the 
-            RefPtr<GenericSubstitution> solvedSubst = new GenericSubstitution();
-            solvedSubst->genericDecl = genericDeclRef.getDecl();
-            solvedSubst->outer = genericDeclRef.substitutions;
-            solvedSubst->args = args;
 
             return solvedSubst;
         }
@@ -4659,6 +4782,10 @@ namespace Slang
                         if(auto subscriptDeclRef = candidate.item.declRef.As<SubscriptDecl>())
                         {
                             for(auto setter : subscriptDeclRef.getDecl()->getMembersOfType<SetterDecl>())
+                            {
+                                callExpr->type.IsLeftValue = true;
+                            }
+                            for(auto refAccessor : subscriptDeclRef.getDecl()->getMembersOfType<RefAccessorDecl>())
                             {
                                 callExpr->type.IsLeftValue = true;
                             }
