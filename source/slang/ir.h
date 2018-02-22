@@ -20,7 +20,7 @@ class   FuncType;
 class   Layout;
 class   Type;
 class   Session;
-
+class   Name;
 struct  IRFunc;
 struct  IRGlobalValueWithCode;
 struct  IRInst;
@@ -157,7 +157,10 @@ struct IRValue : public IRObject
     // no value.
     RefPtr<Type>    type;
 
-    Type* getType() { return type; }
+    Type* getFullType() { return type; }
+
+    Type* getRate();
+    Type* getDataType();
 
     // Source location information for this value, if any
     SourceLoc sourceLoc;
@@ -477,7 +480,7 @@ struct IRGlobalValue : IRValue
 
     // The mangled name, for a symbol that should have linkage,
     // or which might have multiple declarations.
-    String mangledName;
+    Name* mangledName = nullptr;
 
 
     IRGlobalValue*  nextGlobalValue;
@@ -497,11 +500,6 @@ struct IRGlobalValue : IRValue
     void removeFromParent();
 
     void moveToEnd();
-    virtual void dispose() override
-    {
-        IRValue::dispose();
-        mangledName = String();
-    }
 };
 
 /// @brief A global value that potentially holds executable code.

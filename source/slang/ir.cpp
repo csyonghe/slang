@@ -11,7 +11,7 @@ namespace Slang
 
     IRGlobalValue* cloneGlobalValueWithMangledName(
         IRSpecContext*  context,
-        String const&   mangledName,
+        Name*   mangledName,
         IRGlobalValue*  originalVal);
 
 
@@ -1277,7 +1277,7 @@ namespace Slang
         return entry;
     }
 
-    IRWitnessTable * IRBuilder::lookupWitnessTable(String mangledName)
+    IRWitnessTable * IRBuilder::lookupWitnessTable(Name* mangledName)
     {
         IRWitnessTable * result;
         if (sharedBuilder->witnessTableMap.TryGetValue(mangledName, result))
@@ -1349,12 +1349,19 @@ namespace Slang
     IRInst* IRBuilder::emitLoad(
         IRValue*    ptr)
     {
+        // Note: a `load` operation does not consider the rate
+        // (if any) attached to its operand (see the use of `getDataType`
+        // below). This means that a load from a rate-qualified
+        // variable will still conceptually execute (and return
+        // results) at the "default" rate of the parent function,
+        // unless a subsequent analysis pass constraints it.
+
         RefPtr<Type> valueType;
-        if(auto ptrType = ptr->getType()->As<PtrTypeBase>())
+        if(auto ptrType = ptr->getDataType()->As<PtrTypeBase>())
         {
             valueType = ptrType->getValueType();
         }
-        else if(auto ptrLikeType = ptr->getType()->As<PointerLikeType>())
+        else if(auto ptrLikeType = ptr->getDataType()->As<PointerLikeType>())
         {
             valueType = ptrLikeType->getElementType();
         }
@@ -1368,7 +1375,9 @@ namespace Slang
         // Ugly special case: the result of loading from `groupshared`
         // memory should not itself be `groupshared`.
         //
-        // TODO: Should this generalize to any "rate-qualified" type?
+        // TODO: This special case will go away once `GroupSharedType`
+        // is replaced by a `GroupSharedRate` that gets used together
+        // with `RateQualifiedType`.
         if(auto rateType = valueType->As<GroupSharedType>())
         {
             valueType = rateType->valueType;
@@ -1807,7 +1816,7 @@ namespace Slang
             {
                 auto irFunc = (IRFunc*) inst;
                 dump(context, "@");
-                dump(context, irFunc->mangledName.Buffer());
+                dump(context, getText(irFunc->mangledName).Buffer());
             }
             break;
 
@@ -2036,6 +2045,17 @@ namespace Slang
             dump(context, "@ThreadGroup ");
             dumpType(context, groupSharedType->valueType);
         }
+        else if(auto rateQualifiedType = type->As<RateQualifiedType>())
+        {
+            dump(context, "@");
+            dumpType(context, rateQualifiedType->rate);
+            dump(context, " ");
+            dumpType(context, rateQualifiedType->valueType);
+        }
+        else if(auto constExprRate = type->As<ConstExprRate>())
+        {
+            dump(context, "ConstExpr");
+        }
         else
         {
             // Need a default case here
@@ -2117,7 +2137,7 @@ namespace Slang
                 dumpIndent(context);
                 dump(context, "param ");
                 dumpID(context, pp);
-                dumpInstTypeClause(context, pp->getType());
+                dumpInstTypeClause(context, pp->getFullType());
             }
             context->indent -= 2;
             dump(context, ")");
@@ -2271,15 +2291,16 @@ namespace Slang
         dumpIndent(context);
 
         auto opInfo = &kIROpInfos[op];
-        auto type = inst->getType();
+        auto type = inst->getFullType();
+        auto dataType = inst->getDataType();
 
-        if (!type)
+        if (!dataType)
         {
             // No result, okay...
         }
         else
         {
-            auto basicType = type->As<BasicExpressionType>();
+            auto basicType = dataType->As<BasicExpressionType>();
             if (basicType && basicType->baseType == BaseType::Void)
             {
                 // No result, okay...
@@ -2439,7 +2460,7 @@ namespace Slang
         dumpIndent(context);
         dump(context, "ir_global_var ");
         dumpID(context, var);
-        dumpInstTypeClause(context, var->getType());
+        dumpInstTypeClause(context, var->getFullType());
 
         // TODO: deal with the case where a global
         // might have embedded initialization logic.
@@ -2455,7 +2476,7 @@ namespace Slang
         dumpIndent(context);
         dump(context, "ir_global_constant ");
         dumpID(context, val);
-        dumpInstTypeClause(context, val->getType());
+        dumpInstTypeClause(context, val->getFullType());
 
         // TODO: deal with the case where a global
         // might have embedded initialization logic.
@@ -2573,6 +2594,22 @@ namespace Slang
     //
     //
     //
+
+    Type* IRValue::getRate()
+    {
+        if(auto rateQualifiedType = type->As<RateQualifiedType>())
+            return rateQualifiedType->rate;
+
+        return nullptr;
+    }
+
+    Type* IRValue::getDataType()
+    {
+        if(auto rateQualifiedType = type->As<RateQualifiedType>())
+            return rateQualifiedType->valueType;
+
+        return type;
+    }
 
     void IRValue::replaceUsesWith(IRValue* other)
     {
@@ -3165,7 +3202,7 @@ namespace Slang
 
         if( systemValueInfo )
         {
-            globalVariable->mangledName = systemValueInfo->name;
+            globalVariable->mangledName = builder->getSession()->getNameObj(systemValueInfo->name);
         }
 
         builder->addLayoutDecoration(globalVariable, varLayout);
@@ -3566,7 +3603,7 @@ namespace Slang
                 // uses of the variable, and the exact logic there
                 // will differ a bit between the pointer and non-pointer
                 // cases.
-                auto paramType = pp->getType();
+                auto paramType = pp->getDataType();
 
                 // Any initialization code we insert nees to be at the start
                 // of the block:
@@ -3719,7 +3756,7 @@ namespace Slang
         // A map from mangled symbol names to zero or
         // more global IR values that have that name,
         // in the *original* module.
-        typedef Dictionary<String, RefPtr<IRSpecSymbol>> SymbolDictionary;
+        typedef Dictionary<Name*, RefPtr<IRSpecSymbol>> SymbolDictionary;
         SymbolDictionary symbols;
 
         // A map from values in the original IR module
@@ -3738,7 +3775,7 @@ namespace Slang
     {
         // A map from the mangled name of a global variable
         // to the layout to use for it.
-        Dictionary<String, VarLayout*> globalVarLayouts;
+        Dictionary<Name*, VarLayout*> globalVarLayouts;
 
         IRSharedSpecContext* shared;
 
@@ -4167,7 +4204,15 @@ namespace Slang
         IRGlobalVar*    originalVar,
         IROriginalValuesForClone const& originalValues)
     {
-        auto clonedVar = context->builder->createGlobalVar(context->maybeCloneType(originalVar->getType()->getValueType())); 
+        auto clonedVar = context->builder->createGlobalVar(
+            context->maybeCloneType(originalVar->getDataType()->getValueType()));
+
+        if(auto rate = originalVar->getRate() )
+        {
+            clonedVar->type = context->builder->getSession()->getRateQualifiedType(
+                rate, clonedVar->type);
+        }
+
         registerClonedValue(context, clonedVar, originalValues);
 
         auto mangledName = originalVar->mangledName;
@@ -4196,7 +4241,7 @@ namespace Slang
         IRGlobalConstant*    originalVal,
         IROriginalValuesForClone const& originalValues)
     {
-        auto clonedVal = context->builder->createGlobalConstant(context->maybeCloneType(originalVal->getType()));
+        auto clonedVal = context->builder->createGlobalConstant(context->maybeCloneType(originalVal->getFullType()));
         registerClonedValue(context, clonedVal, originalValues);
 
         auto mangledName = originalVal->mangledName;
@@ -4290,7 +4335,7 @@ namespace Slang
             {
                 IRParam* clonedParam = builder->emitParam(
                     context->maybeCloneType(
-                        originalParam->getType()));
+                        originalParam->getFullType()));
                 cloneDecorations(context, clonedParam, originalParam);
                 registerClonedValue(context, clonedParam, originalParam);
             }
@@ -4350,7 +4395,7 @@ namespace Slang
         EntryPointLayout*   entryPointLayout)
     {
         // Look up the IR symbol by name
-        String mangledName = getMangledName(entryPointRequest->decl);
+        auto mangledName = context->getModule()->session->getNameObj(getMangledName(entryPointRequest->decl));
         RefPtr<IRSpecSymbol> sym;
         if (!context->getSymbols().TryGetValue(mangledName, sym))
         {
@@ -4606,7 +4651,7 @@ namespace Slang
     // (It is okay for this parameter to be null).
     IRGlobalValue* cloneGlobalValueWithMangledName(
         IRSpecContext*  context,
-        String const&   mangledName,
+        Name*           mangledName,
         IRGlobalValue*  originalVal)
     {
         // Check if we've already cloned this value, for the case where
@@ -4617,7 +4662,7 @@ namespace Slang
             return (IRGlobalValue*) clonedVal;
         }
 
-        if(mangledName.Length() == 0)
+        if(getText(mangledName).Length() == 0)
         {
             // If there is no mangled name, then we assume this is a local symbol,
             // and it can't possibly have multiple declarations.
@@ -4665,7 +4710,7 @@ namespace Slang
         return cloneGlobalValueImpl(context, bestVal, sym);
     }
 
-    IRGlobalValue* cloneGlobalValueWithMangledName(IRSpecContext* context, String const& mangledName)
+    IRGlobalValue* cloneGlobalValueWithMangledName(IRSpecContext* context, Name* mangledName)
     {
         return cloneGlobalValueWithMangledName(context, mangledName, nullptr);
     }
@@ -4691,12 +4736,12 @@ namespace Slang
         IRSharedSpecContext*    sharedContext,
         IRGlobalValue*          gv)
     {
-        String mangledName = gv->mangledName;
+        auto mangledName = gv->mangledName;
 
         // Don't try to register a symbol for global values
         // with no mangled name, since these represent symbols
         // that shouldn't get "linkage"
-        if (mangledName == "")
+        if (!getText(mangledName).Length())
             return;
 
         RefPtr<IRSpecSymbol> sym = new IRSpecSymbol();
@@ -4845,7 +4890,7 @@ namespace Slang
         auto globalStructLayout = getGlobalStructLayout(newProgramLayout);
         for (auto globalVarLayout : globalStructLayout->fields)
         {
-            String mangledName = getMangledName(globalVarLayout->varDecl);
+            auto mangledName = compileRequest->mSession->getNameObj(getMangledName(globalVarLayout->varDecl));
             context->globalVarLayouts.AddIfNotExists(mangledName, globalVarLayout);
         }
 
@@ -4879,7 +4924,7 @@ namespace Slang
 
         IRGlobalValue* irDeclVal = cloneGlobalValueWithMangledName(
             state->getContext(),
-            mangledDeclName);
+            state->getContext()->getModule()->session->getNameObj(mangledDeclName));
         if(!irDeclVal)
             return nullptr;
 
@@ -4968,9 +5013,9 @@ namespace Slang
     {
         if( auto subtypeWitness = dynamic_cast<SubtypeWitness*>(val) )
         {
-            String mangledName = getMangledNameForConformanceWitness(
+            auto mangledName = context->getModule()->session->getNameObj(getMangledNameForConformanceWitness(
                 subtypeWitness->sub,
-                subtypeWitness->sup);
+                subtypeWitness->sup));
             RefPtr<IRSpecSymbol> symbol;
 
             if (context->getSymbols().TryGetValue(mangledName, symbol))
@@ -4985,9 +5030,9 @@ namespace Slang
                 auto subDeclRefGen = DeclRef<Decl>(subDeclRef->declRef.decl, 
                     createDefaultSubstitutions(context->builder->getSession(), subDeclRef->declRef.decl));
 
-                String genericName = getMangledNameForConformanceWitness(
+                auto genericName = context->getModule()->session->getNameObj(getMangledNameForConformanceWitness(
                     subDeclRefGen,
-                    subtypeWitness->sup);
+                    subtypeWitness->sup));
                 if (context->getSymbols().TryGetValue(genericName, symbol))
                 {
                     auto specInst = context->builder->emitSpecializeInst(subtypeWitness->sup, symbol->irGlobalValue, subDeclRef->declRef);
@@ -5235,8 +5280,8 @@ namespace Slang
         String specializedMangledName = getMangledNameForConformanceWitness(specDeclRef.Substitute(originalTable->subTypeDeclRef),
             specDeclRef.Substitute(originalTable->supTypeDeclRef));
 
-        if (dstTable && dstTable->mangledName.Length())
-            specializedMangledName = dstTable->mangledName;
+        if (dstTable && getText(dstTable->mangledName).Length())
+            specializedMangledName = getText(dstTable->mangledName);
 
         // TODO: This is a terrible linear search, and we should
         // avoid it by building a dictionary ahead of time,
@@ -5247,7 +5292,7 @@ namespace Slang
             auto module = sharedContext->module;
             for (auto gv = module->getFirstGlobalValue(); gv; gv = gv->getNextValue())
             {
-                if (gv->mangledName == specializedMangledName)
+                if (getText(gv->mangledName) == specializedMangledName)
                     return (IRWitnessTable*)gv;
             }
         }
@@ -5266,7 +5311,7 @@ namespace Slang
         auto specTable = cloneWitnessTableWithoutRegistering(&context, originalTable, dstTable);
 
         // Set up the clone to recognize that it is no longer generic
-        specTable->mangledName = specializedMangledName;
+        specTable->mangledName = context.getModule()->session->getNameObj(specializedMangledName);
         specTable->genericDecl = nullptr;
         
         // Specialization of witness tables should trigger cascading specializations 
@@ -5303,9 +5348,10 @@ namespace Slang
         if (genericFunc->getGenericDecl() == specDeclRef.decl)
             specMangledName = getMangledName(specDeclRef);
         else
-            specMangledName = mangleSpecializedFuncName(genericFunc->mangledName, specDeclRef.substitutions);
+            specMangledName = mangleSpecializedFuncName(getText(genericFunc->mangledName), specDeclRef.substitutions);
+        auto specMangledNameObj = sharedContext->module->session->getNameObj(specMangledName);
         RefPtr<IRSpecSymbol> symb;
-        if (sharedContext->symbols.TryGetValue(specMangledName, symb))
+        if (sharedContext->symbols.TryGetValue(specMangledNameObj, symb))
         {
             return (IRFunc*)(symb->irGlobalValue);
         }
@@ -5315,7 +5361,7 @@ namespace Slang
         // We can probalby use the same basic context, actually.
         for (auto gv = sharedContext->module->getFirstGlobalValue(); gv; gv = gv->getNextValue())
         {
-            if (gv->mangledName == specMangledName)
+            if (gv->mangledName == specMangledNameObj)
                 return (IRFunc*) gv;
         }
 
@@ -5344,7 +5390,7 @@ namespace Slang
 
         auto specFunc = cloneSimpleFuncWithoutRegistering(&context, genericFunc);
 
-        specFunc->mangledName = specMangledName;
+        specFunc->mangledName = context.getModule()->session->getNameObj(specMangledName);
         
         // reduce specialized generic level by 1
         if (specFunc->specializedGenericLevel >= 0)
@@ -5458,7 +5504,7 @@ namespace Slang
         }
 
         // Build dictionary for witness tables
-        Dictionary<String, IRWitnessTable*> witnessTables;
+        Dictionary<Name*, IRWitnessTable*> witnessTables;
         for (auto gv = module->getFirstGlobalValue();
             gv;
             gv = gv->getNextValue())
@@ -5557,7 +5603,7 @@ namespace Slang
                             IRWitnessTable* witnessTable = nullptr;
                             auto srcDeclRef = ((IRDeclRef*)lookupInst->sourceType.get())->declRef;
                             auto interfaceDeclRef = ((IRDeclRef*)lookupInst->interfaceType.get())->declRef;
-                            auto mangledName = getMangledNameForConformanceWitness(srcDeclRef, interfaceDeclRef);
+                            auto mangledName = module->session->getNameObj(getMangledNameForConformanceWitness(srcDeclRef, interfaceDeclRef));
                             witnessTables.TryGetValue(mangledName, witnessTable);
                             
                             if (!witnessTable)
@@ -5565,7 +5611,7 @@ namespace Slang
                                 // try specialize the witness table
                                 auto genDeclRef = srcDeclRef;
                                 genDeclRef.substitutions = createDefaultSubstitutions(module->session, genDeclRef.decl);
-                                auto genName = getMangledNameForConformanceWitness(genDeclRef, interfaceDeclRef);
+                                auto genName = module->session->getNameObj(getMangledNameForConformanceWitness(genDeclRef, interfaceDeclRef));
                                 IRWitnessTable* genTable = nullptr;
                                 if (witnessTables.TryGetValue(genName, genTable))
                                 {
@@ -5673,7 +5719,7 @@ namespace Slang
                             IRGlobalValue * rs = nullptr;
                             while (globalVar)
                             {
-                                if (globalVar->mangledName == name)
+                                if (getText(globalVar->mangledName) == name)
                                 {
                                     rs = globalVar;
                                     break;
@@ -5694,7 +5740,7 @@ namespace Slang
                                 WitnessTableSpecializationWorkItem workItem;
                                 workItem.srcTable = (IRWitnessTable*)cloneGlobalValue(context, (IRWitnessTable*)(table));
                                 workItem.dstTable = context->builder->createWitnessTable();
-                                workItem.dstTable->mangledName = getMangledNameForConformanceWitness(subDeclRefType->declRef, subtypeWitness->sup);
+                                workItem.dstTable->mangledName = context->getModule()->session->getNameObj(getMangledNameForConformanceWitness(subDeclRefType->declRef, subtypeWitness->sup));
                                 workItem.specDeclRef = subDeclRefType->declRef;
                                 witnessTablesToSpecailize.Add(workItem);
                                 table = workItem.dstTable;
@@ -5717,5 +5763,19 @@ namespace Slang
                 workItem.specDeclRef.SubstituteImpl(SubstitutionSet(nullptr, nullptr, globalParamSubst), &diff), workItem.dstTable);
         }
         return globalParamSubst;
+    }
+
+    
+    void markConstExpr(
+        Session* session,
+        IRValue* irValue)
+    {
+        // We will take an IR value with type `T`,
+        // and turn it into one with type `@ConstExpr T`.
+
+        // TODO: need to be careful if the value already has a rate
+        // qualifier set.
+
+        irValue->type = session->getConstExprType(irValue->getDataType());
     }
 }

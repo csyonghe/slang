@@ -429,7 +429,7 @@ namespace Slang
 
         RootNamePool* getRootNamePool() { return &rootNamePool; }
         NamePool* getNamePool() { return &namePool; }
-
+        Name* getNameObj(String name) { return namePool.getName(name); }
         //
 
         // Generated code for stdlib, etc.
@@ -448,6 +448,7 @@ namespace Slang
         RefPtr<Type> errorType;
         RefPtr<Type> initializerListType;
         RefPtr<Type> overloadedType;
+        RefPtr<Type> constExprRate;
         RefPtr<Type> irBasicBlockType;
 
         Dictionary<int, RefPtr<Type>> builtinTypes;
@@ -466,6 +467,17 @@ namespace Slang
         Type* getInitializerListType();
         Type* getOverloadedType();
         Type* getErrorType();
+
+        Type* getConstExprRate();
+        RefPtr<RateQualifiedType> getRateQualifiedType(
+            Type* rate,
+            Type* valueType);
+
+        RefPtr<RateQualifiedType> getConstExprType(
+            Type* valueType)
+        {
+            return getRateQualifiedType(getConstExprRate(), valueType);
+        }
 
         // Should not be used in front-end code
         Type* getIRBasicBlockType();

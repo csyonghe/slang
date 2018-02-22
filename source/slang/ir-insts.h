@@ -307,9 +307,9 @@ struct IRSwizzleSet : IRReturn
 // a stack allocation of some memory.
 struct IRVar : IRInst
 {
-    PtrType* getType()
+    PtrType* getDataType()
     {
-        return (PtrType*)type.Ptr();
+        return (PtrType*) ((IRValue*) this)->getDataType();
     }
 };
 
@@ -321,7 +321,10 @@ struct IRVar : IRInst
 /// blocks nested inside this value.
 struct IRGlobalVar : IRGlobalValueWithCode
 {
-    PtrType* getType() { return type.As<PtrType>(); }
+    PtrType* getDataType()
+    {
+        return (PtrType*) ((IRValue*) this)->getDataType();
+    }
 };
 
 /// @brief A global constant.
@@ -403,7 +406,7 @@ struct SharedIRBuilder
 
     Dictionary<IRInstKey,       IRInst*>    globalValueNumberingMap;
     Dictionary<IRConstantKey,   IRConstant*>    constantMap;
-    Dictionary<String, IRWitnessTable*> witnessTableMap;
+    Dictionary<Name*, IRWitnessTable*> witnessTableMap;
 };
 
 struct IRBuilderSourceLocRAII;
@@ -520,7 +523,7 @@ struct IRBuilder
         IRWitnessTable* witnessTable,
         IRValue*        requirementKey,
         IRValue*        satisfyingVal);
-    IRWitnessTable* lookupWitnessTable(String mangledName);
+    IRWitnessTable* lookupWitnessTable(Name* mangledName);
     void registerWitnessTable(IRWitnessTable* table);
     IRBlock* createBlock();
     IRBlock* emitBlock();
@@ -730,6 +733,12 @@ void specializeIRForEntryPoint(
 void specializeGenerics(
     IRModule*   module,
     CodeGenTarget target);
+
+//
+
+void markConstExpr(
+    Session* session,
+    IRValue* irValue);
 
 //
 
