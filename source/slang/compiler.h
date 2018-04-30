@@ -363,6 +363,7 @@ namespace Slang
         
         Type* getTypeFromString(String typeStr);
 
+
         void parseTranslationUnit(
             TranslationUnitRequest* translationUnit);
 
@@ -395,6 +396,8 @@ namespace Slang
             String const&           name,
             Profile                 profile,
             List<String> const &    genericTypeNames);
+
+        void setGlobalTypeArgs(int count, const char** args);
 
         UInt addTarget(
             CodeGenTarget   target);

@@ -299,7 +299,8 @@ void CompileRequest::checkAllTranslationUnits()
     // apply the semantic checking logic.
     for( auto& translationUnit : translationUnits )
     {
-        checkTranslationUnit(translationUnit.Ptr());
+        if (!translationUnit->irModule)
+            checkTranslationUnit(translationUnit.Ptr());
     }
 
     // Next, do follow-up validation on any entry points.
@@ -355,7 +356,7 @@ int CompileRequest::executeActionsInner()
     // each translation unit.
     for (auto& translationUnit : translationUnits)
     {
-        translationUnit->compileFlags |= compileFlags;
+        translationUnit->compileFlags = compileFlags;
     }
 
     // If no code-generation target was specified, then try to infer one from the source language,
@@ -404,7 +405,8 @@ int CompileRequest::executeActionsInner()
         // Parse everything from the input files requested
         for (auto& translationUnit : translationUnits)
         {
-            parseTranslationUnit(translationUnit.Ptr());
+            if (!translationUnit->irModule)
+                parseTranslationUnit(translationUnit.Ptr());
         }
         if (mSink.GetErrorCount() != 0)
             return 1;
@@ -516,6 +518,18 @@ void CompileRequest::addTranslationUnitSourceFile(
         source);
 
     mDependencyFilePaths.Add(path);
+}
+
+void CompileRequest::setGlobalTypeArgs(int argCount, const char** args)
+{
+    for (auto & entryPoint : entryPoints)
+    {
+        entryPoint->genericParameterTypeNames.Clear();
+        entryPoint->genericParameterTypes.Clear();
+        entryPoint->genericParameterWitnesses.Clear();
+        for (int i = 0; i < argCount; i++)
+            entryPoint->genericParameterTypeNames.Add(args[i]);
+    }
 }
 
 int CompileRequest::addEntryPoint(
@@ -871,6 +885,11 @@ SLANG_API void spDestroyCompileRequest(
     if(!request) return;
     auto req = REQ(request);
     delete req;
+}
+
+SLANG_API void spSetGlobalTypeArgs(SlangCompileRequest* request, int numArgs, const char ** args)
+{
+    REQ(request)->setGlobalTypeArgs(numArgs, args);
 }
 
 SLANG_API void spSetCompileFlags(

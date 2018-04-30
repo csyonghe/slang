@@ -222,6 +222,7 @@ extern "C"
     SLANG_API void spDestroyCompileRequest(
         SlangCompileRequest*    request);
 
+    SLANG_API void spSetGlobalTypeArgs(SlangCompileRequest* request, int numArgs, const char ** args);
 
     /*!
     @brief Set flags to be used for compilation.
