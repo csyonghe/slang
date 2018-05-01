@@ -317,7 +317,7 @@ namespace Slang
         bool shouldSkipCodegen = false;
 
         // How should `#line` directives be emitted (if at all)?
-        LineDirectiveMode lineDirectiveMode = LineDirectiveMode::Default;
+        LineDirectiveMode lineDirectiveMode = LineDirectiveMode::None;
 
         // Are we being driven by the command-line `slangc`, and should act accordingly?
         bool isCommandLineCompile = false;
@@ -445,6 +445,7 @@ namespace Slang
         char const*     text,
         CodeGenTarget   target);
 
+    struct TypeCheckingCache;
     //
 
     class Session
@@ -553,6 +554,9 @@ namespace Slang
 
         Dictionary<Name*, SyntaxClass<RefObject> > mapNameToSyntaxClass;
 
+        TypeCheckingCache* typeCheckingCache = nullptr;        
+        TypeCheckingCache* getTypeCheckingCache();
+        void destroyTypeCheckingCache();
         //
 
         Session();

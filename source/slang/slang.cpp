@@ -18,8 +18,7 @@
 #endif
 
 namespace Slang {
-
-Session::Session()
+    Session::Session()
 {
     // Initialize name pool
     getNamePool()->setRootNamePool(getRootNamePool());
@@ -828,6 +827,7 @@ Session::~Session()
     builtinTypes = decltype(builtinTypes)();
     // destroy modules next
     loadedModuleCode = decltype(loadedModuleCode)();
+    destroyTypeCheckingCache();
 }
 
 }
