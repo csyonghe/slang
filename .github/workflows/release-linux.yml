@@ -27,9 +27,10 @@ jobs:
           echo "creating binary archieves..."
           export SLANG_OS_NAME=linux
           export SLANG_ARCH_NAME=`uname -p`
-          export TAG_NAME=${{ github.ref }}
+          export TAG_NAME=`git describe --tags`
           export SLANG_TAG=${TAG_NAME#v}
           echo "tag:$TAG_NAME"
+          echo "slang-tag:$SLANG_TAG"
           export SLANG_BINARY_ARCHIVE=slang-${SLANG_TAG}-${SLANG_OS_NAME}-${SLANG_ARCH_NAME}.zip
           export SLANG_BINARY_ARCHIVE_TAR=slang-${SLANG_TAG}-${SLANG_OS_NAME}-${SLANG_ARCH_NAME}.tar.gz
           echo "creating zip"
