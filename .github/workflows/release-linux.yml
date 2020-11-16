@@ -16,6 +16,7 @@ jobs:
       - name: Build release project
         id: build
         run: |
+          echo "starting to build..."
           export CC=gcc
           export CONFIGURATION=release
           echo "building..."
