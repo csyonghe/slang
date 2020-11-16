@@ -37,8 +37,8 @@ jobs:
           zip -r ${SLANG_BINARY_ARCHIVE} bin/*/*/slangc bin/*/*/libslang.so bin/*/*/libslang-glslang.so docs/*.md README.md LICENSE slang.h slang-com-helper.h slang-com-ptr.h slang-tag-version.h prelude/*.h
           echo "creating tar"
           tar -czf ${SLANG_BINARY_ARCHIVE_TAR} bin/*/*/slangc bin/*/*/libslang.so bin/*/*/libslang-glslang.so docs/*.md README.md LICENSE slang.h slang-com-helper.h slang-com-ptr.h slang-tag-version.h prelude/*.h
-          echo "::set-output SLANG_BINARY_ARCHIVE=${SLANG_BINARY_ARCHIVE}"
-          echo "::set-output SLANG_BINARY_ARCHIVE_TAR=${SLANG_BINARY_ARCHIVE_TAR}"
+          echo "::set-output name=SLANG_BINARY_ARCHIVE::${SLANG_BINARY_ARCHIVE}"
+          echo "::set-output name=SLANG_BINARY_ARCHIVE_TAR::${SLANG_BINARY_ARCHIVE_TAR}"
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
