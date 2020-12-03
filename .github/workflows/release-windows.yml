@@ -28,6 +28,7 @@ jobs:
         run:
           MSBuild.exe slang.sln -v:m -m -property:Configuration=${{matrix.configuration}} -property:Platform=${{matrix.platform}} -property:WindowsTargetPlatformVersion=10.0.19041.0
       - name: archive
+        id: archive
         run: |
           echo "achiving files..."
           if ("${{matrix.platform}}" -eq "x64")
@@ -41,7 +42,9 @@ jobs:
           $tagName = & git describe --tags
           $slangVersion = $tagName.TrimStart("v")
           $binArchive = "slang-$slangVersion-$slangDeployPlatform.zip"
-          echo "::set-output name=SLANG_BINARY_ARCHIVE::$binArchive"
+
+          echo "name=SLANG_BINARY_ARCHIVE::$binArchive"
+          echo "::set-output name=SLANG_WIN32_BINARY_ARCHIVE::$binArchive"
 
           7z a "$binArchive" slang.h
           7z a "$binArchive" slang-com-helper.h
@@ -67,10 +70,14 @@ jobs:
           7z a "$srcArchive" docs\*.md
           7z a "$srcArchive" README.md
           7z a "$srcArchive" LICENSE
+      - name: Check outputs
+        shell: pwsh
+        run: echo "binary is ${{ steps.archive.outputs.SLANG_WIN32_BINARY_ARCHIVE }}"
       - name: UploadBinary
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ steps.archive.outputs.SLANG_BINARY_ARCHIVE }}
+          files: |
+            ${{ steps.archive.outputs.SLANG_WIN32_BINARY_ARCHIVE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: UploadSource
