@@ -38,7 +38,7 @@ jobs:
           $tagName = & git describe --tags
           $slangVersion = $tagName.TrimStart("v")
           $binArchive = "slang-$slangVersion-$slangDeployPlatform.zip"
-          "::set-output name=SLANG_BINARY_ARCHIVE::$binArchive"
+          echo "::set-output name=SLANG_BINARY_ARCHIVE::$binArchive"
 
           7z a "$binArchive" slang.h
           7z a "$binArchive" slang-com-helper.h
@@ -52,7 +52,7 @@ jobs:
           7z a "$binArchive" docs\*.md
 
           $srcArchive = "slang-$slangVersion-source.zip"
-          "::set-output name=SLANG_SOURCE_ARCHIVE::$srcArchive"
+          echo "::set-output name=SLANG_SOURCE_ARCHIVE::$srcArchive"
           
           7z a "$srcArchive" slang.h
           7z a "$srcArchive" slang-com-helper.h
