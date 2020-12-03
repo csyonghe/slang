@@ -72,7 +72,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: UploadSource
         uses: softprops/action-gh-release@v1
-        if: ${{ matrix.platform == "x64" }}
+        if: ${{ matrix.platform == 'x64' }}
         with:
           files: ${{ steps.build.outputs.SLANG_SOURCE_ARCHIVE }}
         env:
