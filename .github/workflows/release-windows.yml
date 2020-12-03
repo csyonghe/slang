@@ -64,34 +64,16 @@ jobs:
           7z a "$srcArchive" docs\*.md
           7z a "$srcArchive" README.md
           7z a "$srcArchive" LICENSE
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: UploadBinary
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.build.outputs.SLANG_BINARY_ARCHIVE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: UploadSource
+        uses: softprops/action-gh-release@v1
+        if: ${{ matrix.platform == "x64" }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-      - name: Upload Release Asset (zip)
-        id: upload-release-asset-zip 
-        uses: actions/upload-release-asset@v1
+          files: ${{ steps.build.outputs.SLANG_SOURCE_ARCHIVE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ steps.build.outputs.SLANG_BINARY_ARCHIVE }}
-          asset_name: ${{ steps.build.outputs.SLANG_BINARY_ARCHIVE }}
-          asset_content_type: application/zip
-      - name: Upload Release Source (zip)
-        id: upload-release-src-zip
-        uses: actions/upload-release-asset@v1
-        if: ${{ matrix.platform == 'x64' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ steps.build.outputs.SLANG_SOURCE_ARCHIVE }}
-          asset_name: ${{ steps.build.outputs.SLANG_SOURCE_ARCHIVE }}
-          asset_content_type: application/zip
