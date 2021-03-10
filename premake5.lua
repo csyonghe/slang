@@ -834,7 +834,7 @@ tool "platform"
     uuid "3565fe5e-4fa3-11eb-ae93-0242ac130002"
     kind "SharedLib"
     pic "On"
-    links {"core"}
+    links {"core", "slang", "gfx" }
     defines { "SLANG_PLATFORM_DYNAMIC", "SLANG_PLATFORM_DYNAMIC_EXPORT" }
     includedirs { ".", "external", "source", "external/imgui", "tools/gfx" }
 
