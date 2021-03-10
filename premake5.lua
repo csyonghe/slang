@@ -526,6 +526,11 @@ function example(name)
     -- depends on the `core` library). We specify all of that here,
     -- rather than in each example.
     links { "slang", "core", "gfx", "gfx-util", "platform" }
+
+    if isTargetWindows then
+    else
+        links {"X11"}
+    end
 end
 
 --
@@ -552,26 +557,24 @@ function generatorProject(name, sourcePath)
     kind "StaticLib"
 end   
 
-if isTargetWindows then
-    --
-    -- With all of these helper routines defined, we can now define the
-    -- actual projects quite simply. For example, here is the entire
-    -- declaration of the "Hello, World" example project:
-    --
-    example "hello-world"
-    --
-    -- Note how we are calling our custom `example()` subroutine with
-    -- the same syntax sugar that Premake usually advocates for their
-    -- `project()` function. This allows us to treat `example` as
-    -- a kind of specialized "subclass" of `project`
-    --
+--
+-- With all of these helper routines defined, we can now define the
+-- actual projects quite simply. For example, here is the entire
+-- declaration of the "Hello, World" example project:
+--
+example "hello-world"
+--
+-- Note how we are calling our custom `example()` subroutine with
+-- the same syntax sugar that Premake usually advocates for their
+-- `project()` function. This allows us to treat `example` as
+-- a kind of specialized "subclass" of `project`
+--
 
-    -- Let's go ahead and set up the projects for our other example now.
-    example "gpu-printing"
-        kind "ConsoleApp"
+-- Let's go ahead and set up the projects for our other example now.
+example "gpu-printing"
+    kind "ConsoleApp"
 
-    example "shader-toy"
-end
+example "shader-toy"
 
 example "shader-object"
     kind "ConsoleApp"
@@ -787,8 +790,9 @@ tool "gfx"
     elseif os.target() == "macosx" then
         --addSourceDir "tools/gfx/open-gl"
     else
+        links {"X11"}
         -- Linux like
-        --addSourceDir "tools/gfx/vulkan"
+        addSourceDir "tools/gfx/vulkan"
         --addSourceDir "tools/gfx/open-gl"
     end
 
@@ -828,9 +832,10 @@ tool "gfx-util"
 --
 tool "platform" 
     uuid "3565fe5e-4fa3-11eb-ae93-0242ac130002"
-    kind "StaticLib"
+    kind "SharedLib"
     pic "On"
-    
+    links {"core"}
+    defines { "SLANG_PLATFORM_DYNAMIC", "SLANG_PLATFORM_DYNAMIC_EXPORT" }
     includedirs { ".", "external", "source", "external/imgui", "tools/gfx" }
 
     addSourceDir "tools/platform"
@@ -839,6 +844,8 @@ tool "platform"
     -- Include windowing support on Windows.
     if isTargetWindows then
         systemversion "10.0.14393.0"
+    else
+        links {"X11"}
     end
 
 --
