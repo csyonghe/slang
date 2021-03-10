@@ -29,6 +29,12 @@
     <ClCompile Include="..\..\..\tools\platform\gui.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\tools\platform\linux\x11-key-code.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\tools\platform\linux\x11-window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\tools\platform\model.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
