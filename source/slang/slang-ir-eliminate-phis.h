@@ -16,4 +16,6 @@ namespace Slang
         ///
         /// If livenessMode is enabled LiveRangeStarts will be inserted into the module.
     void eliminatePhis(CodeGenContext* context, LivenessMode livenessMode, IRModule* module);
+
+    void eliminatePhisInFunc(CodeGenContext* codeGenContext, LivenessMode livenessMode, IRModule* module, IRGlobalValueWithCode* func);
 }

@@ -906,4 +906,10 @@ void eliminatePhis(CodeGenContext* codeGenContext, LivenessMode livenessMode, IR
     context.eliminatePhisInModule();
 }
 
+void eliminatePhisInFunc(CodeGenContext* codeGenContext, LivenessMode livenessMode, IRModule* module, IRGlobalValueWithCode* func)
+{
+    PhiEliminationContext context(codeGenContext, livenessMode, module);
+    context.eliminatePhisInFunc(func);
+}
+
 }

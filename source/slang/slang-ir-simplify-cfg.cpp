@@ -33,6 +33,8 @@ bool processFunc(IRFunc* func)
             // merge point in CFG. Such blocks will have more than one use.
             if (successor->hasMoreThanOneUse())
                 break;
+            if (block->hasMoreThanOneUse())
+                break;
             changed = true;
             Index paramIndex = 0;
             auto inst = successor->getFirstDecorationOrChild();
