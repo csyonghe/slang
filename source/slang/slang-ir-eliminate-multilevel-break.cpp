@@ -12,7 +12,6 @@ namespace Slang
 struct EliminateMultiLevelBreakContext
 {
     IRModule* irModule;
-    CodeGenContext* codeGenContext;
 
     struct LoopInfo : RefObject
     {
@@ -152,7 +151,7 @@ struct EliminateMultiLevelBreakContext
         }
 
         // To make things easy, eliminate Phis before perform transformations.
-        eliminatePhisInFunc(codeGenContext, LivenessMode::Disabled, irModule, func);
+        eliminatePhisInFunc(LivenessMode::Disabled, irModule, func);
 
         // Before modifying the cfg, we gather all required info from the existing cfg.
         FuncContext funcInfo;
@@ -164,6 +163,8 @@ struct EliminateMultiLevelBreakContext
         SharedIRBuilder sharedBuilder;
         sharedBuilder.init(irModule);
         IRBuilder builder(&sharedBuilder);
+        builder.setInsertInto(func);
+
         OrderedHashSet<LoopInfo*> skippedOverLoops;
         auto unreachableBlock = builder.emitBlock();
         builder.setInsertInto(unreachableBlock);
@@ -245,35 +246,46 @@ struct EliminateMultiLevelBreakContext
                 case kIROp_conditionalBranch:
                 case kIROp_ifElse:
                 case kIROp_Switch:
-                    // Cannot handle this. We should ensure that the break block is not
-                    // directly folded into these insts.
-                    SLANG_ABORT_COMPILATION("unsupported IR form: loop break block used as conditional branch target.");
+                    // For complex branches, insert an intermediate block so we can specify the
+                    // target index argument.
+                    {
+                        builder.setInsertInto(func);
+                        auto tmpBlock = builder.createBlock();
+                        tmpBlock->insertAfter(user->getParent());
+                        builder.setInsertInto(tmpBlock);
+                        if (!levelInst)
+                            levelInst = builder.getIntValue(builder.getIntType(), level);
+                        builder.emitBranch(breakBlock, 1, &levelInst);
+                        use->set(tmpBlock);
+                    }
                     break;
                 case kIROp_loop:
                     // Ignore.
                     continue;
-                }
-                if (auto originalBranch = as<IRUnconditionalBranch>(user))
-                {
-                    if (originalBranch->getOperandCount() == 1)
+                case kIROp_unconditionalBranch:
                     {
-                        builder.setInsertBefore(originalBranch);
-                        if (!levelInst)
-                            levelInst = builder.getIntValue(builder.getIntType(), level);
-                        builder.emitBranch(breakBlock, 1, &levelInst);
-                        originalBranch->removeAndDeallocate();
+                        auto originalBranch = as<IRUnconditionalBranch>(user);
+                        if (originalBranch->getOperandCount() == 1)
+                        {
+                            builder.setInsertBefore(originalBranch);
+                            if (!levelInst)
+                                levelInst = builder.getIntValue(builder.getIntType(), level);
+                            builder.emitBranch(breakBlock, 1, &levelInst);
+                            originalBranch->removeAndDeallocate();
+                        }
                     }
+                    break;
                 }
+                
             }
         }
     }
 };
 
-void eliminateMultiLevelBreak(CodeGenContext* codeGenContext, IRModule* irModule)
+void eliminateMultiLevelBreak(IRModule* irModule)
 {
     EliminateMultiLevelBreakContext context;
     context.irModule = irModule;
-    context.codeGenContext = codeGenContext;
     for (auto globalInst : irModule->getGlobalInsts())
     {
         if (auto codeInst = as<IRGlobalValueWithCode>(globalInst))
@@ -283,11 +295,10 @@ void eliminateMultiLevelBreak(CodeGenContext* codeGenContext, IRModule* irModule
     }
 }
 
-void eliminateMultiLevelBreakForFunc(CodeGenContext* codeGenContext, IRModule* irModule, IRGlobalValueWithCode* func)
+void eliminateMultiLevelBreakForFunc(IRModule* irModule, IRGlobalValueWithCode* func)
 {
     EliminateMultiLevelBreakContext context;
     context.irModule = irModule;
-    context.codeGenContext = codeGenContext;
     context.processFunc(func);
 }
 

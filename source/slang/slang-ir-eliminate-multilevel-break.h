@@ -4,10 +4,9 @@
 namespace Slang
 {
     struct IRModule;
-    struct CodeGenContext;
     struct IRGlobalValueWithCode;
 
-    void eliminateMultiLevelBreak(CodeGenContext* codeGenContext, IRModule* module);
-    void eliminateMultiLevelBreakForFunc(CodeGenContext* codeGenContext, IRModule* module, IRGlobalValueWithCode* func);
+    void eliminateMultiLevelBreak(IRModule* module);
+    void eliminateMultiLevelBreakForFunc(IRModule* module, IRGlobalValueWithCode* func);
 
 }

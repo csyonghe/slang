@@ -6,7 +6,7 @@
 namespace Slang
 {
 
-bool processFunc(IRFunc* func)
+bool processFunc(IRGlobalValueWithCode* func)
 {
     auto firstBlock = func->getFirstBlock();
     if (!firstBlock)
@@ -23,6 +23,15 @@ bool processFunc(IRFunc* func)
         workList.fastRemoveAt(0);
         while (block)
         {
+            if (auto loop = as<IRLoop>(block->getTerminator()))
+            {
+                auto continueBlock = loop->getContinueBlock();
+                if (continueBlock && !continueBlock->hasMoreThanOneUse())
+                {
+                    loop->continueBlock.set(loop->getBreakBlock());
+                    continueBlock->removeAndDeallocate();
+                }
+            }
             // If `block` does not end with an unconditional branch, bail.
             if (block->getTerminator()->getOp() != kIROp_unconditionalBranch)
                 break;
@@ -79,6 +88,11 @@ bool simplifyCFG(IRModule* module)
         }
     }
     return changed;
+}
+
+bool simplifyCFG(IRGlobalValueWithCode* func)
+{
+    return processFunc(func);
 }
 
 } // namespace Slang

@@ -376,7 +376,7 @@ Result linkAndOptimizeIR(
     if (sink->getErrorCount() != 0)
         return SLANG_FAIL;
 
-    eliminateMultiLevelBreak(codeGenContext, irModule);
+    eliminateMultiLevelBreak(irModule);
 
     // TODO(DG): There are multiple DCE steps here, which need to be changed
     //   so that they don't just throw out any non-entry point code
@@ -786,7 +786,7 @@ Result linkAndOptimizeIR(
 
         {
             // We only want to accumulate locations if liveness tracking is enabled.
-            eliminatePhis(codeGenContext, livenessMode, irModule);
+            eliminatePhis(livenessMode, irModule);
 #if 0
             dumpIRIfEnabled(codeGenContext, irModule, "PHIS ELIMINATED");
 #endif
