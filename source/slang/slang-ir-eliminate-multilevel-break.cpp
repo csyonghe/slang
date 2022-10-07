@@ -39,102 +39,127 @@ struct EliminateMultiLevelBreakContext
         LoopInfo* breakTargetLoop;
     };
 
-    void collectLoopBlocks(LoopInfo& info, HashSet<IRBlock*>& breakBlocks, HashSet<IRBlock*>& processedBlocks)
+    struct FuncContext
     {
-        auto startBlock = info.loopInst->getTargetBlock();
-        info.blockSet.Add(startBlock);
-        info.blocks.add(startBlock);
-        breakBlocks.Add(info.loopInst->getBreakBlock());
-        for (Index i = 0; i < info.blocks.getCount(); i++)
-        {
-            auto block = info.blocks[i];
-            if (!processedBlocks.Add(block))
-                continue;
-            if (auto loopInst = as<IRLoop>(block->getTerminator()))
-            {
-                RefPtr<LoopInfo> childLoop = new LoopInfo();
-                childLoop->loopInst = loopInst;
-                childLoop->parent = &info;
-                childLoop->level = info.level + 1;
-                collectLoopBlocks(*childLoop, breakBlocks, processedBlocks);
-                info.childLoops.add(childLoop);
-                block = loopInst->getBreakBlock();
-                if (info.blockSet.Add(block))
-                {
-                    info.blocks.add(block);
-                }
-                continue;
-            }
-            for (auto succ : block->getSuccessors())
-            {
-                if (!breakBlocks.Contains(succ))
-                {
-                    if (info.blockSet.Add(succ))
-                        info.blocks.add(succ);
-                }
-            }
-        }
-        breakBlocks.Remove(info.loopInst->getBreakBlock());
-    }
-    void processFunc(IRGlobalValueWithCode* func)
-    {
-        eliminatePhisInFunc(codeGenContext, LivenessMode::Disabled, irModule, func);
-        // Before modifying the cfg, we gather all required info from the existing cfg.
         List<RefPtr<LoopInfo>> loops;
         HashSet<IRBlock*> breakBlocks;
         Dictionary<IRBlock*, LoopInfo*> mapBreakBlockToLoop;
         Dictionary<IRBlock*, LoopInfo*> mapBlockToLoop;
         HashSet<IRBlock*> processedBlocks;
-        for (auto block : func->getBlocks())
+        List<MultiLevelBreakInfo> multiLevelBreaks;
+
+        void collectLoopBlocks(LoopInfo& info)
         {
-            if (processedBlocks.Contains(block))
-                continue;
-            auto terminator = block->getTerminator();
-            if (auto loop = as<IRLoop>(terminator))
+            auto startBlock = info.loopInst->getTargetBlock();
+            info.blockSet.Add(startBlock);
+            info.blocks.add(startBlock);
+            breakBlocks.Add(info.loopInst->getBreakBlock());
+            for (Index i = 0; i < info.blocks.getCount(); i++)
             {
-                RefPtr<LoopInfo> loopInfo = new LoopInfo();
-                loopInfo->loopInst = loop;
-                collectLoopBlocks(*loopInfo, breakBlocks, processedBlocks);
-                loops.add(loopInfo);
+                auto block = info.blocks[i];
+                if (!processedBlocks.Add(block))
+                    continue;
+                if (auto loopInst = as<IRLoop>(block->getTerminator()))
+                {
+                    RefPtr<LoopInfo> childLoop = new LoopInfo();
+                    childLoop->loopInst = loopInst;
+                    childLoop->parent = &info;
+                    childLoop->level = info.level + 1;
+                    collectLoopBlocks(*childLoop);
+                    info.childLoops.add(childLoop);
+                    block = loopInst->getBreakBlock();
+                    if (info.blockSet.Add(block))
+                    {
+                        info.blocks.add(block);
+                    }
+                    continue;
+                }
+                for (auto succ : block->getSuccessors())
+                {
+                    if (!breakBlocks.Contains(succ))
+                    {
+                        if (info.blockSet.Add(succ))
+                            info.blocks.add(succ);
+                    }
+                }
             }
+            breakBlocks.Remove(info.loopInst->getBreakBlock());
         }
 
-        for (auto& l : loops)
+        void gatherInfo(IRGlobalValueWithCode* func)
         {
-            l->forEach(
-                [&](LoopInfo* loop)
-                {
-                    mapBreakBlockToLoop.Add(loop->loopInst->getBreakBlock(), loop);
-                    for (auto block : loop->blocks)
-                        mapBlockToLoop.Add(block, loop);
-                });
-        }
-        
-        List<MultiLevelBreakInfo> multiLevelBreaks;
-        for (auto block : func->getBlocks())
-        {
-            auto terminator = block->getTerminator();
-            if (auto branch = as<IRUnconditionalBranch>(terminator))
+            for (auto block : func->getBlocks())
             {
-                if (as<IRLoop>(terminator))
+                if (processedBlocks.Contains(block))
                     continue;
-                LoopInfo* breakLoop = nullptr;
-                LoopInfo* currentLoop = nullptr;
-                if (!mapBreakBlockToLoop.TryGetValue(branch->getTargetBlock(), breakLoop))
-                    continue;
-                if (mapBlockToLoop.TryGetValue(block, currentLoop))
+                auto terminator = block->getTerminator();
+                if (auto loop = as<IRLoop>(terminator))
                 {
-                    if (currentLoop != breakLoop)
+                    RefPtr<LoopInfo> loopInfo = new LoopInfo();
+                    loopInfo->loopInst = loop;
+                    collectLoopBlocks(*loopInfo);
+                    loops.add(loopInfo);
+                }
+            }
+
+            for (auto& l : loops)
+            {
+                l->forEach(
+                    [&](LoopInfo* loop)
                     {
-                        MultiLevelBreakInfo breakInfo;
-                        breakInfo.breakInst = branch;
-                        breakInfo.breakTargetLoop = breakLoop;
-                        breakInfo.currentLoop = currentLoop;
-                        multiLevelBreaks.add(breakInfo);
+                        mapBreakBlockToLoop.Add(loop->loopInst->getBreakBlock(), loop);
+                        for (auto block : loop->blocks)
+                            mapBlockToLoop.Add(block, loop);
+                    });
+            }
+
+            for (auto block : func->getBlocks())
+            {
+                auto terminator = block->getTerminator();
+                if (auto branch = as<IRUnconditionalBranch>(terminator))
+                {
+                    if (as<IRLoop>(terminator))
+                        continue;
+                    LoopInfo* breakLoop = nullptr;
+                    LoopInfo* currentLoop = nullptr;
+                    if (!mapBreakBlockToLoop.TryGetValue(branch->getTargetBlock(), breakLoop))
+                        continue;
+                    if (mapBlockToLoop.TryGetValue(block, currentLoop))
+                    {
+                        if (currentLoop != breakLoop)
+                        {
+                            MultiLevelBreakInfo breakInfo;
+                            breakInfo.breakInst = branch;
+                            breakInfo.breakTargetLoop = breakLoop;
+                            breakInfo.currentLoop = currentLoop;
+                            multiLevelBreaks.add(breakInfo);
+                        }
                     }
                 }
             }
         }
+    };
+
+    void processFunc(IRGlobalValueWithCode* func)
+    {
+        // If func does not have any multi-level breaks, return.
+        {
+            FuncContext funcInfo;
+            funcInfo.gatherInfo(func);
+
+            if (funcInfo.multiLevelBreaks.getCount() == 0)
+                return;
+        }
+
+        // To make things easy, eliminate Phis before perform transformations.
+        eliminatePhisInFunc(codeGenContext, LivenessMode::Disabled, irModule, func);
+
+        // Before modifying the cfg, we gather all required info from the existing cfg.
+        FuncContext funcInfo;
+        funcInfo.gatherInfo(func);
+
+        if (funcInfo.multiLevelBreaks.getCount() == 0)
+            return;
 
         SharedIRBuilder sharedBuilder;
         sharedBuilder.init(irModule);
@@ -146,7 +171,7 @@ struct EliminateMultiLevelBreakContext
         builder.setInsertInto(func);
 
         // Rewrite multi-level breaks with single level break + target level argument.
-        for (auto breakInfo : multiLevelBreaks)
+        for (auto breakInfo : funcInfo.multiLevelBreaks)
         {
             auto loop = breakInfo.currentLoop;
             while (loop)
