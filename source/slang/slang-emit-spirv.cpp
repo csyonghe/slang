@@ -2243,7 +2243,8 @@ struct SPIRVEmitContext
             param->getDataType(),
             storageClass
         );
-        maybeEmitPointerDecoration(varInst, param);
+        IRBuilder builder(param);
+        maybeEmitPointerDecoration(varInst, param, tryGetPointedToType(&builder, param->getDataType()));
         if (auto layout = getVarLayout(param))
             emitVarLayout(param, varInst, layout);
         maybeEmitName(varInst, param);
@@ -2267,7 +2268,8 @@ struct SPIRVEmitContext
             globalVar->getDataType(),
             storageClass
         );
-        maybeEmitPointerDecoration(varInst, globalVar);
+        IRBuilder builder(globalVar);
+        maybeEmitPointerDecoration(varInst, globalVar, tryGetPointedToType(&builder, globalVar->getDataType()));
         if(layout)
             emitVarLayout(globalVar, varInst, layout);
         maybeEmitName(varInst, globalVar);
@@ -3851,11 +3853,32 @@ struct SPIRVEmitContext
         return nullptr;
     }
 
-    void maybeEmitPointerDecoration(SpvInst* varInst, IRInst* inst)
+    void maybeEmitPointerDecoration(SpvInst* varInst, IRInst* inst, IRType* type)
     {
-        auto ptrType = as<IRPtrType>(inst->getDataType());
+        auto ptrType = as<IRPtrType>(unwrapArray(type));
         if (!ptrType)
             return;
+        for (auto decor : inst->getDecorations())
+        {
+            if (as<IRGloballyCoherentDecoration>(decor))
+            {
+                emitOpDecorate(
+                    getSection(SpvLogicalSectionID::Annotations),
+                    nullptr,
+                    varInst,
+                    SpvDecorationCoherent
+                );
+            }
+            else if (as<IRGLSLVolatileDecoration>(decor))
+            {
+                emitOpDecorate(
+                    getSection(SpvLogicalSectionID::Annotations),
+                    nullptr,
+                    varInst,
+                    SpvDecorationVolatile
+                );
+            }
+        }
         if (ptrType->getAddressSpace() == SpvStorageClassPhysicalStorageBuffer)
         {
             emitOpDecorate(
@@ -3871,7 +3894,7 @@ struct SPIRVEmitContext
     {
         auto paramSpvInst = emitOpFunctionParameter(parent, inst, inst->getFullType());
         maybeEmitName(paramSpvInst, inst);
-        maybeEmitPointerDecoration(paramSpvInst, inst);
+        maybeEmitPointerDecoration(paramSpvInst, inst, inst->getFullType());
         return paramSpvInst;
     }
 
@@ -3886,7 +3909,7 @@ struct SPIRVEmitContext
         }
         auto varSpvInst = emitOpVariable(parent, inst, inst->getFullType(), storageClass);
         maybeEmitName(varSpvInst, inst);
-        maybeEmitPointerDecoration(varSpvInst, inst);
+        maybeEmitPointerDecoration(varSpvInst, inst, ptrType->getValueType());
         return varSpvInst;
     }
 
