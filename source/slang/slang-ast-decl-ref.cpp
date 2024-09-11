@@ -162,6 +162,17 @@ Val* LookupDeclRef::tryResolve(SubtypeWitness* newWitness, Type* newLookupSource
 {
     auto astBuilder = getCurrentASTBuilder();
     Decl* requirementKey = getDecl();
+
+    // If we are looking up a generic associated type requirement, the requirementKey can be the
+    // Decl* to the GenericDecl itself. However, our witness table will always use the inner decl
+    // as the key, so we need to extract the inner decl from the generic requirement key.
+    //
+    bool isGenericRequirement = false;
+    if (auto genericDecl = as<GenericDecl>(requirementKey))
+    {
+        requirementKey = genericDecl->inner;
+        isGenericRequirement = true;
+    }
     RequirementWitness requirementWitness = tryLookUpRequirementWitness(astBuilder, newWitness, requirementKey);
     switch (requirementWitness.getFlavor())
     {
@@ -172,6 +183,17 @@ Val* LookupDeclRef::tryResolve(SubtypeWitness* newWitness, Type* newLookupSource
     case RequirementWitness::Flavor::val:
     {
         auto satisfyingVal = requirementWitness.getVal()->resolve();
+
+        // If the lookup key is a generic decl, we need to return the resulting generic decl from the
+        // DeclRefType stored in the witness table.
+        //
+        if (isGenericRequirement)
+        {
+            if (auto declRefVal = as<GenericDeclRefType>(satisfyingVal))
+            {
+                return declRefVal->getDeclRef();
+            }
+        }
         return satisfyingVal;
     }
     break;
@@ -216,6 +238,12 @@ DeclRefBase* GenericAppDeclRef::_substituteImplOverride(ASTBuilder* astBuilder, 
 {
     int diff = 0;
     auto substGenericDeclRef = getGenericDeclRef()->substituteImpl(astBuilder, subst, &diff);
+    Decl* decl = getDecl();
+    if (substGenericDeclRef != getGenericDeclRef())
+    {
+        diff = true;
+        decl = remapInnerDecl(substGenericDeclRef, decl);
+    }
     List<Val*> substArgs;
     for (auto arg : getArgs())
     {
@@ -224,7 +252,7 @@ DeclRefBase* GenericAppDeclRef::_substituteImplOverride(ASTBuilder* astBuilder, 
     if (diff == 0)
         return this;
     (*ioDiff)++;
-    return astBuilder->getGenericAppDeclRef(substGenericDeclRef, substArgs.getArrayView(), getDecl());
+    return astBuilder->getGenericAppDeclRef(substGenericDeclRef, substArgs.getArrayView(), decl);
 }
 
 GenericDecl* GenericAppDeclRef::getGenericDecl() { return as<GenericDecl>(getGenericDeclRef()->getDecl()); }
@@ -249,14 +277,83 @@ void GenericAppDeclRef::_toTextOverride(StringBuilder& out)
     out << ">";
 }
 
+Decl* GenericAppDeclRef::remapInnerDecl(DeclRefBase* resolvedGenericDeclRef, Decl* oldDecl)
+{
+    Decl* decl = oldDecl;
+    if (resolvedGenericDeclRef->getDecl() != getGenericDeclRef()->getDecl())
+    {
+        // If the resolved declref points to a different generic decl,
+        // we need to update this DeclRef's inner decl to map to the
+        // corresponding decl in the new generic decl.
+        auto oldGenericDecl = as<GenericDecl>(getGenericDeclRef()->getDecl());
+        auto newGenericDecl = as<GenericDecl>(resolvedGenericDeclRef->getDecl());
+        bool isInnerDecl = oldGenericDecl->inner == decl;
+        if (isInnerDecl)
+        {
+            decl = newGenericDecl->inner;
+        }
+        else
+        {
+            // Find the index of the original inner decl.
+            Index childDeclIndex = 0;
+            for (auto dd : oldGenericDecl->members)
+            {
+                switch (dd->astNodeType)
+                {
+                case ASTNodeType::GenericTypeConstraintDecl:
+                case ASTNodeType::GenericTypeParamDecl:
+                case ASTNodeType::GenericValueParamDecl:
+                case ASTNodeType::GenericTypePackParamDecl:
+                    break;
+                default:
+                    continue;
+                }
+                if (dd == decl)
+                    break;
+                childDeclIndex++;
+            }
+            // Replace decl with the inner decl at the same index within
+            // the new generic decl.
+            for (auto dd : newGenericDecl->members)
+            {
+                switch (dd->astNodeType)
+                {
+                case ASTNodeType::GenericTypeConstraintDecl:
+                case ASTNodeType::GenericTypeParamDecl:
+                case ASTNodeType::GenericValueParamDecl:
+                case ASTNodeType::GenericTypePackParamDecl:
+                    break;
+                default:
+                    continue;
+                }
+                if (childDeclIndex == 0)
+                {
+                    decl = dd;
+                    break;
+                }
+                childDeclIndex--;
+                if (childDeclIndex < 0)
+                {
+                    SLANG_UNEXPECTED("inner decl of a generic has no correspondence in the lookup result.");
+                }
+            }
+        }
+    }
+    return decl;
+}
+
 Val* GenericAppDeclRef::_resolveImplOverride()
 {
     auto astBuilder = getCurrentASTBuilder();
     Val* resolvedVal = this;
     auto resolvedGenericDeclRef = _resolveAsDeclRef(getGenericDeclRef());
     bool diff = false;
+    Decl* decl = getDecl();
     if (resolvedGenericDeclRef != getGenericDeclRef())
+    {
         diff = true;
+        decl = remapInnerDecl(resolvedGenericDeclRef, decl);
+    }
     List<Val*> resolvedArgs;
     for (auto arg : getArgs())
     {
@@ -266,7 +363,7 @@ Val* GenericAppDeclRef::_resolveImplOverride()
             diff = true;
     }
     if (diff)
-        resolvedVal = astBuilder->getGenericAppDeclRef(resolvedGenericDeclRef, resolvedArgs.getArrayView(), getDecl());
+        resolvedVal = astBuilder->getGenericAppDeclRef(resolvedGenericDeclRef, resolvedArgs.getArrayView(), decl);
     return resolvedVal;
 }
 

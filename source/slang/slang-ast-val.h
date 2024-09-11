@@ -131,6 +131,8 @@ public:
     Val* _resolveImplOverride();
 
     DeclRefBase* _getBaseOverride();
+
+    Decl* remapInnerDecl(DeclRefBase* newGenericDecl, Decl* oldInnerDecl);
 };
 
 // A compile-time integer (may not have a specific concrete value)

@@ -771,7 +771,7 @@ Index getFilterCountImpl(const ReflectClassInfo& clsInfo, MemberFilterStyle filt
 
         if (auto lookupDeclRef = SubstitutionSet(substDeclRef).findLookupDeclRef())
         {
-            if (auto interfaceDecl = as<InterfaceDecl>(substAssocTypeDecl->parentDecl))
+            if (auto interfaceDecl = as<InterfaceDecl>(getParentDecl(substAssocTypeDecl)))
             {
                 if (lookupDeclRef->getSupDecl() == interfaceDecl)
                 {

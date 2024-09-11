@@ -2212,10 +2212,14 @@ struct ValLoweringVisitor : ValVisitor<ValLoweringVisitor, LoweredValInfo, Lower
         return LoweredValInfo::simple(getBuilder()->getAttr(kIROp_NoDiffAttr));
     }
 
+    LoweredValInfo visitGenericDeclRefType(GenericDeclRefType* type)
+    {
+        return emitDeclRef(context, type->getDeclRef(), getBuilder()->getTypeKind());
+    }
+
     // We do not expect to encounter the following types in ASTs that have
     // passed front-end semantic checking.
 #define UNEXPECTED_CASE(NAME) IRType* visit##NAME(NAME*) { SLANG_UNEXPECTED(#NAME); UNREACHABLE_RETURN(nullptr); }
-    UNEXPECTED_CASE(GenericDeclRefType)
     UNEXPECTED_CASE(TypeType)
     UNEXPECTED_CASE(ErrorType)
     UNEXPECTED_CASE(InitializerListType)
@@ -7626,11 +7630,8 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         // interface requirement.
         if(auto assocTypeDecl = as<AssocTypeDecl>(decl->parentDecl))
         {
-            // TODO: might need extra steps if we ever allow
-            // generic associated types.
 
-
-            if(const auto interfaceDecl = as<InterfaceDecl>(assocTypeDecl->parentDecl))
+            if (const auto interfaceDecl = as<InterfaceDecl>(getParentDecl(assocTypeDecl)))
             {
                 // Okay, this seems to be an interface rquirement, and
                 // we should lower it as such.
@@ -7683,6 +7684,15 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         return false;
     }
 
+    GenericDecl* isGenericAssociatedTypeConstraintDecl(Decl* decl)
+    {
+        if (!as<TypeConstraintDecl>(decl))
+            return nullptr;
+        if (!as<AssocTypeDecl>(decl->parentDecl))
+            return nullptr;
+        return as<GenericDecl>(decl->parentDecl->parentDecl);
+    }
+
     void lowerWitnessTable(
         IRGenContext*                               subContext,
         WitnessTable*                               astWitnessTable,
@@ -7690,6 +7700,7 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         Dictionary<WitnessTable*, IRWitnessTable*>  &mapASTToIRWitnessTable)
     {
         auto subBuilder = subContext->irBuilder;
+        auto outerGenericOfWitness = findOuterGeneric(irWitnessTable);
 
         for(auto entry : astWitnessTable->getRequirementDictionary())
         {
@@ -7716,7 +7727,38 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
             case RequirementWitness::Flavor::val:
                 {
                     auto satisfyingVal = satisfyingWitness.getVal();
-                    irSatisfyingVal = lowerSimpleVal(subContext, satisfyingVal);
+                    if (auto genericDeclRefType = as<GenericDeclRefType>(satisfyingVal))
+                    {
+                        // The satisfying val for a generic associatedtype requirement
+                        // will be in the form of a GenericDeclRefType.
+                        // We can simply lower the satisfyingVal in this case to get
+                        // the IRGeneric representing the generic satisfying type.
+                        irSatisfyingVal = lowerSimpleVal(subContext, satisfyingVal);
+                        if (outerGenericOfWitness)
+                            irSatisfyingVal = specializeWithOuterGeneric(subContext->irBuilder, irSatisfyingVal, (IRGeneric*)outerGenericOfWitness);
+                    }
+                    else if (auto genericDecl = isGenericAssociatedTypeConstraintDecl(requiredMemberDecl))
+                    {
+                        // The type constraints for a generic associatedtype will
+                        // come in the form of a DeclaredSubtypeWitness whose declref
+                        // contains default substitutions to the generic type constraint
+                        // decl. To lower these witnesses, we need to create the enclosing
+                        // IRGeneric now.
+                        // 
+                        auto associatedtypeRequirementKey = genericDecl->inner;
+                        auto associatedtypeWitness = astWitnessTable->getRequirementDictionary().tryGetValue(associatedtypeRequirementKey);
+                        auto genericDeclRef = as<GenericDeclRefType>(associatedtypeWitness->getVal());
+                        auto satisfyingAssociatedTypeDecl = as<GenericDecl>(genericDeclRef->getDeclRef().getDecl());
+                        NestedContext nestedContext(subContext);
+                        nestedContext.subBuilderStorage = *(subContext->irBuilder);
+                        auto irGeneric = emitOuterGenericNonRecursive(nestedContext.getContext(), satisfyingAssociatedTypeDecl);
+                        auto innerVal = lowerSimpleVal(nestedContext.getContext(), satisfyingVal);
+                        irSatisfyingVal = finishOuterGenerics(nestedContext.getBuilder(), innerVal, irGeneric, true);
+                    }
+                    else
+                    {
+                        irSatisfyingVal = lowerSimpleVal(subContext, satisfyingVal);
+                    }
                 }
                 break;
 
@@ -8000,12 +8042,10 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         IRBuilder       subBuilderStorage;
         IRGenContext    subContextStorage;
 
-        NestedContext(DeclLoweringVisitor* outer)
-            : subBuilderStorage(*outer->getBuilder())
-            , subContextStorage(*outer->context)
+        NestedContext(IRGenContext* outerContext)
+            : subBuilderStorage(*(outerContext->irBuilder))
+            , subContextStorage(*outerContext)
         {
-            auto outerContext = outer->context;
-
             subEnvStorage.outer = outerContext->env;
 
             subContextStorage.irBuilder = &subBuilderStorage;
@@ -8015,6 +8055,12 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
             subContextStorage.thisTypeWitness = outerContext->thisTypeWitness;
 
             subContextStorage.returnDestination = LoweredValInfo();
+        }
+
+        NestedContext(DeclLoweringVisitor* outer)
+            : NestedContext(outer->context)
+        {
+            subBuilderStorage = *outer->getBuilder();
         }
 
         IRBuilder* getBuilder() { return &subBuilderStorage; }
@@ -8523,9 +8569,14 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
             }
 
             operandCount++;
+
             // As a special case, any type constraints placed
             // on an associated type will *also* need to be turned
             // into requirement keys for this interface.
+            if (auto genericRequirementDecl = as<GenericDecl>(requirementDecl))
+            {
+                requirementDecl = genericRequirementDecl->inner;
+            }
             if (auto associatedTypeDecl = as<AssocTypeDecl>(requirementDecl))
             {
                 operandCount += associatedTypeDecl->getMembersOfType<TypeConstraintDecl>().getCount();
@@ -8606,7 +8657,7 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
                     {
                         auto constraintKey = getInterfaceRequirementKey(constraintDeclRef.getDecl());
                         auto constraintInterfaceType =
-                            lowerType(context, getSup(subContext->astBuilder, constraintDeclRef));
+                            lowerType(subContext, getSup(subContext->astBuilder, constraintDeclRef));
                         auto witnessTableType =
                             getBuilder()->getWitnessTableType(constraintInterfaceType);
 
@@ -9146,15 +9197,11 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         subContext->setValue(constraintDecl, LoweredValInfo::simple(value));
     }
 
-    IRGeneric* emitOuterGeneric(
-        IRGenContext*   subContext,
-        GenericDecl*    genericDecl,
-        Decl*           leafDecl)
+    IRGeneric* emitOuterGenericNonRecursive(
+        IRGenContext* subContext,
+        GenericDecl* genericDecl)
     {
         auto subBuilder = subContext->irBuilder;
-
-        // Of course, a generic might itself be nested inside of other generics...
-        emitOuterGenerics(subContext, genericDecl, leafDecl);
 
         // We need to create an IR generic
 
@@ -9200,6 +9247,17 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         }
 
         return irGeneric;
+    }
+
+    IRGeneric* emitOuterGeneric(
+        IRGenContext*   subContext,
+        GenericDecl*    genericDecl,
+        Decl*           leafDecl)
+    {
+        // Of course, a generic might itself be nested inside of other generics...
+        emitOuterGenerics(subContext, genericDecl, leafDecl);
+
+        return emitOuterGenericNonRecursive(subContext, genericDecl);   
     }
 
     IRGeneric* emitOuterInterfaceGeneric(
@@ -9317,7 +9375,8 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
     IRInst* finishOuterGenerics(
         IRBuilder*  subBuilder,
         IRInst*     val,
-        IRGeneric*  parentGeneric)
+        IRGeneric*  parentGeneric,
+        bool nonRecursive = false)
     {
         IRInst* v = val;
 
@@ -9460,6 +9519,8 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
 #endif
             subBuilder->emitReturn(v);
             parentGeneric->moveToEnd();
+
+            if (nonRecursive) break;
 
             // There might be more outer generics,
             // so we need to loop until we run out.
@@ -10398,8 +10459,7 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
             return ensureDecl(context, innerFuncDecl);
         else if (auto innerStructDecl = as<StructDecl>(genDecl->inner))
         {
-            ensureDecl(context, innerStructDecl);
-            return LoweredValInfo();
+            return ensureDecl(context, innerStructDecl);
         }
         else if( auto extensionDecl = as<ExtensionDecl>(genDecl->inner) )
         {
@@ -10416,6 +10476,10 @@ struct DeclLoweringVisitor : DeclVisitor<DeclLoweringVisitor, LoweredValInfo>
         else if (auto subscriptDecl = as<SubscriptDecl>(genDecl->inner))
         {
             return ensureDecl(context, subscriptDecl);
+        }
+        else if (auto assoctypeDecl = as<AssocTypeDecl>(genDecl->inner))
+        {
+            return ensureDecl(context, assoctypeDecl);
         }
         SLANG_RELEASE_ASSERT(false);
         UNREACHABLE_RETURN(LoweredValInfo());
@@ -10567,6 +10631,10 @@ bool canDeclLowerToAGeneric(Decl* decl)
 
     // An inheritance decl lowers to an `IRWitnessTable`, and can be generic
     if(as<InheritanceDecl>(decl)) return true;
+
+    // The type constraint nested insdie a generic associated type can be generic.
+    if (as<GenericTypeConstraintDecl>(decl) && as<AssocTypeDecl>(decl->parentDecl))
+        return true;
 
     // A `typedef` declaration nested under a generic will turn into
     // a generic that returns a type (a simple type-level function).
@@ -10783,6 +10851,8 @@ LoweredValInfo emitDeclRef(
                 // We may want to consider unifying our IR representation to
                 // represent associated types with lookupWitness inst even inside
                 // interface definitions.
+                if (as<GenericDecl>(decl->parentDecl))
+                    decl = decl->parentDecl;
                 return emitDeclRef(
                     context,
                     createDefaultSpecializedDeclRef(context, nullptr, decl),

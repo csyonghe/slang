@@ -2497,6 +2497,23 @@ namespace Slang
         //
         CheckConstraintSubType(decl->sub);
         decl->sub = TranslateTypeNodeForced(decl->sub);
+        if (auto genericDeclRefType = as<GenericDeclRefType>(decl->sub.type))
+        {
+            // If sub is a GenericDeclRefType referencing the current generic decl, then we need
+            // to replace the type with the default substitutions.
+            //
+            auto genericDeclRef = genericDeclRefType->getDeclRef().as<GenericDecl>();
+            SLANG_ASSERT(genericDeclRef);
+            if (genericDeclRef.getDecl() == findNextOuterGeneric(decl))
+            {
+                auto args = getDefaultSubstitutionArgs(m_astBuilder, this, genericDeclRef.getDecl());
+                auto newGenericDeclRef = m_astBuilder->getGenericAppDeclRef(genericDeclRef, args.getArrayView());
+
+                decl->sub.type = DeclRefType::create(
+                    m_astBuilder,
+                    createDefaultSubstitutionsIfNeeded(m_astBuilder, this, newGenericDeclRef));
+            }
+        }
         decl->sup = TranslateTypeNodeForced(decl->sup);
         if (!decl->isEqualityConstraint && !isValidGenericConstraintType(decl->sup) && !as<ErrorType>(decl->sub.type))
         {
@@ -3561,10 +3578,8 @@ namespace Slang
             // Grab the type we expect to conform to from the constraint.
             auto requiredSuperType = getSup(m_astBuilder, requiredConstraintDeclRef);
 
-            auto subType = getSub(m_astBuilder, requiredConstraintDeclRef);
-
             // Perform a search for a witness to the subtype relationship.
-            witness = tryGetSubtypeWitness(subType, requiredSuperType);
+            witness = tryGetSubtypeWitness(satisfyingType, requiredSuperType);
             if (witness)
             {
                 auto genConstraint = as<GenericTypeConstraintDecl>(requiredConstraintDeclRef.getDecl());
@@ -3604,9 +3619,24 @@ namespace Slang
         // before checking the constraints, since the subtype of
         // the constraints maybe referencing the satisfying type via
         // witness lookups.
-        auto requirementWitness = RequirementWitness(satisfyingType->getCanonicalType());
-        witnessTable->m_requirementDictionary[requiredAssociatedTypeDeclRef.getDecl()]
-            = requirementWitness;
+        if (as<GenericDecl>(requiredAssociatedTypeDeclRef.getDecl()->parentDecl))
+        {
+            if (auto satisfyingGenericApp = as<GenericAppDeclRef>(isDeclRefTypeOf<Decl>(satisfyingType).declRefBase))
+            {
+                auto genericSatisfyingDeclRefType = getGenericDeclRefType(m_astBuilder, satisfyingGenericApp->getGenericDeclRef());
+                auto requirementWitness = RequirementWitness(genericSatisfyingDeclRefType);
+                witnessTable->m_requirementDictionary[requiredAssociatedTypeDeclRef.getDecl()] = requirementWitness;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            auto requirementWitness = RequirementWitness(satisfyingType->getCanonicalType());
+            witnessTable->m_requirementDictionary[requiredAssociatedTypeDeclRef.getDecl()] = requirementWitness;
+        }
 
         // We need to confirm that the chosen type `satisfyingType`,
         // meets all the constraints placed on the associated type
@@ -6833,10 +6863,6 @@ namespace Slang
 
     void SemanticsDeclHeaderVisitor::visitAssocTypeDecl(AssocTypeDecl* decl)
     {
-        // assoctype only allowed in an interface
-        auto interfaceDecl = as<InterfaceDecl>(decl->parentDecl);
-        if (!interfaceDecl)
-            getSink()->diagnose(decl, Slang::Diagnostics::assocTypeInInterfaceOnly);
         checkVisibility(decl);
     }
 

@@ -4464,6 +4464,7 @@ namespace Slang
             case ASTNodeType::TypeDefDecl:
             case ASTNodeType::ExtensionDecl:
             case ASTNodeType::SubscriptDecl:
+            case ASTNodeType::AssocTypeDecl:
                 return true;
             default:
                 return false;
