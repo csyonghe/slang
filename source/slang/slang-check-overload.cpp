@@ -2566,7 +2566,8 @@ Expr* SemanticsVisitor::ResolveInvoke(InvokeExpr* expr)
             {
                 if (candidate.cacheVersion == typeCheckingCache->version)
                 {
-                    AddOverloadCandidate(context, candidate.candidate, 0);
+                    context.bestCandidateStorage = candidate.candidate;
+                    context.bestCandidate = &context.bestCandidateStorage;
                     shouldAddToCache = false;
                 }
                 else
