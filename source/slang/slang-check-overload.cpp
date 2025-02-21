@@ -2553,7 +2553,7 @@ Expr* SemanticsVisitor::ResolveInvoke(InvokeExpr* expr)
 
     // check if this is a core module operator call, if so we want to use cached results
     // to speed up compilation
-    bool shouldAddToCache = true;
+    bool shouldAddToCache = false;
     OperatorOverloadCacheKey key;
     TypeCheckingCache* typeCheckingCache = getLinkage()->getTypeCheckingCache();
     if (auto opExpr = as<OperatorExpr>(expr))
@@ -2568,14 +2568,18 @@ Expr* SemanticsVisitor::ResolveInvoke(InvokeExpr* expr)
                 {
                     context.bestCandidateStorage = candidate.candidate;
                     context.bestCandidate = &context.bestCandidateStorage;
-                    shouldAddToCache = false;
                 }
                 else
                 {
                     LookupResultItem overloadCandidate = {};
                     overloadCandidate.declRef = getOuterGenericOrSelf(candidate.decl);
                     AddDeclRefOverloadCandidates(overloadCandidate, context, 0);
+                    shouldAddToCache = true;
                 }
+            }
+            else
+            {
+                shouldAddToCache = true;
             }
         }
     }
