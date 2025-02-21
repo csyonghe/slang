@@ -2063,6 +2063,8 @@ DeclRef<Decl> SemanticsVisitor::inferGenericArguments(
     // their constraints must have been checked).
     //
     ensureDecl(genericDeclRef, DeclCheckState::CanSpecializeGeneric);
+    if (auto innerDecl = getInner(genericDeclRef))
+        ensureDecl(innerDecl, DeclCheckState::CanSpecializeGeneric);
 
     // Conceptually, we are going to be trying to infer any unspecified
     // generic arguments by forming a system of constraints on those arguments
