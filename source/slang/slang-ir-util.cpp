@@ -1199,7 +1199,8 @@ bool areCallArgumentsSideEffectFree(IRCall* call, SideEffectAnalysisOptions opti
 bool isPureFunctionalCall(IRCall* call, SideEffectAnalysisOptions options)
 {
     auto callee = getResolvedInstForDecorations(call->getCallee());
-    if (callee->findDecoration<IRReadNoneDecoration>())
+    if (callee->findDecoration<IRReadNoneDecoration>() ||
+        call->findDecoration<IRReadNoneDecoration>())
     {
         return areCallArgumentsSideEffectFree(call, options);
     }
@@ -1208,7 +1209,8 @@ bool isPureFunctionalCall(IRCall* call, SideEffectAnalysisOptions options)
 
 bool isSideEffectFreeFunctionalCall(IRCall* call, SideEffectAnalysisOptions options)
 {
-    if (!doesCalleeHaveSideEffect(call->getCallee()))
+    if (!doesCalleeHaveSideEffect(call->getCallee()) ||
+        call->findDecoration<IRReadNoneDecoration>())
     {
         return areCallArgumentsSideEffectFree(call, options);
     }

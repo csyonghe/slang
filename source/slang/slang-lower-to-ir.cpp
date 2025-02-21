@@ -791,11 +791,9 @@ LoweredValInfo emitCallToVal(
                 }
                 else
                 {
-                    return LoweredValInfo::simple(builder->emitCallInst(
-                        type,
-                        getSimpleVal(context, funcVal),
-                        argCount,
-                        args));
+                    auto callInst =
+                        builder->emitCallInst(type, getSimpleVal(context, funcVal), argCount, args);
+                    return LoweredValInfo::simple(callInst);
                 }
             }
 
@@ -877,7 +875,16 @@ LoweredValInfo emitCallToDeclRef(
     // Fallback case is to emit an actual call.
     //
     LoweredValInfo funcVal = emitDeclRef(context, funcDeclRef, funcType);
-    return emitCallToVal(context, type, funcVal, argCount, args, tryEnv);
+    auto result = emitCallToVal(context, type, funcVal, argCount, args, tryEnv);
+
+    if (funcVal.val && result.val)
+    {
+        if (funcDeclRef.getDecl()->findModifier<ReadNoneAttribute>())
+        {
+            context->irBuilder->addDecoration(result.val, kIROp_ReadNoneDecoration);
+        }
+    }
+    return result;
 }
 
 LoweredValInfo emitCallToDeclRef(

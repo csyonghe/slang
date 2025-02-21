@@ -161,7 +161,7 @@ interface IArithmetic : IComparable
 
     __init(int val);
 
-        /// Initialize from the same type.
+    /// Initialize from the same type.
     __init(This value);
 }
 
@@ -2484,37 +2484,42 @@ ${{{{
 
 for (auto op : intrinsicUnaryOps)
 {
-    for (auto type : kBaseTypes)
+    if (!op.interface)
     {
-        if ((type.flags & op.flags) == 0)
-            continue;
+        for (auto type : kBaseTypes)
+        {
+            if ((type.flags & op.flags) == 0)
+                continue;
 
-        char const* resultType = type.name;
-        if (op.flags & BOOL_RESULT) resultType = "bool";
+            char const* resultType = type.name;
+            if (op.flags & BOOL_RESULT) resultType = "bool";
 
-        // scalar version
-        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(" << type.name << " value);\n";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " __" << op.funcName << "(" << type.name << " value);\n";
+            // scalar version
+            sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(" << type.name << " value);\n";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " __" << op.funcName << "(" << type.name << " value);\n";
 
-        // vector version
-        sb << "__generic<let N : int> ";
-        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(" << "vector<" << type.name << ",N> value);\n";
+            // vector version
+            sb << "__generic<let N : int> ";
+            sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(" << "vector<" << type.name << ",N> value);\n";
 
-        // matrix version
-        sb << "__generic<let N : int, let M : int> ";
-        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(" <<  "matrix<" << type.name << ",N,M> value);\n";
+            // matrix version
+            sb << "__generic<let N : int, let M : int, let L : int> ";
+            sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(" <<  "matrix<" << type.name << ",N,M,L> value);\n";
+        }
     }
-
-    // Synthesize generic versions
-    if(op.interface)
+    else
     {
+        // Synthesize generic versions
         char const* resultType = "T";
         if (op.flags & BOOL_RESULT) resultType = "bool";
         
         // scalar version
         sb << "__generic<T : " << op.interface << ">\n";
         sb << "[OverloadRank(10)]";
-        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(" << "T value);\n";
+        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(T value);\n";
+
+        sb << "__generic<T : " << op.interface << ">\n";
+        sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " __" << op.funcName << "(T value);\n";
 
         // vector version
         sb << "__generic<T : " << op.interface << ", let N : int> ";
@@ -2522,9 +2527,9 @@ for (auto op : intrinsicUnaryOps)
         sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<T,N> value);\n";
 
         // matrix version
-        sb << "__generic<T : " << op.interface << ", let N : int, let M : int> ";
+        sb << "__generic<T : " << op.interface << ", let N : int, let M : int, let L : int> ";
         sb << "[OverloadRank(10)]";
-        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(matrix<T,N,M> value);\n";
+        sb << "__prefix __intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(matrix<T,N,M,L> value);\n";
     }
 }
 
@@ -2612,7 +2617,7 @@ vector<T,N> operator$(op.name)(in out vector<T,N> value)
 $(fixity.qual)
 __generic<T : __BuiltinArithmeticType, let R : int, let C : int, let L : int>
 [__unsafeForceInlineEarly]
-matrix<T,R,C> operator$(op.name)(in out matrix<T,R,C,L> value)
+matrix<T,R,C,L> operator$(op.name)(in out matrix<T,R,C,L> value)
 {$(fixity.bodyPrefix) value = value $(op.binOp) T(1); return $(fixity.returnVal); }
 
 $(fixity.qual)
@@ -2626,90 +2631,91 @@ ${{{{
 
 for (auto op : intrinsicBinaryOps)
 {
-    for (auto type : kBaseTypes)
+    if(!op.interface)
     {
-        if ((type.flags & op.flags) == 0)
-            continue;
+        for (auto type : kBaseTypes)
+        {
+            if ((type.flags & op.flags) == 0)
+                continue;
 
-        char const* leftType = type.name;
-        char const* rightType = leftType;
-        char const* resultType = leftType;
+            char const* leftType = type.name;
+            char const* rightType = leftType;
+            char const* resultType = leftType;
 
-        if (op.flags & BOOL_RESULT) resultType = "bool";
+            if (op.flags & BOOL_RESULT) resultType = "bool";
 
-        // TODO: We should handle a `SHIFT` flag on the op
-        // by changing `rightType` to `int` in order to
-        // account for the fact that the shift amount should
-        // always have a fixed type independent of the LHS.
-        //
-        // (It is unclear why this change hadn't been made
-        // already, so it is possible that such a change
-        // breaks overload resolution or other parts of
-        // the compiler)
+            // TODO: We should handle a `SHIFT` flag on the op
+            // by changing `rightType` to `int` in order to
+            // account for the fact that the shift amount should
+            // always have a fixed type independent of the LHS.
+            //
+            // (It is unclear why this change hadn't been made
+            // already, so it is possible that such a change
+            // breaks overload resolution or other parts of
+            // the compiler)
 
-        // scalar version
-        sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(" << leftType << " left, " << rightType << " right);\n";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " __" << op.funcName << "(" << leftType << " left, " << rightType << " right);\n";
+            // scalar version
+            sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(" << leftType << " left, " << rightType << " right);\n";
 
-        // vector version
-        sb << "__generic<let N : int> ";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<" << leftType << ",N> left, vector<" << rightType << ",N> right);\n";
+            // vector version
+            sb << "__generic<let N : int> ";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<" << leftType << ",N> left, vector<" << rightType << ",N> right);\n";
 
-        // matrix version
-        sb << "__generic<let N : int, let M : int> ";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(matrix<" << leftType << ",N,M> left, matrix<" << rightType << ",N,M> right);\n";
+            // matrix version
+            sb << "__generic<let N : int, let M : int, let L : int> ";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(matrix<" << leftType << ",N,M,L> left, matrix<" << rightType << ",N,M,L> right);\n";
 
-        // We currently synthesize addiitonal overloads
-        // for the case where one or the other operand
-        // is a scalar. This choice serves a few purposes:
-        //
-        // 1. It avoids introducing scalar-to-vector or
-        // scalar-to-matrix promotions before the operator,
-        // which might allow some back ends to produce
-        // more optimal code.
-        //
-        // 2. It avoids concerns about making overload resolution
-        // and the inference rules for `N` and `M` able to
-        // handle the mixed vector/scalar or matrix/scalar case.
-        //
-        // 3. Having explicit overloads for the matrix/scalar cases
-        // here means that we do *not* need to support a general
-        // implicit conversion from scalars to matrices, unless
-        // we decide we want to.
-        //
-        // Note: Case (2) of the motivation shouldn't really apply
-        // any more, because we end up having to support similar
-        // inteference for built-in binary math functions where
-        // vectors and scalars might be combined (and where defining
-        // additional overloads to cover all the combinations doesn't
-        // seem practical or desirable).
-        //
-        // TODO: We should consider whether dropping these extra
-        // overloads is possible and worth it. The optimization
-        // concern (1) could possibly be addressed in specific
-        // back-ends. The issue (3) about not wanting to support
-        // implicit scalar-to-matrix conversion may be moot if
-        // we end up needing to support mixed scalar/matrix input
-        // for builtin in non-operator functions anyway.
+            // We currently synthesize addiitonal overloads
+            // for the case where one or the other operand
+            // is a scalar. This choice serves a few purposes:
+            //
+            // 1. It avoids introducing scalar-to-vector or
+            // scalar-to-matrix promotions before the operator,
+            // which might allow some back ends to produce
+            // more optimal code.
+            //
+            // 2. It avoids concerns about making overload resolution
+            // and the inference rules for `N` and `M` able to
+            // handle the mixed vector/scalar or matrix/scalar case.
+            //
+            // 3. Having explicit overloads for the matrix/scalar cases
+            // here means that we do *not* need to support a general
+            // implicit conversion from scalars to matrices, unless
+            // we decide we want to.
+            //
+            // Note: Case (2) of the motivation shouldn't really apply
+            // any more, because we end up having to support similar
+            // inteference for built-in binary math functions where
+            // vectors and scalars might be combined (and where defining
+            // additional overloads to cover all the combinations doesn't
+            // seem practical or desirable).
+            //
+            // TODO: We should consider whether dropping these extra
+            // overloads is possible and worth it. The optimization
+            // concern (1) could possibly be addressed in specific
+            // back-ends. The issue (3) about not wanting to support
+            // implicit scalar-to-matrix conversion may be moot if
+            // we end up needing to support mixed scalar/matrix input
+            // for builtin in non-operator functions anyway.
 
-        // scalar-vector and scalar-matrix
-        sb << "__generic<let N : int> ";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(" << leftType << " left, vector<" << rightType << ",N> right);\n";
+            // scalar-vector and scalar-matrix
+            sb << "__generic<let N : int> ";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(" << leftType << " left, vector<" << rightType << ",N> right);\n";
 
-        sb << "__generic<let N : int, let M : int> ";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(" << leftType << " left, matrix<" << rightType << ",N,M> right);\n";
+            sb << "__generic<let N : int, let M : int, let L : int> ";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(" << leftType << " left, matrix<" << rightType << ",N,M,L> right);\n";
 
-        // vector-scalar and matrix-scalar
-        sb << "__generic<let N : int> ";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<" << leftType << ",N> left, " << rightType << " right);\n";
+            // vector-scalar and matrix-scalar
+            sb << "__generic<let N : int> ";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<" << leftType << ",N> left, " << rightType << " right);\n";
 
-        sb << "__generic<let N : int, let M : int> ";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(matrix<" << leftType << ",N,M> left, " << rightType << " right);\n";
+            sb << "__generic<let N : int, let M : int, let L : int> ";
+            sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(matrix<" << leftType << ",N,M,L> left, " << rightType << " right);\n";
+        }
     }
-
-    // Synthesize generic versions
-    if(op.interface)
+    else
     {
+        // Synthesize generic versions
         char const* leftType = "T";
         char const* rightType = leftType;
         char const* resultType = leftType;
@@ -2721,6 +2727,9 @@ for (auto op : intrinsicBinaryOps)
         sb << "__generic<T : " << op.interface << ">\n";
         sb << "[OverloadRank(10)]";
         sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " operator" << op.opName << "(" << leftType << " left, " << rightType << " right);\n";
+        
+        sb << "__generic<T : " << op.interface << ">\n";
+        sb << "__intrinsic_op(" << int(op.opCode) << ") " << resultType << " __" << op.funcName << "(" << leftType << " left, " << rightType << " right);\n";
 
         // vector version
         sb << "__generic<T : " << op.interface << ", let N : int> ";
@@ -2728,27 +2737,27 @@ for (auto op : intrinsicBinaryOps)
         sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<" << leftType << ",N> left, vector<" << rightType << ",N> right);\n";
 
         // matrix version
-        sb << "__generic<T : " << op.interface << ", let N : int, let M : int> ";
+        sb << "__generic<T : " << op.interface << ", let N : int, let M : int, let L : int> ";
         sb << "[OverloadRank(10)]";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(matrix<" << leftType << ",N,M> left, matrix<" << rightType << ",N,M> right);\n";
+        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(matrix<" << leftType << ",N,M,L> left, matrix<" << rightType << ",N,M,L> right);\n";
 
         // scalar-vector and scalar-matrix
         sb << "__generic<T : " << op.interface << ", let N : int> ";
         sb << "[OverloadRank(10)]";
         sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(" << leftType << " left, vector<" << rightType << ",N> right);\n";
 
-        sb << "__generic<T : " << op.interface << ", let N : int, let M : int> ";
+        sb << "__generic<T : " << op.interface << ", let N : int, let M : int, let L: int> ";
         sb << "[OverloadRank(10)]";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(" <<  leftType << " left, matrix<" << rightType << ",N,M> right);\n";
+        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(" <<  leftType << " left, matrix<" << rightType << ",N,M,L> right);\n";
 
         // vector-scalar and matrix-scalar
         sb << "__generic<T : " << op.interface << ", let N : int> ";
         sb << "[OverloadRank(10)]";
         sb << "__intrinsic_op(" << int(op.opCode) << ") vector<" << resultType << ",N> operator" << op.opName << "(vector<" << leftType << ",N> left, " << rightType << " right);\n";
 
-        sb << "__generic<T : " << op.interface << ", let N : int, let M : int> ";
+        sb << "__generic<T : " << op.interface << ", let N : int, let M : int, let L : int> ";
         sb << "[OverloadRank(10)]";
-        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M> operator" << op.opName << "(matrix<" << leftType << ",N,M> left, " << rightType << " right);\n";
+        sb << "__intrinsic_op(" << int(op.opCode) << ") matrix<" << resultType << ",N,M,L> operator" << op.opName << "(matrix<" << leftType << ",N,M,L> left, " << rightType << " right);\n";
     }
 }
 
@@ -2888,17 +2897,17 @@ ${{{{
         return left;
     }
 
-    __generic<T : $(op.interface), let R : int, let C : int, let Layout : int>
+    __generic<T : $(op.interface), let R : int, let C : int, let L : int>
     [__unsafeForceInlineEarly]
-    matrix<T,R,C> operator$(op.name)=(in out matrix<T,R,C,Layout> left, matrix<T,R,C> right)
+    matrix<T,R,C,L> operator$(op.name)=(in out matrix<T,R,C,L> left, matrix<T,R,C,L> right)
     {
         left = left $(op.name) right;
         return left;
     }
 
-    __generic<T : $(op.interface), let R : int, let C : int, let Layout : int>
+    __generic<T : $(op.interface), let R : int, let C : int, let L : int>
     [__unsafeForceInlineEarly]
-    matrix<T,R,C> operator$(op.name)=(in out matrix<T,R,C, Layout> left, T right)
+    matrix<T,R,C,L> operator$(op.name)=(in out matrix<T,R,C,L> left, T right)
     {
         left = left $(op.name) right;
         return left;
