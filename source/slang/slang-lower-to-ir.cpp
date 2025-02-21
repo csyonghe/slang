@@ -2007,6 +2007,11 @@ struct ValLoweringVisitor : ValVisitor<ValLoweringVisitor, LoweredValInfo, Lower
         return getBuilder()->getBasicType(type->getBaseType());
     }
 
+    IRType* visitIntLiteralType(IntLiteralType* type)
+    {
+        return visitBasicExpressionType((BasicExpressionType*)(type->getProperType()));
+    }
+
     IRType* visitVectorExpressionType(VectorExpressionType* type)
     {
         auto elementType = lowerType(context, type->getElementType());

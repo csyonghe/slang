@@ -1673,7 +1673,11 @@ Expr* SemanticsExprVisitor::visitIntegerLiteralExpr(IntegerLiteralExpr* expr)
     //
     if (!expr->type.type)
     {
-        expr->type = m_astBuilder->getBuiltinType(expr->suffixType);
+        if (expr->suffixType == BaseType::Void)
+            expr->type = m_astBuilder->getIntLiteralType(
+                m_astBuilder->getIntVal(getProperTypeForIntLit(expr->value, false), expr->value));
+        else
+            expr->type = m_astBuilder->getBuiltinType(expr->suffixType);
     }
     return expr;
 }
@@ -1695,7 +1699,12 @@ Expr* SemanticsExprVisitor::visitStringLiteralExpr(StringLiteralExpr* expr)
 
 IntVal* SemanticsVisitor::getIntVal(IntegerLiteralExpr* expr)
 {
-    return m_astBuilder->getIntVal(expr->type.type, expr->value);
+    auto type = expr->type.type;
+    if (auto intLitType = as<IntLiteralType>(type))
+    {
+        type = intLitType->getProperType();
+    }
+    return m_astBuilder->getIntVal(type, expr->value);
 }
 
 IntVal* SemanticsVisitor::tryConstantFoldExpr(
@@ -2319,6 +2328,8 @@ Expr* SemanticsVisitor::CheckSimpleSubscriptExpr(IndexExpr* subscriptExpr, Type*
     }
 
     auto indexExpr = subscriptExpr->indexExprs[0];
+
+    subscriptExpr->indexExprs[0] = maybeCoerceExprToProperIntType(indexExpr);
 
     if (!isScalarIntegerType(indexExpr->type.type))
     {
@@ -2968,6 +2979,35 @@ Expr* SemanticsExprVisitor::convertToLogicOperatorExpr(InvokeExpr* expr)
     return newExpr;
 }
 
+Expr* SemanticsExprVisitor::tryFoldLiteralNegateExpr(InvokeExpr* expr)
+{
+    auto varExpr = as<VarExpr>(expr->functionExpr);
+    if (!varExpr)
+        return nullptr;
+    if (expr->arguments.getCount() != 1)
+        return nullptr;
+    auto litExpr = as<IntegerLiteralExpr>(expr->arguments[0]);
+    if (!litExpr)
+        return nullptr;
+    if (getText(varExpr->name) != "-")
+        return nullptr;
+    if (!as<IntLiteralType>(litExpr->type))
+        return nullptr;
+    if (litExpr->value > -INT64_MIN)
+    {
+        getSink()->diagnose(
+            expr,
+            Diagnostics::integerLiteralTruncated,
+            String("-") + String(litExpr->value),
+            "int64_t",
+            -litExpr->value);
+    }
+    litExpr->value = -litExpr->value;
+    litExpr->type = m_astBuilder->getIntLiteralType(
+        m_astBuilder->getIntVal(getProperTypeForIntLit(litExpr->value, true), litExpr->value));
+    return litExpr;
+}
+
 Expr* SemanticsExprVisitor::visitInvokeExpr(InvokeExpr* expr)
 {
     // check the base expression first
@@ -2980,7 +3020,8 @@ Expr* SemanticsExprVisitor::visitInvokeExpr(InvokeExpr* expr)
     {
         arg = CheckExpr(arg);
     }
-
+    if (auto result = tryFoldLiteralNegateExpr(expr))
+        return result;
     // if the expression is '&&' or '||', we will convert it
     // to use short-circuit evaluation.
     if (auto newExpr = convertToLogicOperatorExpr(expr))

@@ -499,6 +499,9 @@ public:
     Type* getNoneType() { return m_sharedASTBuilder->getNoneType(); }
     Type* getEnumTypeType() { return m_sharedASTBuilder->getEnumTypeType(); }
     Type* getDiffInterfaceType() { return m_sharedASTBuilder->getDiffInterfaceType(); }
+
+    IntLiteralType* getIntLiteralType(ConstantIntVal* val);
+
     // Construct the type `Ptr<valueType>`, where `Ptr`
     // is looked up as a builtin type.
     PtrType* getPtrType(Type* valueType, AddressSpace addrSpace);

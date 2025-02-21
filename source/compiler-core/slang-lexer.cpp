@@ -678,22 +678,22 @@ IntegerLiteralValue getIntegerLiteralValue(
     UnownedStringSlice* outSuffix,
     bool* outIsDecimalBase)
 {
-    IntegerLiteralValue value = 0;
+    uint64_t value = 0;
 
     const UnownedStringSlice content = token.getContent();
 
     char const* cursor = content.begin();
     char const* end = content.end();
 
-    int base = _readOptionalBase(&cursor);
+    uint32_t base = _readOptionalBase(&cursor);
 
     for (;;)
     {
-        int digit = _maybeReadDigit(&cursor, base);
+        int32_t digit = _maybeReadDigit(&cursor, base);
         if (digit < 0)
             break;
 
-        value = value * base + digit;
+        value = value * base + (uint32_t)digit;
     }
 
     if (outSuffix)
@@ -706,7 +706,7 @@ IntegerLiteralValue getIntegerLiteralValue(
         *outIsDecimalBase = (base == 10);
     }
 
-    return value;
+    return (IntegerLiteralValue)value;
 }
 
 FloatingPointLiteralValue getFloatingPointLiteralValue(

@@ -30,6 +30,20 @@ class InitializerListType : public Type
     Type* _createCanonicalTypeOverride();
 };
 
+// The type of a known int literal that can be coerced to different integer types.
+class IntLiteralType : public Type
+{
+    SLANG_AST_CLASS(IntLiteralType)
+
+    ConstantIntVal* getValue() { return as<ConstantIntVal>(getOperand(0)); }
+    Type* getProperType();
+    IntLiteralType(ConstantIntVal* value) { setOperands(value); }
+
+    // Overrides should be public so base classes can access
+    void _toTextOverride(StringBuilder& out);
+    Type* _createCanonicalTypeOverride();
+};
+
 // The type of an expression that was erroneous
 class ErrorType : public Type
 {

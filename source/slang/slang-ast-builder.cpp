@@ -301,6 +301,11 @@ Type* ASTBuilder::getSpecializedBuiltinType(ArrayView<Val*> genericArgs, const c
     return rsType;
 }
 
+IntLiteralType* ASTBuilder::getIntLiteralType(ConstantIntVal* val)
+{
+    return getOrCreate<IntLiteralType>(val);
+}
+
 PtrType* ASTBuilder::getPtrType(Type* valueType, AddressSpace addrSpace)
 {
     return dynamicCast<PtrType>(getPtrType(valueType, addrSpace, "PtrType"));

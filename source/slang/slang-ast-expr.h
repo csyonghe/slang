@@ -93,6 +93,7 @@ class IntegerLiteralExpr : public LiteralExpr
     SLANG_AST_CLASS(IntegerLiteralExpr)
 
     IntegerLiteralValue value;
+    bool isSigned = false;
 };
 
 class FloatingPointLiteralExpr : public LiteralExpr

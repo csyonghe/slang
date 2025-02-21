@@ -1829,7 +1829,7 @@ void SemanticsDeclHeaderVisitor::checkVarDeclCommon(VarDeclBase* varDecl)
             // literals have a distinct type from the standard int/float types,
             // then we would need to "decay" a literal to an explicit type here.
 
-            varDecl->initExpr = initExpr;
+            varDecl->initExpr = maybeCoerceExprToProperIntType(initExpr);
             varDecl->type.type = initExpr->type;
             _validateCircularVarDefinition(varDecl);
         }
@@ -7680,7 +7680,11 @@ bool SemanticsVisitor::isScalarIntegerType(Type* type)
 {
     auto basicType = as<BasicExpressionType>(type);
     if (!basicType)
+    {
+        if (as<IntLiteralType>(type))
+            return true;
         return false;
+    }
     auto baseType = basicType->getBaseType();
     return isIntegerBaseType(baseType) || baseType == BaseType::Bool;
 }
@@ -7742,6 +7746,10 @@ bool SemanticsVisitor::isIntValueInRangeOfType(IntegerLiteralValue value, Type* 
 
     case BaseType::Half:
         return value >= -2048 && value <= 2048;
+    case BaseType::Float:
+        return value >= -16777216 && value <= 16777216;
+    case BaseType::Double:
+        return value >= -9007199254740992 && value <= 9007199254740992;
     default:
         return false;
     }
@@ -9838,6 +9846,67 @@ bool getExtensionTargetDeclList(
         }
     }
     return targetDecls.getCount() != 0;
+}
+
+IntegerLiteralValue _fixIntegerLiteral(
+    BaseType baseType,
+    IntegerLiteralValue value,
+    Token* token,
+    DiagnosticSink* sink)
+{
+    // TODO(JS):
+    // It is worth noting here that because of the way that the lexer works, that literals
+    // are always handled as if they are positive (a preceding - is taken as a negate on a
+    // positive value).
+    // The code here is designed to work with positive and negative values, as this behavior
+    // might change in the future, and is arguably more 'correct'.
+
+    const BaseTypeInfo& info = BaseTypeInfo::getInfo(baseType);
+    SLANG_ASSERT(info.flags & BaseTypeInfo::Flag::Integer);
+    SLANG_COMPILE_TIME_ASSERT(sizeof(value) == sizeof(uint64_t));
+
+    // If the type is 64 bits, do nothing, we'll assume all is good
+    if (baseType != BaseType::Void && info.sizeInBytes != sizeof(value))
+    {
+        const IntegerLiteralValue signBit = IntegerLiteralValue(1) << (8 * info.sizeInBytes - 1);
+        // Same as (~IntegerLiteralValue(0)) << (8 * info.sizeInBytes);, without the need for
+        // variable shift
+        const IntegerLiteralValue mask = -(signBit + signBit);
+
+        IntegerLiteralValue truncatedValue = value;
+        // If it's signed, and top bit is set, sign extend it negative
+        if (info.flags & BaseTypeInfo::Flag::Signed)
+        {
+            // Sign extend
+            truncatedValue = (value & signBit) ? (value | mask) : (value & ~mask);
+        }
+        else
+        {
+            // 0 top bits
+            truncatedValue = value & ~mask;
+        }
+
+        const IntegerLiteralValue maskedValue = value & mask;
+
+        // If the masked value is 0 or equal to the mask, we 'assume' no information is
+        // lost
+        // This allows for example -1u, to give 0xffffffff
+        // It also means 0xfffffffffffffffffu will give 0xffffffff, without a warning.
+        if ((!(maskedValue == 0 || maskedValue == mask)) && sink && token)
+        {
+            // Output a warning that number has been altered
+            sink->diagnose(
+                *token,
+                Diagnostics::integerLiteralTruncated,
+                token->getContent(),
+                BaseTypeInfo::asText(baseType),
+                truncatedValue);
+        }
+
+        value = truncatedValue;
+    }
+
+    return value;
 }
 
 

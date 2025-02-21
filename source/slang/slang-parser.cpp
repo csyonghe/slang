@@ -6854,125 +6854,6 @@ static FloatFixKind _fixFloatLiteralValue(
     return FloatFixKind::None;
 }
 
-static IntegerLiteralValue _fixIntegerLiteral(
-    BaseType baseType,
-    IntegerLiteralValue value,
-    Token* token,
-    DiagnosticSink* sink)
-{
-    // TODO(JS):
-    // It is worth noting here that because of the way that the lexer works, that literals
-    // are always handled as if they are positive (a preceding - is taken as a negate on a
-    // positive value).
-    // The code here is designed to work with positive and negative values, as this behavior
-    // might change in the future, and is arguably more 'correct'.
-
-    const BaseTypeInfo& info = BaseTypeInfo::getInfo(baseType);
-    SLANG_ASSERT(info.flags & BaseTypeInfo::Flag::Integer);
-    SLANG_COMPILE_TIME_ASSERT(sizeof(value) == sizeof(uint64_t));
-
-    // If the type is 64 bits, do nothing, we'll assume all is good
-    if (baseType != BaseType::Void && info.sizeInBytes != sizeof(value))
-    {
-        const IntegerLiteralValue signBit = IntegerLiteralValue(1) << (8 * info.sizeInBytes - 1);
-        // Same as (~IntegerLiteralValue(0)) << (8 * info.sizeInBytes);, without the need for
-        // variable shift
-        const IntegerLiteralValue mask = -(signBit + signBit);
-
-        IntegerLiteralValue truncatedValue = value;
-        // If it's signed, and top bit is set, sign extend it negative
-        if (info.flags & BaseTypeInfo::Flag::Signed)
-        {
-            // Sign extend
-            truncatedValue = (value & signBit) ? (value | mask) : (value & ~mask);
-        }
-        else
-        {
-            // 0 top bits
-            truncatedValue = value & ~mask;
-        }
-
-        const IntegerLiteralValue maskedValue = value & mask;
-
-        // If the masked value is 0 or equal to the mask, we 'assume' no information is
-        // lost
-        // This allows for example -1u, to give 0xffffffff
-        // It also means 0xfffffffffffffffffu will give 0xffffffff, without a warning.
-        if ((!(maskedValue == 0 || maskedValue == mask)) && sink && token)
-        {
-            // Output a warning that number has been altered
-            sink->diagnose(
-                *token,
-                Diagnostics::integerLiteralTruncated,
-                token->getContent(),
-                BaseTypeInfo::asText(baseType),
-                truncatedValue);
-        }
-
-        value = truncatedValue;
-    }
-
-    return value;
-}
-
-static BaseType _determineNonSuffixedIntegerLiteralType(
-    IntegerLiteralValue value,
-    bool isDecimalBase,
-    Token* token,
-    DiagnosticSink* sink)
-{
-    const uint64_t rawValue = (uint64_t)value;
-
-    /// Non-suffixed integer literal types
-    ///
-    /// The type is the first from the following list in which the value can fit:
-    /// - For decimal bases:
-    ///     - `int`
-    ///     - `int64_t`
-    /// - For non-decimal bases:
-    ///     - `int`
-    ///     - `uint`
-    ///     - `int64_t`
-    ///     - `uint64_t`
-    ///
-    /// The lexer scans the negative(-) part of literal separately, and the value part here
-    /// is always positive hence it is sufficient to only compare with the maximum limits.
-    BaseType baseType;
-    if (rawValue <= INT32_MAX)
-    {
-        baseType = BaseType::Int;
-    }
-    else if ((rawValue <= UINT32_MAX) && !isDecimalBase)
-    {
-        baseType = BaseType::UInt;
-    }
-    else if (rawValue <= INT64_MAX)
-    {
-        baseType = BaseType::Int64;
-    }
-    else
-    {
-        baseType = BaseType::UInt64;
-
-        if (isDecimalBase)
-        {
-            // There is an edge case here where 9223372036854775808 or INT64_MAX + 1
-            // brings us here, but the complete literal is -9223372036854775808 or INT64_MIN and is
-            // valid. Unfortunately because the lexer handles the negative(-) part of the literal
-            // separately it is impossible to know whether the literal has a negative sign or not.
-            // We emit the warning and initially process it as a uint64 anyways, and the negative
-            // sign will be properly parsed and the value will still be properly stored as a
-            // negative INT64_MIN.
-
-            // Decimal integer is too large to be represented as signed.
-            // Output warning that it is represented as unsigned instead.
-            sink->diagnose(*token, Diagnostics::integerLiteralTooLarge);
-        }
-    }
-
-    return baseType;
-}
-
 static bool _isCast(Parser* parser, Expr* expr)
 {
     if (as<PointerTypeExpr>(expr))
@@ -7278,7 +7159,7 @@ static Expr* parseAtomicExpr(Parser* parser)
             const char* const suffixEnd = suffix.end();
             const bool suffixExists = (suffixCursor != suffixEnd);
 
-            // Mark as void, taken as an error
+            // Mark as void as default, which will be eval to a IntLiteralType.
             BaseType suffixBaseType = BaseType::Void;
             if (suffixExists)
             {
@@ -7350,18 +7231,8 @@ static Expr* parseAtomicExpr(Parser* parser)
                     parser->sink->diagnose(token, Diagnostics::invalidIntegerLiteralSuffix, suffix);
                     suffixBaseType = BaseType::Int;
                 }
+                value = _fixIntegerLiteral(suffixBaseType, value, &token, parser->sink);
             }
-            else
-            {
-                suffixBaseType = _determineNonSuffixedIntegerLiteralType(
-                    value,
-                    isDecimalBase,
-                    &token,
-                    parser->sink);
-            }
-
-            value = _fixIntegerLiteral(suffixBaseType, value, &token, parser->sink);
-
 
             constExpr->value = value;
             constExpr->suffixType = suffixBaseType;

@@ -1677,12 +1677,11 @@ DIAGNOSTIC(
     integerLiteralTooLarge,
     "integer literal is too large to be represented in a signed integer type, interpreting as "
     "unsigned")
-
 DIAGNOSTIC(
     39999,
     Warning,
     integerLiteralTruncated,
-    "integer literal '$0' too large for type '$1' truncated to '$2'")
+    "integer literal '$0' out of range for type '$1' truncated to '$2'")
 DIAGNOSTIC(
     39999,
     Warning,

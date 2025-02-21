@@ -59,7 +59,7 @@ namespace Slang
 Type* SemanticsVisitor::TryJoinVectorAndScalarType(
     ConstraintSystem* constraints,
     VectorExpressionType* vectorType,
-    BasicExpressionType* scalarType)
+    Type* scalarType)
 {
     // Join( vector<T,N>, S ) -> vetor<Join(T,S), N>
     //
@@ -232,13 +232,18 @@ Type* SemanticsVisitor::TryJoinTypes(ConstraintSystem* constraints, QualType lef
     if (left->equals(right))
         return left;
 
+    auto leftBasic = as<BasicExpressionType>(left);
+    auto leftLit = as<IntLiteralType>(left);
+    auto rightBasic = as<BasicExpressionType>(right);
+    auto rightLit = as<IntLiteralType>(right);
+
     // We can join two basic types by picking the "better" of the two
-    if (auto leftBasic = as<BasicExpressionType>(left))
+    if (leftBasic || leftLit)
     {
-        if (auto rightBasic = as<BasicExpressionType>(right))
+        if (rightBasic || rightLit)
         {
-            auto costConvertRightToLeft = getConversionCost(leftBasic, right);
-            auto costConvertLeftToRight = getConversionCost(rightBasic, left);
+            auto costConvertRightToLeft = getConversionCost(left, right);
+            auto costConvertLeftToRight = getConversionCost(right, left);
 
             // Return the one that had lower conversion cost.
             if (costConvertRightToLeft > costConvertLeftToRight)
@@ -252,7 +257,7 @@ Type* SemanticsVisitor::TryJoinTypes(ConstraintSystem* constraints, QualType lef
         // We can also join a vector and a scalar
         if (auto rightVector = as<VectorExpressionType>(right))
         {
-            return TryJoinVectorAndScalarType(constraints, rightVector, leftBasic);
+            return TryJoinVectorAndScalarType(constraints, rightVector, left);
         }
     }
 
@@ -278,11 +283,17 @@ Type* SemanticsVisitor::TryJoinTypes(ConstraintSystem* constraints, QualType lef
         }
 
         // We can also join a vector and a scalar
-        if (auto rightBasic = as<BasicExpressionType>(right))
+        if (rightBasic || rightLit)
         {
-            return TryJoinVectorAndScalarType(constraints, leftVector, rightBasic);
+            return TryJoinVectorAndScalarType(constraints, leftVector, right);
         }
+    
     }
+
+    if (leftLit)
+        left = leftLit->getProperType();
+    if (rightLit)
+        right = rightLit->getProperType();
 
     // HACK: trying to work trait types in here...
     if (auto leftDeclRefType = as<DeclRefType>(left))

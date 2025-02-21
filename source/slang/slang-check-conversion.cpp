@@ -1089,6 +1089,109 @@ ConversionCost SemanticsVisitor::getImplicitConversionCostWithKnownArg(
     return candidateCost;
 }
 
+bool SemanticsVisitor::coerceIntLitToBaseType(
+    IntLiteralType* fromType,
+    BasicExpressionType* toType,
+    Expr** outToExpr,
+    ConversionCost* outCost,
+    SourceLoc loc)
+{
+    if (toType->getBaseType() == BaseType::Void)
+        return false;
+
+    ConstantIntVal* value = fromType->getValue();
+    ConversionCost cost = 0;
+    if (!isIntValueInRangeOfType(value->getValue(), toType))
+    {
+        switch (toType->getBaseType())
+        {
+        case BaseType::Half:
+            cost = kConversionCost_IntegerToHalfConversion;
+            break;
+        case BaseType::Float:
+        case BaseType::Double:
+            cost = kConversionCost_IntegerToFloatConversion;
+            break;
+        default:
+            cost = kConversionCost_IntegerTruncate;
+            break;
+        }
+    }
+    else
+    {
+        if (toType != fromType->getProperType())
+        {
+            switch (toType->getBaseType())
+            {
+            case BaseType::UInt:
+            case BaseType::UInt16:
+            case BaseType::UInt8:
+                cost = kConversionCost_InRangeIntLitSignedToUnsignedConversion;
+                break;
+            default:
+                cost = kConversionCost_InRangeIntLitConversion;
+                break;
+            }
+        }
+    }
+    if (outCost)
+        *outCost = cost;
+    if (outToExpr)
+    {
+        switch (toType->getBaseType())
+        {
+        case BaseType::Half:
+        case BaseType::Float:
+        case BaseType::Double:
+            {
+                auto floatLit = m_astBuilder->create<FloatingPointLiteralExpr>();
+                floatLit->loc = loc;
+                floatLit->type = QualType(toType);
+                floatLit->value = (FloatingPointLiteralValue)value->getValue();
+                *outToExpr = floatLit;
+            }
+            break;
+        default:
+            {
+                auto intLit = m_astBuilder->create<IntegerLiteralExpr>();
+                intLit->loc = loc;
+                intLit->type = QualType(toType);
+                intLit->value =
+                    _fixIntegerLiteral(toType->getBaseType(), value->getValue(), nullptr, nullptr);
+                *outToExpr = intLit;
+            }
+            break;
+        }
+    }
+    return true;
+}
+
+Expr* SemanticsVisitor::maybeCoerceExprToProperIntType(Expr* expr)
+{
+    auto intLitExpr = as<IntegerLiteralExpr>(expr);
+    if (!intLitExpr)
+    {
+        SLANG_ASSERT(!as<IntLiteralType>(expr->type.type));
+        return expr;
+    }
+    auto intLitType = as<IntLiteralType>(expr->type.type);
+    expr->type.type = intLitType->getProperType();
+    return expr;
+}
+
+BasicExpressionType* SemanticsVisitor::getProperTypeForIntLit(IntegerLiteralValue value, bool isSigned)
+{
+    if (value >= std::numeric_limits<int32_t>::min() &&
+        value <= std::numeric_limits<int32_t>::max())
+        return (BasicExpressionType*)m_astBuilder->getBuiltinType(BaseType::Int);
+    if (value >= std::numeric_limits<uint32_t>::min() &&
+        value <= std::numeric_limits<uint32_t>::max())
+        return (BasicExpressionType*)m_astBuilder->getBuiltinType(BaseType::UInt);
+    if (isSigned || value >= 0 && value <= std::numeric_limits<int64_t>::max())
+        return (BasicExpressionType*)m_astBuilder->getBuiltinType(BaseType::Int64);
+    return (BasicExpressionType*)m_astBuilder->getBuiltinType(BaseType::UInt64);
+}
+
 bool SemanticsVisitor::_coerce(
     CoercionSite site,
     Type* toType,
@@ -1313,6 +1416,25 @@ bool SemanticsVisitor::_coerce(
             *outToExpr = resultExpr;
         }
         return true;
+    }
+
+    if (auto fromIntLitType = as<IntLiteralType>(fromType))
+    {
+        auto toBasicType = as<BasicExpressionType>(toType);
+        if (!toBasicType)
+        {
+            if (auto toLitType = as<IntLiteralType>(toType))
+                toBasicType = (BasicExpressionType*)toLitType->getProperType();
+        }
+        if (toBasicType)
+        {
+            return coerceIntLitToBaseType(
+                fromIntLitType,
+                toBasicType,
+                outToExpr,
+                outCost,
+                fromExpr ? fromExpr->loc : SourceLoc());
+        }
     }
 
     // A enum type can be converted into its underlying tag type.
@@ -1671,8 +1793,7 @@ bool SemanticsVisitor::_coerce(
             }
             else if (cost >= kConversionCost_Default)
             {
-                // For general types of implicit conversions, we issue a warning, unless `fromExpr`
-                // is a known constant and we know it won't cause a problem.
+                // For general types of implicit conversions, we issue a warning.
                 bool shouldEmitGeneralWarning = true;
                 if (isScalarIntegerType(toType) || isHalfType(toType))
                 {

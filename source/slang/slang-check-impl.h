@@ -1629,6 +1629,18 @@ public:
     /// Report that implicit type coercion is not possible.
     bool _failedCoercion(Type* toType, Expr** outToExpr, Expr* fromExpr);
 
+    // Coerce a int literal to a base type.
+    bool coerceIntLitToBaseType(
+        IntLiteralType* fromType,
+        BasicExpressionType* toType,
+        Expr** outToExpr,
+        ConversionCost* outCost,
+        SourceLoc loc);
+
+    Expr* maybeCoerceExprToProperIntType(Expr* expr);
+
+    BasicExpressionType* getProperTypeForIntLit(IntegerLiteralValue value, bool isSigned);
+
     /// Central engine for implementing implicit coercion logic
     ///
     /// This function tries to find an implicit conversion path from
@@ -2258,7 +2270,7 @@ public:
     Type* TryJoinVectorAndScalarType(
         ConstraintSystem* constraints,
         VectorExpressionType* vectorType,
-        BasicExpressionType* scalarType);
+        Type* scalarType);
 
     /// Is the given interface one that a tagged-union type can conform to?
     ///
@@ -2880,6 +2892,8 @@ public:
 
     Expr* visitInvokeExpr(InvokeExpr* expr);
 
+    Expr* tryFoldLiteralNegateExpr(InvokeExpr* expr);
+
     Expr* visitSelectExpr(SelectExpr* expr);
 
     Expr* visitVarExpr(VarExpr* expr);
@@ -3104,5 +3118,13 @@ bool getExtensionTargetDeclList(
     DeclRefType* targetDeclRefType,
     ExtensionDecl* extDeclRef,
     ShortList<AggTypeDecl*>& targetDecls);
+
+
+IntegerLiteralValue _fixIntegerLiteral(
+    BaseType baseType,
+    IntegerLiteralValue value,
+    Token* token,
+    DiagnosticSink* sink);
+
 
 } // namespace Slang

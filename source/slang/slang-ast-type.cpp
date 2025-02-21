@@ -78,6 +78,22 @@ Type* InitializerListType::_createCanonicalTypeOverride()
     return this;
 }
 
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! IntLiteralType !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Type* IntLiteralType::getProperType()
+{
+    return getValue()->getType();
+}
+
+void IntLiteralType::_toTextOverride(StringBuilder& out)
+{
+    out << toSlice("int-literal");
+}
+
+Type* IntLiteralType::_createCanonicalTypeOverride()
+{
+    return this;
+}
+
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ErrorType !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 void ErrorType::_toTextOverride(StringBuilder& out)
