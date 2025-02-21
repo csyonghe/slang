@@ -1312,6 +1312,7 @@ Linkage::~Linkage()
             globalSession->getTypeCheckingCache()->resolvedOperatorOverloadCache.getCount() <
                 getTypeCheckingCache()->resolvedOperatorOverloadCache.getCount())
         {
+            getTypeCheckingCache()->version++;
             globalSession->m_typeCheckingCache = m_typeCheckingCache;
         }
     }
