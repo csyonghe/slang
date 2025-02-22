@@ -7707,7 +7707,12 @@ bool SemanticsVisitor::isIntValueInRangeOfType(IntegerLiteralValue value, Type* 
 {
     auto basicType = as<BasicExpressionType>(type);
     if (!basicType)
-        return false;
+    {
+        if (auto litType = as<IntLiteralType>(type))
+            basicType = (BasicExpressionType*)litType->getProperType();
+        else
+            return false;
+    }
 
     switch (basicType->getBaseType())
     {

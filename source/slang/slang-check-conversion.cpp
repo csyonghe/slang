@@ -43,7 +43,7 @@ bool SemanticsVisitor::isEffectivelyScalarForInitializerLists(Type* type)
     if (as<MatrixExpressionType>(type))
         return false;
 
-    if (as<BasicExpressionType>(type))
+    if (as<BasicExpressionType>(type) || as<IntLiteralType>(type))
     {
         return true;
     }
@@ -996,7 +996,11 @@ static bool isSigned(Type* t)
 {
     auto basicType = as<BasicExpressionType>(t);
     if (!basicType)
+    {
+        if (auto litType = as<IntLiteralType>(t))
+            return isSigned(litType->getProperType());
         return false;
+    }
     switch (basicType->getBaseType())
     {
     case BaseType::Int8:
@@ -1014,7 +1018,11 @@ int getTypeBitSize(Type* t)
 {
     auto basicType = as<BasicExpressionType>(t);
     if (!basicType)
+    {
+        if (auto litType = as<IntLiteralType>(t))
+            return getTypeBitSize(litType->getProperType());
         return 0;
+    }
 
     switch (basicType->getBaseType())
     {

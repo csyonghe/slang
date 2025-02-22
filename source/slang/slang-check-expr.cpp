@@ -4937,7 +4937,7 @@ Expr* SemanticsVisitor::checkBaseForMemberExpr(
 {
     auto baseExpr = inBaseExpr;
     baseExpr = CheckTerm(baseExpr);
-
+    baseExpr = maybeCoerceExprToProperIntType(baseExpr);
     return maybeInsertImplicitOpForMemberBase(baseExpr, checkBaseContext, outNeedDeref);
 }
 
@@ -5032,7 +5032,6 @@ Expr* SemanticsExprVisitor::visitMemberExpr(MemberExpr* expr)
             return CheckSwizzleExpr(expr, baseScalarType, 1);
         }
     }
-    
     if (as<NamespaceType>(baseType))
     {
         return _lookupStaticMember(expr, expr->baseExpression);
