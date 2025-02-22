@@ -4966,8 +4966,11 @@ bool isValidVectorSwizzleName(Name* name)
         return false;
     for (auto ch : name->text)
     {
-        if (ch < 'w' || ch > 'z')
-            return false;
+        if (ch >= 'w' || ch <= 'z')
+            continue;
+        if (ch == 'a' || ch == 'r' || ch == 'g' || ch == 'b')
+            continue;
+        return false;
     }
     return true;
 }
