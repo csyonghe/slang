@@ -1919,7 +1919,7 @@ bool SemanticsVisitor::canCoerce(
 
     BasicTypeKeyPair cacheKey;
     cacheKey.type1 = makeBasicTypeKey(toType);
-    cacheKey.type2 = makeBasicTypeKey(fromType, fromExpr);
+    cacheKey.type2 = makeBasicTypeKey(fromType);
 
     if (cacheKey.isValid())
     {

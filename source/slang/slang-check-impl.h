@@ -102,19 +102,25 @@ SLANG_FORCE_INLINE BasicTypeKey makeBasicTypeKey(
         0};
 }
 
-inline BasicTypeKey makeBasicTypeKey(QualType typeIn, Expr* exprIn = nullptr)
+inline BasicTypeKey makeBasicTypeKey(QualType typeIn)
 {
     if (auto basicType = as<BasicExpressionType>(typeIn))
     {
         auto rs = makeBasicTypeKey(basicType->getBaseType());
-        if (auto constInt = as<IntegerLiteralExpr>(exprIn))
+        rs.isLValue = typeIn.isLeftValue ? 1u : 0u;
+        return rs;
+    }
+    else if (auto litType = as<IntLiteralType>(typeIn))
+    {
+        auto constInt = litType->getValue();
+        auto baseType = as<BasicExpressionType>(constInt->getType())->getBaseType();
+        auto rs = makeBasicTypeKey(baseType);
+        if (constInt->getValue() < 0 && 
+            baseType != BaseType::UInt64)
         {
-            if (constInt->value < 0)
-            {
-                rs.knownNegative = 1;
-            }
-            rs.knownConstantBitCount = getIntValueBitSize(constInt->value);
+            rs.knownNegative = 1;
         }
+        rs.knownConstantBitCount = getIntValueBitSize(constInt->getValue());
         rs.isLValue = typeIn.isLeftValue ? 1u : 0u;
         return rs;
     }
@@ -195,7 +201,7 @@ struct OperatorOverloadCacheKey
 
         for (Index i = 0; i < opExpr->arguments.getCount(); i++)
         {
-            auto key = makeBasicTypeKey(opExpr->arguments[i]->type, opExpr->arguments[i]);
+            auto key = makeBasicTypeKey(opExpr->arguments[i]->type);
             if (key.getRaw() == BasicTypeKey::invalid().getRaw())
             {
                 return false;
