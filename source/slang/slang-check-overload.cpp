@@ -1617,6 +1617,12 @@ int SemanticsVisitor::CompareOverloadCandidates(OverloadCandidate* left, Overloa
     // the costs of their type conversion sequences
     if (left->status == OverloadCandidate::Status::Applicable)
     {
+        // If there is explicit overload rank, respect that.
+        auto overloadRankDiff =
+            getOverloadRank(right->item.declRef) - getOverloadRank(left->item.declRef);
+        if (overloadRankDiff)
+            return overloadRankDiff;
+
         // If one candidate incurred less cost related to
         // implicit conversion of arguments to matching
         // parameter types, then we should prefer that
@@ -1731,12 +1737,6 @@ int SemanticsVisitor::CompareOverloadCandidates(OverloadCandidate* left, Overloa
         auto scopeRank = getScopeRank(left->item.declRef, right->item.declRef, this->m_outerScope);
         if (scopeRank)
             return scopeRank;
-
-        // If we reach here, we will attempt to use overload rank to break the ties.
-        auto overloadRankDiff =
-            getOverloadRank(right->item.declRef) - getOverloadRank(left->item.declRef);
-        if (overloadRankDiff)
-            return overloadRankDiff;
     }
 
     return 0;

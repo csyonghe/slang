@@ -1903,8 +1903,22 @@ vector<bool, N> __vectorEql<T, let N : int>(vector<T, N> left, vector<T, N> righ
 __generic<T:__BuiltinIntegerType, let N : int>
 extension vector<T,N> : IInteger
 {
-    [__unsafeForceInlineEarly] bool lessThan(This other) { return this[0] < other[0]; }
-    [__unsafeForceInlineEarly] bool lessThanOrEquals(This other) { return this[0] <= other[0]; }
+    [__unsafeForceInlineEarly] bool lessThan(This other)
+    {
+        [ForceUnroll]
+        for (int i = 0; i < N; i++)
+            if (this[i] < other[i])
+                return true;
+        return false;
+    }
+    [__unsafeForceInlineEarly] bool lessThanOrEquals(This other)
+    {
+        [ForceUnroll]
+        for (int i = 0; i < N; i++)
+            if (this[i] <= other[i])
+                return true;
+        return false;
+    }
     [__unsafeForceInlineEarly] bool equals(This other) { return all(__vectorEql(this, other)); }
     __intrinsic_op($(kIROp_Add)) This add(This other);
     __intrinsic_op($(kIROp_Sub)) This sub(This other);
@@ -2032,8 +2046,20 @@ extension vector<T,N> : IDifferentiable
 __generic<T:__BuiltinFloatingPointType, let N : int, let M : int, let L : int>
 extension matrix<T,N,M,L> : IFloat
 {
-    [TreatAsDifferentiable][__unsafeForceInlineEarly] bool lessThan(This other) { return this < other; }
-    [TreatAsDifferentiable][__unsafeForceInlineEarly] bool lessThanOrEquals(This other) { return this <= other; }
+    [TreatAsDifferentiable] [__unsafeForceInlineEarly] bool lessThan(This other)
+    {
+        [ForceUnroll]
+        for (int i = 0; i < N; i++)
+            if (this[i].lessThan(other[i])) return true;
+        return false;
+    }
+    [TreatAsDifferentiable] [__unsafeForceInlineEarly] bool lessThanOrEquals(This other)
+    {
+        [ForceUnroll]
+        for (int i = 0; i < N; i++)
+            if (this[i].lessThanOrEquals(other[i])) return true;
+        return false;
+    }
     [TreatAsDifferentiable][__unsafeForceInlineEarly] bool equals(This other) { return all(this == other); }
     [TreatAsDifferentiable] __intrinsic_op($(kIROp_Add)) This add(This other);
     [TreatAsDifferentiable] __intrinsic_op($(kIROp_Sub)) This sub(This other);
