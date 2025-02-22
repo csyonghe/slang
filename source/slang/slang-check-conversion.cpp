@@ -1439,6 +1439,7 @@ bool SemanticsVisitor::_coerce(
                 outCost,
                 fromExpr ? fromExpr->loc : SourceLoc());
         }
+        fromType = fromIntLitType->getProperType();
     }
 
     // A enum type can be converted into its underlying tag type.

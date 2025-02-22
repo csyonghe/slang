@@ -573,10 +573,13 @@ DeclRef<Decl> SemanticsVisitor::trySolveConstraintSystem(
             }
             auto& types = solvedArgs[typeParam->parameterIndex].types;
             // Fail if any of the resolved type element is empty.
-            for (auto t : types)
+            for (auto& t : types)
             {
                 if (!t)
                     return DeclRef<Decl>();
+                // If the resolved type is an integer literal type, we should use its proper type.
+                if (auto litType = as<IntLiteralType>(t))
+                    t = litType->getProperType();
             }
             if (!isPack)
             {
