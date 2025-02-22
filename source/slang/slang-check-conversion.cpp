@@ -1128,6 +1128,13 @@ bool SemanticsVisitor::coerceIntLitToBaseType(
             case BaseType::UInt8:
                 cost = kConversionCost_InRangeIntLitSignedToUnsignedConversion;
                 break;
+            case BaseType::Float:
+            case BaseType::Double:
+                cost = kConversionCost_IntegerToFloatConversion;
+                break;
+            case BaseType::Half:
+                cost = kConversionCost_IntegerToHalfConversion;
+                break;
             default:
                 cost = kConversionCost_InRangeIntLitConversion;
                 break;
@@ -1418,15 +1425,12 @@ bool SemanticsVisitor::_coerce(
         return true;
     }
 
+     if (auto toLitType = as<IntLiteralType>(toType))
+        toType = (BasicExpressionType*)toLitType->getProperType();
+
     if (auto fromIntLitType = as<IntLiteralType>(fromType))
     {
-        auto toBasicType = as<BasicExpressionType>(toType);
-        if (!toBasicType)
-        {
-            if (auto toLitType = as<IntLiteralType>(toType))
-                toBasicType = (BasicExpressionType*)toLitType->getProperType();
-        }
-        if (toBasicType)
+        if (auto toBasicType = as<BasicExpressionType>(toType))
         {
             return coerceIntLitToBaseType(
                 fromIntLitType,
