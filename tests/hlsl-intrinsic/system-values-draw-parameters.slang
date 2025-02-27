@@ -27,17 +27,18 @@ VSOutput main(VSInput input,
     float y = (float)(input.instanceID + startInstanceLocation) * 0.2f;
     output.position = float4(x, y, 0.0f, 1.0f) * scales[viewIndex];
 
-    // CHECK_SPIRV: BuiltIn BaseVertex
+    // CHECK_SPIRV: OpEntryPoint
+    // xCHECK_SPIRV: BuiltIn BaseVertex
     // CHECK_GLSL: gl_BaseVertex
     // CHECK_HLSL: SV_StartVertexLocation
     // CHECK_METAL: base_vertex
 
-    // CHECK_SPIRV: BuiltIn BaseInstance
+    // xCHECK_SPIRV: BuiltIn BaseInstance
     // CHECK_GLSL: gl_BaseInstance
     // CHECK_HLSL: SV_StartInstanceLocation
     // CHECK_METAL: base_instance
 
-    // CHECK_SPIRV: BuiltIn ViewIndex
+    // xCHECK_SPIRV: BuiltIn ViewIndex
     // CHECK_GLSL: gl_ViewIndex
     // CHECK_HLSL: SV_ViewID
     // CHECK_METAL: amplification_id
