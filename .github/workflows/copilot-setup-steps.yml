@@ -23,14 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-            submodules: "recursive"
-            fetch-depth: "2"
+          submodules: "recursive"
+          fetch-depth: "2"
       - name: setup environment
         run: |
-            sudo apt-get update
-            sudo apt-get install -y libx11-dev
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev
       - name: Build
         run: |
-            cmake --preset default --fresh
-            cmake --workflow --preset debug
-            
+          cmake --preset default --fresh
+          cmake --workflow --preset debug
