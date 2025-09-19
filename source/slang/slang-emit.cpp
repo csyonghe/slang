@@ -1708,6 +1708,7 @@ Result linkAndOptimizeIR(
         if (targetProgram->getOptionSet().getBoolOption(
                 CompilerOptionName::EnableExperimentalPasses))
             introduceExplicitGlobalContext(irModule, target);
+        transformParamsToConstRef(irModule, codeGenContext->getSink());
 #if 0
         dumpIRIfEnabled(codeGenContext, irModule, "EXPLICIT GLOBAL CONTEXT INTRODUCED");
 #endif
