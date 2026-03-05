@@ -3,12 +3,15 @@
 #
 
 #
-# Neural module configuration
-# SLANG_STANDARD_MODULE_DIR_NAME is the output directory name for all the standard modules, currently there is only neural module
+# Standard module configuration
+# SLANG_STANDARD_MODULE_DIR_NAME is the output directory name for all standard modules.
 set(SLANG_STANDARD_MODULE_DIR_NAME "slang-standard-module-${SLANG_VERSION_NUMERIC}" CACHE STRING "Directory name for standard module")
 
 # SLANG_NEURAL_MODULE_FILE_NAME is the file name for the neural module
 set(SLANG_NEURAL_MODULE_FILE_NAME "neural.slang-module" CACHE STRING "module file name for neural module")
+
+# SLANG_TILE_MODULE_FILE_NAME is the file name for the tile module
+set(SLANG_TILE_MODULE_FILE_NAME "tile.slang-module" CACHE STRING "module file name for tile module")
 
 # Determine the library directory based on platform
 # On Windows: shared libraries (.dll) go to bin/
@@ -39,5 +42,6 @@ add_custom_target(
 )
 set_target_properties(generate_standard_module_config_header PROPERTIES FOLDER "generated")
 
-# Build the neural module
+# Build standard modules
 add_subdirectory(neural)
+add_subdirectory(tile)
