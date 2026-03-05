@@ -23,6 +23,8 @@ public:
     }
     bool isFp8Required() { return m_requireFp8; }
     bool isBfloat16Required() { return m_requireBF16; }
+    bool isTileRequired() { return m_requireTile; }
+
     void requireBaseTypes(BaseTypeFlags flags) { m_baseTypeFlags |= flags; }
 
     /// Ensure that the generated code is compiled for at least CUDA SM `version`
@@ -31,6 +33,8 @@ public:
         m_smVersion = (smVersion > m_smVersion) ? smVersion : m_smVersion;
     }
 
+    void requireTile() { m_requireTile = true; }
+
     /// Should be called before reading out values.
     void finalize();
 
@@ -38,6 +42,7 @@ protected:
     static BaseTypeFlags _getFlag(BaseType baseType) { return BaseTypeFlags(1) << int(baseType); }
     bool m_requireBF16 = false;
     bool m_requireFp8 = false;
+    bool m_requireTile = false;
     BaseTypeFlags m_baseTypeFlags = 0;
 };
 

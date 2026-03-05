@@ -446,6 +446,8 @@ static Slang::String SlangStageToString(const SlangStage stage)
         CASE(SLANG_STAGE_CALLABLE);
         CASE(SLANG_STAGE_MESH);
         CASE(SLANG_STAGE_AMPLIFICATION);
+        CASE(SLANG_STAGE_DISPATCH);
+        CASE(SLANG_STAGE_TILE);
     default:
         Slang::StringBuilder str;
         str << "Unknown SlangStage: " << static_cast<uint32_t>(stage);

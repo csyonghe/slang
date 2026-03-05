@@ -16,7 +16,7 @@ struct Parameters
     float scale;
 }
 
-// CUDA: __device__ Parameters_[[#]] processParameters(uint idx_[[#]], CommonParameters_[[#]] commonParams_[[#]])
+// CUDA: SLANG_CUDA_GENERAL_DEVICE Parameters_[[#]] processParameters(uint idx_[[#]], CommonParameters_[[#]] commonParams_[[#]])
 [CudaDeviceExport]
 Parameters processParameters(uint idx, CommonParameters commonParams)
 {

@@ -112,6 +112,9 @@ Stages
 `tesseval`
 > Tessellation Evaluation shader stage
 
+`tile`
+> Tile shader and capabilities
+
 `vertex`
 > Vertex shader stage
 

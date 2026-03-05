@@ -183,7 +183,12 @@ static void emitReflectionVarBindingInfoJSON(
         case SLANG_STAGE_AMPLIFICATION:
             stageName = "amplification";
             break;
-
+        case SLANG_STAGE_DISPATCH:
+            stageName = "dispatch";
+            break;
+        case SLANG_STAGE_TILE:
+            stageName = "tile";
+            break;
         default:
             break;
         }

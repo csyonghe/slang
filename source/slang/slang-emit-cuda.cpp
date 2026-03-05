@@ -171,7 +171,7 @@ void CUDASourceEmitter::emitTempModifiers(IRInst* temp)
     CPPSourceEmitter::emitTempModifiers(temp);
     if (as<IRModuleInst>(temp->getParent()))
     {
-        m_writer->emit("__device__ ");
+        m_writer->emit("SLANG_CUDA_GENERAL_DEVICE ");
     }
 }
 
@@ -363,9 +363,19 @@ void CUDASourceEmitter::emitFunctionPreambleImpl(IRInst* inst)
 {
     if (!inst)
         return;
-    if (inst->findDecoration<IREntryPointDecoration>())
+    if (auto entryPointDecor = inst->findDecoration<IREntryPointDecoration>())
     {
-        m_writer->emit("extern \"C\" __global__ ");
+        m_writer->emit("extern \"C\" ");
+        switch (entryPointDecor->getProfile().getStage())
+        {
+        case Stage::Tile:
+            m_extensionTracker->requireTile();
+            m_writer->emit("__tile_global__ ");
+            break;
+        default:
+            m_writer->emit("__global__ ");
+            break;
+        }
         return;
     }
 
@@ -379,7 +389,7 @@ void CUDASourceEmitter::emitFunctionPreambleImpl(IRInst* inst)
     }
     else
     {
-        m_writer->emit("__device__ ");
+        m_writer->emit("SLANG_CUDA_GENERAL_DEVICE ");
     }
 }
 
@@ -1303,10 +1313,9 @@ SlangResult CUDASourceEmitter::emitWMMAFragmentType(
     IRCoopMatrixType* coopMatType,
     StringBuilder& outStr)
 {
-    uint32_t rowCount = (uint32_t) static_cast<IRIntLit*>(coopMatType->getRowCount())->getValue();
-    uint32_t colCount =
-        (uint32_t) static_cast<IRIntLit*>(coopMatType->getColumnCount())->getValue();
-    uint32_t matrixUse = (uint32_t) static_cast<IRIntLit*>(coopMatType->getMatrixUse())->getValue();
+    uint32_t rowCount = (uint32_t)static_cast<IRIntLit*>(coopMatType->getRowCount())->getValue();
+    uint32_t colCount = (uint32_t)static_cast<IRIntLit*>(coopMatType->getColumnCount())->getValue();
+    uint32_t matrixUse = (uint32_t)static_cast<IRIntLit*>(coopMatType->getMatrixUse())->getValue();
 
     auto elementType = coopMatType->getElementType();
     StringBuilder elementTypeSB;

@@ -850,6 +850,7 @@ typedef uint32_t SlangSizeT;
         SLANG_STAGE_MESH,
         SLANG_STAGE_AMPLIFICATION,
         SLANG_STAGE_DISPATCH,
+        SLANG_STAGE_TILE,
         //
         SLANG_STAGE_COUNT,
 

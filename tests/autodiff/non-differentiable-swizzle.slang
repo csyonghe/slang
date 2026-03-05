@@ -2,7 +2,7 @@
 
 // This test just needs to compile without crashing.
 
-// CUDA: __device__ void s_bwd_myKernel_0
+// CUDA: SLANG_CUDA_GENERAL_DEVICE void s_bwd_myKernel_0
 
 [Differentiable]
 uint3 load_foo(int32_t g_idx, TensorView<int32_t> indices)

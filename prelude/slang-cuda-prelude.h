@@ -9,6 +9,12 @@
 #define SLANG_CUDA_RTC 0
 #endif
 
+#ifdef SLANG_CUDA_ENABLE_TILE
+#define SLANG_CUDA_GENERAL_DEVICE __tile__ __device__
+#else
+#define SLANG_CUDA_GENERAL_DEVICE __device__
+#endif
+
 #if SLANG_CUDA_RTC
 
 #else
@@ -209,56 +215,32 @@ struct __align__(1) bool1
 {
     bool x;
 
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
-    {
-        return (&x)[idx];
-    }
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
-    {
-        return (&x)[idx];
-    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx) { return (&x)[idx]; }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const { return (&x)[idx]; }
 };
 
 struct __align__(2) bool2
 {
     bool x, y;
 
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
-    {
-        return (&x)[idx];
-    }
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
-    {
-        return (&x)[idx];
-    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx) { return (&x)[idx]; }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const { return (&x)[idx]; }
 };
 
 struct __align__(1) bool3
 {
     bool x, y, z;
 
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
-    {
-        return (&x)[idx];
-    }
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
-    {
-        return (&x)[idx];
-    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx) { return (&x)[idx]; }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const { return (&x)[idx]; }
 };
 
 struct __align__(4) bool4
 {
     bool x, y, z, w;
 
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx)
-    {
-        return (&x)[idx];
-    }
-    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const
-    {
-        return (&x)[idx];
-    }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL bool& operator[](int idx) { return (&x)[idx]; }
+    SLANG_FORCE_INLINE SLANG_CUDA_CALL const bool& operator[](int idx) const { return (&x)[idx]; }
 };
 
 SLANG_FORCE_INLINE SLANG_CUDA_CALL bool __ldg(const bool* ptr)

@@ -4,7 +4,7 @@
 //CHECK: #include "{{.*}}slang-cuda-prelude.h"
 
 // see "sharedMemory" below
-//CHECK: __device__ __shared__ FixedArray<float, 4>  sharedMemory;
+//CHECK: SLANG_CUDA_GENERAL_DEVICE __shared__ FixedArray<float, 4>  sharedMemory;
 
 //CHECK: struct Struct
 //CHECK: {

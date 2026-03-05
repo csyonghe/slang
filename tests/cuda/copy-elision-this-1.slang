@@ -8,7 +8,7 @@ struct Data {
     StructuredBuffer<uint> index_buffer;
     uint index_count;
 
-    // CUDA: __device__ float Data_fetch{{.*}}(int {{.*}}, int {{.*}})
+    // CUDA: SLANG_CUDA_GENERAL_DEVICE float Data_fetch{{.*}}(int {{.*}}, int {{.*}})
     // CUDA-NEXT: {
     // CUDA-NEXT: globalParams{{.*}}->data{{.*}}->input{{.*}}[{{.*}}]
     float fetch(int buffer, int index)

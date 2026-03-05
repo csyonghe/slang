@@ -173,6 +173,9 @@ struct DownstreamCompileOptions
             EnableFloat8 = 0x10,         ///< If set compiles with support for float8
             EnableBfloat16 = 0x20,       ///< If set compiles with support for bfloat16
 
+            EnableTile =
+                0x40, ///< If set compiles with support for tile shader stage (e.g. in DX12)
+
         };
     };
 

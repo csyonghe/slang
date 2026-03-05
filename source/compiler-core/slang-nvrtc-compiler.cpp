@@ -145,6 +145,10 @@ protected:
         const CompileOptions& options,
         CommandLine& ioCmdLine,
         IArtifactDiagnostics* diagnostics);
+    SlangResult _maybeAddTileSupport(
+        const DownstreamCompileOptions& options,
+        CommandLine& ioCmdLine,
+        IArtifactDiagnostics* diagnostics);
 
 #define SLANG_NVTRC_MEMBER_FUNCS(ret, name, params) ret(*m_##name) params;
 
@@ -164,6 +168,8 @@ protected:
 
     List<String> m_fp8FoundPaths;
     List<String> m_bf16FoundPaths;
+
+    List<String> m_cudaTileFoundPaths;
 
     bool m_optixIncludeSearched = false;
     // Holds location of where include (for optix.h) is found.
@@ -652,6 +658,7 @@ static const UnownedStringSlice g_fp16HeaderName = UnownedStringSlice::fromLiter
 static const UnownedStringSlice g_fp8HeaderName = UnownedStringSlice::fromLiteral("cuda_fp8.h");
 static const UnownedStringSlice g_bf16HeaderName = UnownedStringSlice::fromLiteral("cuda_bf16.h");
 static const UnownedStringSlice g_optixHeaderName = UnownedStringSlice::fromLiteral("optix.h");
+static const UnownedStringSlice g_tileHeaderName = UnownedStringSlice::fromLiteral("cuda_tile.h");
 
 
 SlangResult _findFileInIncludePath(
@@ -1139,6 +1146,56 @@ SlangResult NVRTCDownstreamCompiler::_maybeAddFp8Bf16Support(
     return SLANG_OK;
 }
 
+SlangResult NVRTCDownstreamCompiler::_maybeAddTileSupport(
+    const DownstreamCompileOptions& options,
+    CommandLine& ioCmdLine,
+    IArtifactDiagnostics* diagnostics)
+{
+    if ((options.flags & DownstreamCompileOptions::Flag::EnableTile) == 0)
+    {
+        return SLANG_OK;
+    }
+
+    // First check if we know if one of the include paths contains cuda_tile.h
+    for (const auto& includePath : options.includePaths)
+    {
+        if (m_cudaTileFoundPaths.indexOf(includePath) >= 0)
+        {
+            // Okay we have an include path that we know works.
+            // Just need to enable tile shader in prelude
+            ioCmdLine.addArg("-DSLANG_CUDA_ENABLE_TILE");
+            return SLANG_OK;
+        }
+    }
+
+    // Let's see if one of the paths finds cuda_fp16.h
+    for (const auto& curIncludePath : options.includePaths)
+    {
+        const String includePath = asString(curIncludePath);
+        const String checkPath = Path::combine(includePath, g_tileHeaderName);
+        if (File::exists(checkPath))
+        {
+            m_cudaTileFoundPaths.add(includePath);
+            // Just need to enable tile shader in prelude
+            ioCmdLine.addArg("-DSLANG_CUDA_ENABLE_TILE");
+            return SLANG_OK;
+        }
+    }
+
+    String includePath;
+    if (SLANG_FAILED(_getCUDAIncludePath(includePath, g_tileHeaderName)))
+    {
+        String msg =
+            "Failed to locate CUDA headers (cuda_tile.h) required for tile shader "
+            "support. Please install latest CUDA Toolkit or set CUDA_PATH environment variable.";
+        diagnostics->setRaw(SliceUtil::asCharSlice(msg));
+        diagnostics->requireErrorDiagnostic();
+        return SLANG_E_NOT_FOUND;
+    }
+    ioCmdLine.addArg("-DSLANG_CUDA_ENABLE_TILE");
+    return SLANG_OK;
+}
+
 SlangResult NVRTCDownstreamCompiler::compile(
     const DownstreamCompileOptions& inOptions,
     IArtifact** outArtifact)
@@ -1246,6 +1303,13 @@ SlangResult NVRTCDownstreamCompiler::compile(
     }
 
     if (SLANG_FAILED(_maybeAddFp8Bf16Support(options, cmdLine, diagnostics)))
+    {
+        diagnostics->setResult(SLANG_FAIL);
+        *outArtifact = artifact.detach();
+        return SLANG_FAIL;
+    }
+
+    if (SLANG_FAILED(_maybeAddTileSupport(options, cmdLine, diagnostics)))
     {
         diagnostics->setResult(SLANG_FAIL);
         *outArtifact = artifact.detach();

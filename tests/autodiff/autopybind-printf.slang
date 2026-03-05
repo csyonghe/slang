@@ -1,7 +1,7 @@
 //TEST:SIMPLE(filecheck=CUDA): -target cuda -line-directive-mode none
 //TEST:SIMPLE(filecheck=TORCH): -target torch -line-directive-mode none
 
-// CUDA: __device__ void s_primal_ctx_myKernel_0(
+// CUDA: SLANG_CUDA_GENERAL_DEVICE void s_primal_ctx_myKernel_0(
 // CUDA:         printf("%f\n",
 // CUDA: __global__ void __kernel__myKernel_bwd_diff(DiffTensorView_[[#]] {{[[:alnum:]_]+}}, DiffTensorView_[[#]] {{[[:alnum:]_]+}})
 // CUDA: __global__ void __kernel__myKernel_fwd_diff(DiffTensorView_[[#]] {{[[:alnum:]_]+}}, DiffTensorView_[[#]] {{[[:alnum:]_]+}})

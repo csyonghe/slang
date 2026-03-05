@@ -47,7 +47,7 @@ RWStructuredBuffer<float> outputBuffer;
 // the complete parameter list to access the `bigArray` element directly, without needing to load
 // the entire `Bottom` struct from the caller.
 //
-// CUDA-DAG: __device__ float Bottom_bottomGetValue{{.*}}(StructuredBuffer<Middle{{.*}}> {{.*}}, int {{.*}}, int {{.*}})
+// CUDA-DAG: SLANG_CUDA_GENERAL_DEVICE float Bottom_bottomGetValue{{.*}}(StructuredBuffer<Middle{{.*}}> {{.*}}, int {{.*}}, int {{.*}})
 // PTX: compute_main
 
 [shader("compute")]

@@ -502,6 +502,7 @@ def _callable : stage;
 def _miss : stage;
 def _mesh : stage;
 def _amplification : stage;
+def _tile : stage;
 
 // SPIRV extensions
 
@@ -1443,12 +1444,16 @@ alias task = _amplification + _meshshading;
 /// [Stage]
 alias amplification = _amplification + _meshshading;
 
+/// Tile shader and capabilities
+/// [Stage]
+alias tile = _tile + _cuda_sm_8_0;
+
 // shader stage groups
 /// Collection of all shader stages
 /// [Compound]
 alias any_stage = vertex | fragment | compute | hull | domain | geometry
                  | raygen | intersection | anyhit | closesthit | miss | mesh
-                 | amplification | callable
+                 | amplification | callable | tile
                  ;
 
 /// Collection of shader stages

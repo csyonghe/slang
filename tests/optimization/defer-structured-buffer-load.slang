@@ -27,7 +27,7 @@ RWStructuredBuffer<float> outputBuffer;
 // SPV: %[[VALUE:[A-Za-z0-9_]+]] = OpLoad %float %[[SBPTR]]
 // SPV: OpStore %{{.*}} %[[VALUE]]
 
-// CUDA: __device__ float Bottom_bottomGetValue{{.*}}(uint [[PARAM0:[A-Za-z0-9_]+]], int [[PARAM1:[A-Za-z0-9_]+]])
+// CUDA: SLANG_CUDA_GENERAL_DEVICE float Bottom_bottomGetValue{{.*}}(uint [[PARAM0:[A-Za-z0-9_]+]], int [[PARAM1:[A-Za-z0-9_]+]])
 // CUDA:  __ldg(&(&(&(globalParams_0->sb_0){{\[}}[[PARAM0]]{{\]}})->bottom_0)->bigArray_0{{\[}}[[PARAM1]]{{\]}});
 
 [shader("compute")]

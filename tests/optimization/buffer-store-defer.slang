@@ -37,7 +37,7 @@ RWStructuredBuffer<Root> sb;
 // SPV: OpStore
 // SPV: OpReturn
 
-// CUDA: __device__ void Bottom_setVal_0(int [[INDEX0:[A-Za-z0-9_]+]], int [[INDEX1:[A-Za-z0-9_]+]], int [[INDEX2:[A-Za-z0-9_]+]], float [[VAL:[A-Za-z0-9_]+]])
+// CUDA: SLANG_CUDA_GENERAL_DEVICE void Bottom_setVal_0(int [[INDEX0:[A-Za-z0-9_]+]], int [[INDEX1:[A-Za-z0-9_]+]], int [[INDEX2:[A-Za-z0-9_]+]], float [[VAL:[A-Za-z0-9_]+]])
 // CUDA:  (&(&(globalParams{{.*}}->sb{{.*}}){{\[}}[[INDEX0]]{{\]}})->top{{.*}}{{\[}}[[INDEX1]]{{\]}})->bigArray{{.*}}{{\[}}[[INDEX2]]{{\]}} = [[VAL]];
 // PTX: compute_main
 

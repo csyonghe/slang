@@ -588,6 +588,10 @@ SlangResult CodeGenContext::emitWithDownstreamForEntryPoints(ComPtr<IArtifact>& 
             {
                 options.flags |= CompileOptions::Flag::EnableFloat8;
             }
+            if (cudaTracker->isTileRequired())
+            {
+                options.flags |= CompileOptions::Flag::EnableTile;
+            }
         }
         else if (ShaderExtensionTracker* glslTracker = as<ShaderExtensionTracker>(extensionTracker))
         {

@@ -1574,6 +1574,12 @@ extension bool : IRangedValue
     static const bool minValue = false;
 }
 
+extension bool : ICoopElement
+{
+    __intrinsic_op($(kIROp_IntCast))
+    __init(int val);
+}
+
 extension uint64_t : IRangedValue
 {
     __generic<$(ptrTypeParameterList)>
@@ -4867,16 +4873,19 @@ semantic sv_groupid
     [require(compute)]
     [require(mesh)]
     [require(amplification)]
+    [require(tile)]
     get : uint;
 
     [require(compute)]
     [require(mesh)]
     [require(amplification)]
+    [require(tile)]
     get : uint2;
 
     [require(compute)]
     [require(mesh)]
     [require(amplification)]
+    [require(tile)]
     get : uint3;
 }
 
