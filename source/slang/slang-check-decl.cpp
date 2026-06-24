@@ -4245,7 +4245,8 @@ void SemanticsDeclHeaderVisitor::visitGenericVariadicPackCountConstraintDecl(
     // established here is stricter: `Pack` must be a direct type/value pack
     // parameter of this generic and is stored in `packDeclRef`, `countof(Pack)`
     // is stored in `actualCountVal`, and `CountExpr` must fold to an `IntVal`
-    // such as `3`, `N`, or `countof(OuterPack)`.
+    // that can be canonicalized to `int`, such as `3`, `N`, or
+    // `countof(OuterPack)`.
     // Witness matching and default substitution rely on those checked fields
     // instead of reinterpreting arbitrary syntax or proving algebraically
     // equivalent forms.
@@ -4334,6 +4335,9 @@ void SemanticsDeclHeaderVisitor::visitGenericVariadicPackCountConstraintDecl(
     auto countVal =
         tryConstantFoldExpr(decl->expectedCountExpr, ConstantFoldingKind::CompileTime, nullptr);
     decl->expectedCountVal = as<IntVal>(countVal);
+    if (decl->expectedCountVal)
+        decl->expectedCountVal =
+            m_astBuilder->getTypeCastIntVal(m_astBuilder->getIntType(), decl->expectedCountVal);
     if (!decl->expectedCountVal)
     {
         getSink()->diagnose(
@@ -5355,6 +5359,17 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
             return false;
     }
 
+    // Generic requirement matching can pass the satisfying callable as the bare inner declaration
+    // so the witness table records the generic requirement value in the shape lowering expects.
+    // Differentiability conformance lookup is different: it queries members of the
+    // callable-as-type, so a generic callable must use its default self-substitution
+    // (`method<T, witnesses...>`) for lookup to see the synthesized derivative extension.
+    auto satisfyingCalleeForDiffLookup =
+        createDefaultSubstitutionsIfNeeded(m_astBuilder, this, satisfyingMemberDeclRef)
+            .as<CallableDecl>();
+    if (!satisfyingCalleeForDiffLookup)
+        satisfyingCalleeForDiffLookup = satisfyingMemberDeclRef;
+
     // A hard differentiability requirement is part of the callable's semantic contract, not
     // just a follow-up witness-table entry. Reject a signature-only match that has no matching
     // derivative conformance so overload search can continue to another candidate with the same
@@ -5365,16 +5380,16 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
     if (requiredMemberDeclRef.getDecl()->hasModifier<ForwardDifferentiableAttribute>() ||
         requiredMemberDeclRef.getDecl()->hasModifier<BackwardDifferentiableAttribute>())
     {
-        ensureDecl(satisfyingMemberDeclRef, DeclCheckState::ReadyForLookup);
-        auto hasFwdDiff = doesCalleeHaveFwdDiff(satisfyingMemberDeclRef);
+        ensureDecl(satisfyingCalleeForDiffLookup, DeclCheckState::ReadyForLookup);
+        auto hasFwdDiff = doesCalleeHaveFwdDiff(satisfyingCalleeForDiffLookup);
         if (!hasFwdDiff)
             return false;
     }
 
     if (requiredMemberDeclRef.getDecl()->hasModifier<BackwardDifferentiableAttribute>())
     {
-        ensureDecl(satisfyingMemberDeclRef, DeclCheckState::ReadyForLookup);
-        auto hasBwdDiff = doesCalleeHaveBwdDiff(satisfyingMemberDeclRef);
+        ensureDecl(satisfyingCalleeForDiffLookup, DeclCheckState::ReadyForLookup);
+        auto hasBwdDiff = doesCalleeHaveBwdDiff(satisfyingCalleeForDiffLookup);
         if (!hasBwdDiff)
             return false;
     }
@@ -5389,8 +5404,8 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
 
         if (!requiredMemberDeclRef.getDecl()->hasModifier<HLSLStaticModifier>())
         {
-            if (parentInterfaceDecl && (doesCalleeHaveFwdDiff(satisfyingMemberDeclRef) ||
-                                        doesCalleeHaveBwdDiff(satisfyingMemberDeclRef)))
+            if (parentInterfaceDecl && (doesCalleeHaveFwdDiff(satisfyingCalleeForDiffLookup) ||
+                                        doesCalleeHaveBwdDiff(satisfyingCalleeForDiffLookup)))
             {
                 bool noDiffThisSatisfying =
                     (!isTypeDifferentiable(witnessTable->witnessedType) ||
@@ -5436,16 +5451,6 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
 
 bool SemanticsVisitor::doesCalleeHaveFwdDiff(DeclRef<CallableDecl> declRef)
 {
-    // Generic requirement matching records the unspecialized satisfying callable in the witness
-    // table, but differentiability lookup is a query on the callable-as-type. Recreate the
-    // default substitutions for that query so a generic `[Differentiable]` method is tested as
-    // `method<its generic params and declared witnesses>` rather than as the bare inner decl.
-    if (auto specializedDeclRef =
-            createDefaultSubstitutionsIfNeeded(getASTBuilder(), this, declRef).as<CallableDecl>())
-    {
-        declRef = specializedDeclRef;
-    }
-
     auto lookupResult = lookUpMember(
         getASTBuilder(),
         this,
@@ -5459,14 +5464,6 @@ bool SemanticsVisitor::doesCalleeHaveFwdDiff(DeclRef<CallableDecl> declRef)
 
 bool SemanticsVisitor::doesCalleeHaveBwdDiff(DeclRef<CallableDecl> declRef)
 {
-    // Keep this in sync with `doesCalleeHaveFwdDiff`: the lookup is on the fully substituted
-    // callable-as-type, while the conformance witness may still store the unspecialized decl-ref.
-    if (auto specializedDeclRef =
-            createDefaultSubstitutionsIfNeeded(getASTBuilder(), this, declRef).as<CallableDecl>())
-    {
-        declRef = specializedDeclRef;
-    }
-
     auto lookupResult = lookUpMember(
         getASTBuilder(),
         this,
@@ -6231,10 +6228,7 @@ bool SemanticsVisitor::doesGenericSignatureMatchRequirement(
                 specializedRequiredConstraintDeclRef);
             auto satisfyingActualCount =
                 getPackCountConstraintActualCount(m_astBuilder, satisfyingConstraintDeclRef);
-            if (!arePackCountExpectedCountsEqual(
-                    m_astBuilder,
-                    satisfyingActualCount,
-                    requiredActualCount))
+            if (satisfyingActualCount != requiredActualCount)
                 return false;
 
             auto requiredCount = getPackCountConstraintExpectedCount(
@@ -6242,7 +6236,7 @@ bool SemanticsVisitor::doesGenericSignatureMatchRequirement(
                 specializedRequiredConstraintDeclRef);
             auto satisfyingCount =
                 getPackCountConstraintExpectedCount(m_astBuilder, satisfyingConstraintDeclRef);
-            if (!arePackCountExpectedCountsEqual(m_astBuilder, satisfyingCount, requiredCount))
+            if (satisfyingCount != requiredCount)
                 return false;
         }
         else if (
@@ -12930,14 +12924,14 @@ bool SemanticsVisitor::doGenericSignaturesMatch(
                 getPackCountConstraintActualCount(m_astBuilder, leftConstraintRef);
             auto rightActualCount =
                 getPackCountConstraintActualCount(m_astBuilder, rightConstraint);
-            if (!arePackCountExpectedCountsEqual(m_astBuilder, leftActualCount, rightActualCount))
+            if (leftActualCount != rightActualCount)
             {
                 return false;
             }
 
             auto leftCount = getPackCountConstraintExpectedCount(m_astBuilder, leftConstraintRef);
             auto rightCount = getPackCountConstraintExpectedCount(m_astBuilder, rightConstraint);
-            if (!arePackCountExpectedCountsEqual(m_astBuilder, leftCount, rightCount))
+            if (leftCount != rightCount)
                 return false;
         }
         else if (
