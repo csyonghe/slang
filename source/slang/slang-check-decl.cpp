@@ -14198,20 +14198,6 @@ void SemanticsDeclHeaderVisitor::setFuncTypeIntoRequirementDecl(
     }
 }
 
-static InterfaceDecl* getParentInterfaceDecl(Decl* decl)
-{
-    auto ancestor = decl->parentDecl;
-    for (; ancestor; ancestor = ancestor->parentDecl)
-    {
-        if (auto interfaceDecl = as<InterfaceDecl>(ancestor))
-            return interfaceDecl;
-
-        if (as<ExtensionDecl>(ancestor))
-            return nullptr;
-    }
-    return nullptr;
-}
-
 DeclaredSubtypeWitness* SemanticsVisitor::getThisTypeWitness(
     ASTBuilder* astBuilder,
     DeclRef<InterfaceDecl> inDeclRef)
@@ -14259,7 +14245,7 @@ DeclRef<Decl> SemanticsVisitor::getRequirementAsLookedUpDecl(ASTBuilder* astBuil
     auto interfaceDeclRef = createDefaultSubstitutionsIfNeeded(
                                 astBuilder,
                                 this,
-                                getParentInterfaceDecl(declRef.getDecl()))
+                                findParentInterfaceDecl(declRef.getDecl()))
                                 .as<InterfaceDecl>();
     auto interfaceType = DeclRefType::create(astBuilder, interfaceDeclRef);
     auto thisType = this->calcThisType(interfaceDeclRef);
@@ -14388,21 +14374,21 @@ static DeclRef<SynthesizedFuncDecl> addSynthesizedFunc(
     return synFunc;
 }
 
-List<GenericDecl*> getGenericParents(Decl* decl)
+static List<GenericDecl*> getOuterGenericDecls(Decl* decl)
 {
-    List<GenericDecl*> genericParents;
+    List<GenericDecl*> outerGenericDecls;
     for (auto ancestor = decl->parentDecl; ancestor; ancestor = ancestor->parentDecl)
     {
         if (auto genericParentDecl = as<GenericDecl>(ancestor))
         {
-            genericParents.add(genericParentDecl);
+            outerGenericDecls.add(genericParentDecl);
         }
     }
 
     // Return the list in reverse order so that the outermost generic is first.
-    genericParents.reverse();
+    outerGenericDecls.reverse();
 
-    return genericParents;
+    return outerGenericDecls;
 }
 
 static DeclRef<SynthesizedStructDecl> addOrExtendSynthesizedStruct(
@@ -14438,10 +14424,10 @@ static DeclRef<SynthesizedStructDecl> addOrExtendSynthesizedStruct(
         SLANG_ASSERT(synStruct);
 
         // generic parents of the extension
-        List<GenericDecl*> extGenericDecls = getGenericParents(parentDecl);
+        List<GenericDecl*> extGenericDecls = getOuterGenericDecls(parentDecl);
 
         // generic parents of the struct
-        List<GenericDecl*> synStructGenericDecls = getGenericParents(synStruct);
+        List<GenericDecl*> synStructGenericDecls = getOuterGenericDecls(synStruct);
 
         SLANG_ASSERT(extGenericDecls.getCount() == synStructGenericDecls.getCount());
 
@@ -14938,8 +14924,8 @@ static bool trySynthesizeExactDifferentiabilityConformanceForRequirement(
 //
 static DeclRef<Decl> buildQualifiedReference(SemanticsVisitor* visitor, Decl* decl, Decl* fromDecl)
 {
-    List<GenericDecl*> genericDecls = getGenericParents(decl);
-    List<GenericDecl*> fromGenericDecls = getGenericParents(fromDecl);
+    List<GenericDecl*> genericDecls = getOuterGenericDecls(decl);
+    List<GenericDecl*> fromGenericDecls = getOuterGenericDecls(fromDecl);
 
     SLANG_ASSERT(genericDecls.getCount() == fromGenericDecls.getCount());
 
@@ -15395,7 +15381,7 @@ void SemanticsDeclHeaderVisitor::checkDifferentiableCallableCommon(CallableDecl*
                 auto interfaceDeclRef = createDefaultSubstitutionsIfNeeded(
                     m_astBuilder,
                     this,
-                    makeDeclRef(getParentInterfaceDecl(decl)));
+                    makeDeclRef(findParentInterfaceDecl(decl)));
                 auto interfaceType = DeclRefType::create(m_astBuilder, interfaceDeclRef);
                 bool noDiffThisRequirement = !isTypeDifferentiable(interfaceType);
                 if (noDiffThisRequirement)
@@ -15405,7 +15391,7 @@ void SemanticsDeclHeaderVisitor::checkDifferentiableCallableCommon(CallableDecl*
                 }
             }
 
-            auto interfaceDecl = getParentInterfaceDecl(decl);
+            auto interfaceDecl = findParentInterfaceDecl(decl);
             SLANG_ASSERT(interfaceDecl);
             auto addDifferentiabilityRequirementConstraint =
                 [&](bool isBackwardDifferentiabilityRequirement, bool isOptional)
