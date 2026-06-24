@@ -5380,17 +5380,13 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
     if (requiredMemberDeclRef.getDecl()->hasModifier<ForwardDifferentiableAttribute>() ||
         requiredMemberDeclRef.getDecl()->hasModifier<BackwardDifferentiableAttribute>())
     {
-        ensureDecl(satisfyingCalleeForDiffLookup, DeclCheckState::ReadyForLookup);
-        auto hasFwdDiff = doesCalleeHaveFwdDiff(satisfyingCalleeForDiffLookup);
-        if (!hasFwdDiff)
+        if (!isFuncForwardDifferentiable(satisfyingCalleeForDiffLookup))
             return false;
     }
 
     if (requiredMemberDeclRef.getDecl()->hasModifier<BackwardDifferentiableAttribute>())
     {
-        ensureDecl(satisfyingCalleeForDiffLookup, DeclCheckState::ReadyForLookup);
-        auto hasBwdDiff = doesCalleeHaveBwdDiff(satisfyingCalleeForDiffLookup);
-        if (!hasBwdDiff)
+        if (!isFuncBackwardDifferentiable(satisfyingCalleeForDiffLookup))
             return false;
     }
 
@@ -5404,8 +5400,9 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
 
         if (!requiredMemberDeclRef.getDecl()->hasModifier<HLSLStaticModifier>())
         {
-            if (parentInterfaceDecl && (doesCalleeHaveFwdDiff(satisfyingCalleeForDiffLookup) ||
-                                        doesCalleeHaveBwdDiff(satisfyingCalleeForDiffLookup)))
+            if (parentInterfaceDecl &&
+                (isFuncForwardDifferentiable(satisfyingCalleeForDiffLookup) ||
+                 isFuncBackwardDifferentiable(satisfyingCalleeForDiffLookup)))
             {
                 bool noDiffThisSatisfying =
                     (!isTypeDifferentiable(witnessTable->witnessedType) ||
@@ -5449,30 +5446,22 @@ bool SemanticsVisitor::doesSignatureMatchRequirement(
     return true;
 }
 
-bool SemanticsVisitor::doesCalleeHaveFwdDiff(DeclRef<CallableDecl> declRef)
+SubtypeWitness* SemanticsVisitor::isFuncForwardDifferentiable(DeclRef<CallableDecl> declRef)
 {
-    auto lookupResult = lookUpMember(
-        getASTBuilder(),
-        this,
-        getName("fwd_diff"),
-        DeclRefType::create(getASTBuilder(), declRef),
-        getOuterScope(),
-        LookupMask::Default);
-    lookupResult = resolveOverloadedLookup(lookupResult);
-    return !lookupResult.isOverloaded() && lookupResult.isValid();
+    ensureDecl(declRef, DeclCheckState::ReadyForLookup);
+
+    auto calleeType = DeclRefType::create(getASTBuilder(), declRef);
+    auto forwardDifferentiableType = getForwardDiffFuncInterfaceType(calleeType);
+    return tryGetSubtypeWitness(calleeType, forwardDifferentiableType);
 }
 
-bool SemanticsVisitor::doesCalleeHaveBwdDiff(DeclRef<CallableDecl> declRef)
+SubtypeWitness* SemanticsVisitor::isFuncBackwardDifferentiable(DeclRef<CallableDecl> declRef)
 {
-    auto lookupResult = lookUpMember(
-        getASTBuilder(),
-        this,
-        getName("bwd_diff"),
-        DeclRefType::create(getASTBuilder(), declRef),
-        getOuterScope(),
-        LookupMask::Default);
-    lookupResult = resolveOverloadedLookup(lookupResult);
-    return !lookupResult.isOverloaded() && lookupResult.isValid();
+    ensureDecl(declRef, DeclCheckState::ReadyForLookup);
+
+    auto calleeType = DeclRefType::create(getASTBuilder(), declRef);
+    auto backwardDifferentiableType = getBackwardDiffFuncInterfaceType(calleeType);
+    return tryGetSubtypeWitness(calleeType, backwardDifferentiableType);
 }
 
 bool SemanticsVisitor::doesAccessorMatchRequirement(
@@ -7849,7 +7838,7 @@ bool SemanticsVisitor::trySynthesizeMethodRequirementWitness(
                 // conformance kinds.
                 //
                 ensureDecl(callee, DeclCheckState::ReadyForLookup);
-                if (!doesCalleeHaveFwdDiff(callee))
+                if (!isFuncForwardDifferentiable(callee))
                 {
                     if (auto fwdDiffModifier =
                             synFuncDecl->findModifier<ForwardDifferentiableAttribute>())
@@ -7878,7 +7867,7 @@ bool SemanticsVisitor::trySynthesizeMethodRequirementWitness(
                 }
 
                 // Similar to the ForwardDifferentiable case, but for backward differentiability.
-                if (!doesCalleeHaveBwdDiff(callee))
+                if (!isFuncBackwardDifferentiable(callee))
                 {
                     if (auto bwdDiffModifier =
                             synFuncDecl->findModifier<BackwardDifferentiableAttribute>())
@@ -14725,11 +14714,11 @@ static bool trySynthesizeExactDifferentiabilityConformanceForRequirement(
     switch (kind)
     {
     case DifferentiabilityConformanceKind::Forward:
-        if (!visitor->doesCalleeHaveFwdDiff(callableDeclRef))
+        if (!visitor->isFuncForwardDifferentiable(callableDeclRef))
             return false;
         break;
     case DifferentiabilityConformanceKind::Backward:
-        if (!visitor->doesCalleeHaveBwdDiff(callableDeclRef))
+        if (!visitor->isFuncBackwardDifferentiable(callableDeclRef))
             return false;
         break;
     default:
