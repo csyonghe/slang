@@ -6606,7 +6606,7 @@ DeclRef<Decl> SemanticsVisitor::liftDeclFromGenericContainers(
             copier.getASTCopier().mapDecl(kv.first, kv.second);
         copier.copyParameterMembers();
 
-        auto partiallySpecializedSourceDeclRef = getSourceDeclRefWithCopiedGenericArgs(
+        auto partiallySpecializedSourceDeclRef = getSpecializedDeclRefWithParamsFromGeneric(
             m_astBuilder,
             this,
             sourceGenericDecl,
@@ -6628,7 +6628,7 @@ DeclRef<Decl> SemanticsVisitor::liftDeclFromGenericContainers(
             // just copied, so refresh default substitution arguments after each copied constraint.
             invalidateDefaultSubstitutionArgs(m_astBuilder, synGenericDecl);
             auto partiallySpecializedSourceDeclRefAfterConstraint =
-                getSourceDeclRefWithCopiedGenericArgs(
+                getSpecializedDeclRefWithParamsFromGeneric(
                     m_astBuilder,
                     this,
                     sourceGenericDecl,
@@ -6647,7 +6647,7 @@ DeclRef<Decl> SemanticsVisitor::liftDeclFromGenericContainers(
         // original parameters.
         //
         invalidateDefaultSubstitutionArgs(m_astBuilder, synGenericDecl);
-        auto fullySpecializedDeclRef = getSourceDeclRefWithCopiedGenericArgs(
+        auto fullySpecializedDeclRef = getSpecializedDeclRefWithParamsFromGeneric(
             m_astBuilder,
             this,
             sourceGenericDecl,
