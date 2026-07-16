@@ -1,0 +1,418 @@
+(*
+    Slang surface grammar baseline.
+
+    Baseline: official master 4f4ec505761e2e56a45da873d5c169ff6e512f52, 2026-07-16.
+    Status: proposed structural EBNF. Contextual spelling is written SOFT("text").
+    Builtin type/function names are IDENTIFIERs supplied by the standard environment.
+    Recovery/version/dialect annotations are a blocking grammar-freeze follow-up in chapter 12.
+*)
+
+source-file = { top-level-declaration }, END_OF_FILE ;
+
+top-level-declaration = { modifier }, declaration ;
+
+declaration = module-declaration
+            | file-reference-declaration
+            | namespace-declaration
+            | using-declaration
+            | type-declaration
+            | callable-declaration
+            | binding-declaration
+            | property-declaration
+            | associated-declaration
+            | buffer-declaration
+            | syntax-declaration
+            | require-capability-declaration
+            | internal-container-declaration
+            | c-style-declaration
+            | ";" ;
+
+module-declaration = SOFT("module"), [ IDENTIFIER | STRING_LITERAL ], ";" ;
+
+file-reference-declaration = ( SOFT("import") | SOFT("__import") |
+                               SOFT("__include") | SOFT("implementing") ),
+                             file-reference, ";" ;
+file-reference = STRING_LITERAL | dotted-name ;
+dotted-name = IDENTIFIER, { ".", IDENTIFIER } ;
+
+namespace-declaration = SOFT("namespace"), namespace-path,
+                        "{", { top-level-declaration }, "}" ;
+namespace-path = IDENTIFIER, { ("." | "::"), IDENTIFIER } ;
+using-declaration = SOFT("using"), [ SOFT("namespace") ], expression, ";" ;
+
+type-declaration = typedef-declaration
+                 | typealias-declaration
+                 | struct-declaration
+                 | class-declaration
+                 | enum-declaration
+                 | interface-declaration
+                 | extension-declaration ;
+
+typedef-declaration = SOFT("typedef"), type, declarator, ";" ;
+typealias-declaration = SOFT("typealias"), IDENTIFIER, [ generic-parameter-clause ],
+                        { where-clause }, "=", type, ";" ;
+
+struct-declaration = SOFT("struct"), { legacy-attribute }, [ IDENTIFIER ],
+                     [ generic-parameter-clause ], [ conformance-clause ],
+                     { where-clause }, aggregate-tail ;
+aggregate-tail = aggregate-body | ";" | "=", type, ";" ;
+
+(* Current class parser intentionally has no inline generic/where clause. *)
+class-declaration = SOFT("class"), IDENTIFIER,
+                    [ class-base-and-conformance-clause ], aggregate-body ;
+
+enum-declaration = SOFT("enum"), [ SOFT("class") ], [ IDENTIFIER ],
+                   [ generic-parameter-clause ], [ enum-base-clause ],
+                   { where-clause },
+                   "{", [ enum-case, { ",", enum-case }, [ "," ] ], "}" ;
+enum-case = { modifier }, IDENTIFIER, [ "=", expression ] ;
+
+interface-declaration = SOFT("interface"), IDENTIFIER,
+                        [ generic-parameter-clause ], [ refinement-clause ],
+                        { where-clause }, aggregate-body ;
+
+extension-declaration = ( SOFT("extension") | SOFT("__extension") ),
+                        [ generic-parameter-clause ], type,
+                        [ extension-conformance-clause ],
+                        { where-clause }, aggregate-body ;
+
+(* These clauses share punctuation but have distinct checked roles. In particular, a struct
+   conformance clause accepts interface contracts only; concrete struct inheritance is not a
+   production of the proposed language. *)
+conformance-clause = ":", type-list ;
+class-base-and-conformance-clause = ":", type-list ;
+enum-base-clause = ":", type-list ;
+refinement-clause = ":", type-list ;
+extension-conformance-clause = ":", type-list ;
+type-list = type, { ",", type } ;
+aggregate-body = "{", { top-level-declaration }, "}" ;
+
+callable-declaration = modern-function-declaration
+                     | constructor-declaration
+                     | function-extension-declaration
+                     | explicit-generic-declaration ;
+
+modern-function-declaration = SOFT("func"), callable-name,
+                              [ generic-parameter-clause ],
+                              "(", [ parameter-list ], ")",
+                              [ throws-clause ], [ "->", type ],
+                              { semantic-suffix }, { where-clause }, callable-body ;
+
+traditional-function-declaration = type, declarator,
+                                   [ generic-parameter-clause ],
+                                   "(", [ parameter-list ], ")",
+                                   [ throws-clause ], { semantic-suffix },
+                                   { where-clause }, callable-body ;
+
+callable-name = IDENTIFIER | operator-name ;
+operator-name = SOFT("operator"), operator-token ;
+operator-token = "+" | "-" | "*" | "/" | "%" | "!" | "~" |
+                 "<<" | ">>" | "==" | "!=" | ">" | "<" | ">=" | "<=" |
+                 "&&" | "||" | "&" | "|" | "^" | "++" | "--" |
+                 "=" | "+=" | "-=" | "*=" | "/=" | "%=" |
+                 "<<=" | ">>=" | "&=" | "|=" | "^=" | "()" | "[]" ;
+
+constructor-declaration = SOFT("__init"), [ generic-parameter-clause ],
+                          "(", [ parameter-list ], ")",
+                          { semantic-suffix }, { where-clause }, callable-body ;
+
+function-extension-declaration = SOFT("__func_extension"),
+                                 [ generic-parameter-clause ], keyword-expression-head,
+                                 "(", [ parameter-list ], ")",
+                                 [ throws-clause ], [ "->", type ],
+                                 { where-clause }, callable-body ;
+
+explicit-generic-declaration = SOFT("__generic"), generic-parameter-clause,
+                               top-level-declaration ;
+
+throws-clause = SOFT("throws"), type ;
+callable-body = ";" | block-statement ;
+
+parameter-list = parameter, { ",", parameter }, [ "," ] ;
+parameter = { modifier }, ( traditional-parameter | modern-parameter ) ;
+traditional-parameter = type, declarator, [ "=", initializer ] ;
+modern-parameter = IDENTIFIER, [ ":", type ], [ "=", initializer ] ;
+
+binding-declaration = modern-binding-declaration ;
+modern-binding-declaration = ( SOFT("let") | SOFT("var") ), IDENTIFIER,
+                             [ ":", type ], { semantic-suffix },
+                             [ "=", initializer ], ";" ;
+
+c-style-declaration = type, init-declarator,
+                      { ",", init-declarator }, ";"
+                    | traditional-function-declaration ;
+init-declarator = declarator, [ "=", initializer ] ;
+declarator = { "*" }, ( IDENTIFIER | "(", declarator, ")" ),
+             { "[", [ expression ], "]" } ;
+initializer = assignment-expression | braced-initializer ;
+braced-initializer = "{", [ initializer, { ",", initializer }, [ "," ] ], "}" ;
+
+property-declaration = property | subscript ;
+property = SOFT("property"), IDENTIFIER, ":", type,
+           { semantic-suffix }, accessor-block ;
+subscript = SOFT("__subscript"), [ generic-parameter-clause ],
+            "(", [ parameter-list ], ")", "->", type,
+            { where-clause }, accessor-block ;
+accessor-block = ";" | "{", { accessor-declaration }, "}" ;
+accessor-declaration = { modifier }, ( SOFT("get") | SOFT("set") | SOFT("ref") |
+                       SOFT("constref") ),
+                       callable-body ;
+
+associated-declaration = associated-type-declaration
+                       | interface-constraint-declaration
+                       | associated-function-declaration
+                       | global-generic-parameter-declaration ;
+associated-type-declaration = SOFT("associatedtype"), IDENTIFIER,
+                              [ ":", type-list ], { where-clause }, ";" ;
+interface-constraint-declaration = SOFT("__constraint"), type,
+                                   ( "==" | ":" ), type, ";" ;
+associated-function-declaration = SOFT("__associatedfunc"), (* internal payload *)
+                                  token-island-until-semicolon ;
+global-generic-parameter-declaration = ( SOFT("type_param") |
+                                         SOFT("__generic_value_param") ),
+                                       token-island-until-semicolon ;
+
+generic-parameter-clause = "<", generic-parameter,
+                           { ",", generic-parameter }, [ "," ], ">" ;
+generic-parameter = type-generic-parameter
+                  | value-generic-parameter
+                  | type-pack-parameter
+                  | value-pack-parameter
+                  | function-type-parameter ;
+type-generic-parameter = [ SOFT("typename") ], IDENTIFIER,
+                         [ ":", type-list ], [ "=", type ] ;
+value-generic-parameter = SOFT("let"), IDENTIFIER,
+                          [ ":", type ], [ "=", expression ]
+                        | type, IDENTIFIER, [ "=", expression ] ;
+type-pack-parameter = SOFT("each"), IDENTIFIER, [ ":", type-list ] ;
+value-pack-parameter = [ SOFT("let") ], SOFT("each"),
+                       [ type ], IDENTIFIER, [ ":", type ] ;
+function-type-parameter = SOFT("functype"), IDENTIFIER ;
+
+where-clause = SOFT("where"), [ SOFT("optional") ], where-term ;
+where-term = SOFT("nonempty"), "(", expression, ")"
+           | SOFT("countof"), "(", expression, ")", "==", expression
+           | SOFT("__hasDiffTypeInfo"), "(", type, ")"
+           | type, ":", type-list
+           | type, "==", type
+           | type, "(", type, ")", [ SOFT("implicit") ] ;
+
+buffer-declaration = ( SOFT("cbuffer") | SOFT("tbuffer") ), IDENTIFIER,
+                     [ ":", register-suffix ], aggregate-body
+                   | glsl-interface-block ;
+glsl-interface-block = { modifier }, IDENTIFIER, aggregate-body,
+                       [ IDENTIFIER ], { "[", [ expression ], "]" }, ";" ;
+
+syntax-declaration = SOFT("syntax"), IDENTIFIER,
+                     [ ":", IDENTIFIER ], [ "=", IDENTIFIER ], ";"
+                   | SOFT("attribute_syntax"), "[", IDENTIFIER,
+                     [ "(", [ attribute-parameter-list ], ")" ], "]",
+                     ":", IDENTIFIER, ";" ;
+attribute-parameter-list = attribute-parameter, { ",", attribute-parameter } ;
+attribute-parameter = IDENTIFIER, [ ":", type ], [ "=", expression ] ;
+
+require-capability-declaration = SOFT("__require_capability"), IDENTIFIER,
+                                 { ( "+" | "," ), IDENTIFIER }, ";" ;
+
+internal-container-declaration = ( SOFT("__ignored_block") |
+                                   SOFT("__transparent_block") |
+                                   SOFT("__file_decl") ), aggregate-body ;
+
+statement = block-statement
+          | if-statement
+          | loop-statement
+          | switch-statement
+          | jump-statement
+          | defer-statement
+          | throw-statement
+          | target-switch-statement
+          | compile-time-for-statement
+          | intrinsic-asm-statement
+          | require-capability-statement
+          | label-statement
+          | declaration-statement
+          | expression-statement
+          | ";" ;
+
+block-statement = "{", { statement }, "}" ;
+if-statement = SOFT("if"), "(", ( expression | if-let-binding ), ")",
+               statement, [ SOFT("else"), statement ] ;
+if-let-binding = SOFT("let"), IDENTIFIER, "=", expression ;
+
+loop-statement = SOFT("for"), "(", for-initializer,
+                 [ expression ], ";", [ expression ], ")", statement
+               | SOFT("while"), "(", expression, ")", statement
+               | SOFT("do"), statement,
+                 ( SOFT("while"), "(", expression, ")", ";"
+                 | catch-clause, { catch-clause } ) ;
+for-initializer = ";" | declaration-statement | expression-statement ;
+catch-clause = SOFT("catch"), [ "(", parameter, ")" ], statement ;
+
+switch-statement = SOFT("switch"), "(", expression, ")",
+                   "{", { switch-section }, "}" ;
+switch-section = ( SOFT("case"), expression, ":" | SOFT("default"), ":" ),
+                 { statement } ;
+
+jump-statement = SOFT("break"), [ IDENTIFIER ], ";"
+               | SOFT("continue"), ";"
+               | SOFT("return"), [ expression ], ";"
+               | SOFT("discard"), ";" ;
+defer-statement = SOFT("defer"), statement ;
+throw-statement = SOFT("throw"), expression, ";" ;
+label-statement = IDENTIFIER, ":", statement ;
+
+target-switch-statement = ( SOFT("__target_switch") | SOFT("__stage_switch") ),
+                          "{", { target-switch-section }, "}" ;
+target-switch-section = ( SOFT("case"), IDENTIFIER, ":" |
+                          SOFT("default"), ":" )+, { statement } ;
+
+compile-time-for-statement = "$", SOFT("for"), "(", IDENTIFIER,
+                             SOFT("in"), SOFT("Range"), "(",
+                             expression, [ ",", expression ], ")", ")", statement ;
+intrinsic-asm-statement = SOFT("__intrinsic_asm"), token-island-balanced ;
+require-capability-statement = SOFT("__requireCapability"),
+                               "(", IDENTIFIER, { ",", IDENTIFIER }, ")", ";" ;
+declaration-statement = top-level-declaration ;
+expression-statement = expression, ";" ;
+
+expression = assignment-expression, { ",", assignment-expression } ;
+assignment-expression = conditional-expression,
+                        [ assignment-operator, assignment-expression ] ;
+assignment-operator = "=" | "+=" | "-=" | "*=" | "/=" | "%=" |
+                      "<<=" | ">>=" | "&=" | "|=" | "^=" ;
+conditional-expression = logical-or-expression,
+                         [ "?", expression, ":", conditional-expression ] ;
+logical-or-expression = logical-and-expression, { "||", logical-and-expression } ;
+logical-and-expression = bitwise-or-expression, { "&&", bitwise-or-expression } ;
+bitwise-or-expression = bitwise-xor-expression, { "|", bitwise-xor-expression } ;
+bitwise-xor-expression = bitwise-and-expression, { "^", bitwise-and-expression } ;
+bitwise-and-expression = equality-expression, { "&", equality-expression } ;
+equality-expression = relational-expression, { ( "==" | "!=" ), relational-expression } ;
+relational-expression = shift-expression,
+                        { ( "<" | ">" | "<=" | ">=" |
+                            SOFT("is") | SOFT("as") ), shift-expression } ;
+shift-expression = additive-expression, { ( "<<" | ">>" ), additive-expression } ;
+additive-expression = multiplicative-expression, { ( "+" | "-" ), multiplicative-expression } ;
+multiplicative-expression = prefix-expression, { ( "*" | "/" | "%" ), prefix-expression } ;
+
+prefix-expression = postfix-expression
+                  | prefix-operator, prefix-expression
+                  | c-style-cast-expression
+                  | SOFT("new"), type, [ argument-list ]
+                  | keyword-expression ;
+prefix-operator = "+" | "-" | "!" | "~" | "++" | "--" | "*" | "&" ;
+c-style-cast-expression = "(", type, ")", prefix-expression ;
+
+postfix-expression = primary-expression, { postfix-suffix } ;
+postfix-suffix = argument-list
+               | "[", [ expression-list ], "]"
+               | ( "." | "->" | "::" ), IDENTIFIER
+               | generic-argument-clause
+               | "++" | "--" ;
+argument-list = "(", [ expression-list ], ")" ;
+expression-list = assignment-expression, { ",", assignment-expression }, [ "," ] ;
+
+primary-expression = IDENTIFIER
+                   | INTEGER_LITERAL | FLOATING_POINT_LITERAL
+                   | STRING_LITERAL, { STRING_LITERAL }
+                   | CHAR_LITERAL
+                   | SOFT("true") | SOFT("false") | SOFT("nullptr") | SOFT("none")
+                   | SOFT("this")
+                   | parenthesized-or-tuple-expression
+                   | lambda-expression
+                   | spirv-asm-expression ;
+
+parenthesized-or-tuple-expression = "(", [ expression-list ], ")" ;
+lambda-expression = "(", [ traditional-lambda-parameter-list ], ")", "=>",
+                    ( block-statement | assignment-expression ) ;
+traditional-lambda-parameter-list = traditional-parameter,
+                                    { ",", traditional-parameter }, [ "," ] ;
+
+keyword-expression = SOFT("try"), prefix-expression
+                   | SOFT("no_diff"), argument-list
+                   | ( SOFT("fwd_diff") | SOFT("bwd_diff") |
+                       SOFT("__fwd_diff") | SOFT("__bwd_diff") |
+                       SOFT("__apply") | SOFT("__func_as_type") ), argument-list
+                   | SOFT("__dispatch_kernel"), argument-list
+                   | ( SOFT("sizeof") | SOFT("alignof") ),
+                     "(", expression, [ ",", expression ], ")"
+                   | SOFT("countof"), "(", expression, ")"
+                   | ( SOFT("__first") | SOFT("__last") |
+                       SOFT("__trimFirst") | SOFT("__trimLast") |
+                       SOFT("__shapeConcat") | SOFT("__shapePermute") |
+                       SOFT("__shapeSwap") | SOFT("__shapeReduce") |
+                       SOFT("__packBranch") | SOFT("__getAddress") |
+                       SOFT("__floatAsInt") ), argument-list ;
+keyword-expression-head = keyword-expression ;
+
+generic-argument-clause = "<", generic-argument,
+                          { ",", generic-argument }, [ "," ], generic-close ;
+generic-argument = expression | type ;
+generic-close = ">" | VIRTUAL_GREATER_FROM_SHIFT_RIGHT ;
+
+type = { type-modifier }, intersection-type ;
+intersection-type = postfix-type, { "&", postfix-type } ;
+postfix-type = primary-type, { type-suffix } ;
+type-suffix = "*" | "[", [ expression ], "]" ;
+primary-type = qualified-type-name, [ generic-argument-clause ]
+             | SOFT("functype"), "(", [ type-list ], ")", "->", type
+             | SOFT("each"), type
+             | SOFT("expand"), type
+             | inline-type-declaration
+             | "(", type, ")" ;
+qualified-type-name = [ "::" ], IDENTIFIER,
+                      { ( "::" | "." ), IDENTIFIER } ;
+inline-type-declaration = struct-declaration | class-declaration | enum-declaration ;
+
+modifier = attribute
+         | simple-modifier
+         | complex-modifier ;
+
+simple-modifier = SOFT("in") | SOFT("out") | SOFT("inout") |
+                  SOFT("__ref") | SOFT("__constref") | SOFT("const") |
+                  SOFT("__builtin") | SOFT("highp") | SOFT("lowp") |
+                  SOFT("mediump") | SOFT("__global") | SOFT("inline") |
+                  SOFT("public") | SOFT("private") | SOFT("internal") |
+                  SOFT("require") | SOFT("param") | SOFT("extern") |
+                  SOFT("dyn") | SOFT("row_major") | SOFT("column_major") |
+                  SOFT("nointerpolation") | SOFT("noperspective") |
+                  SOFT("linear") | SOFT("sample") | SOFT("centroid") |
+                  SOFT("precise") | SOFT("shared") | SOFT("groupshared") |
+                  SOFT("static") | SOFT("uniform") | SOFT("volatile") |
+                  SOFT("coherent") | SOFT("restrict") | SOFT("readonly") |
+                  SOFT("writeonly") | SOFT("export") |
+                  SOFT("dynamic_uniform") | SOFT("override") |
+                  SOFT("point") | SOFT("line") | SOFT("triangle") |
+                  SOFT("lineadj") | SOFT("triangleadj") |
+                  SOFT("vertices") | SOFT("indices") | SOFT("primitives") |
+                  SOFT("payload") | SOFT("__prefix") | SOFT("__postfix") |
+                  SOFT("__exported") ;
+
+complex-modifier = SOFT("layout"), "(", token-island-balanced, ")"
+                 | SOFT("hitAttributeEXT")
+                 | standard-syntax-modifier ;
+standard-syntax-modifier = IDENTIFIER, syntax-feature-payload ;
+type-modifier = modifier ;
+
+attribute = "[", [ "[" ], attribute-item,
+            { [ "," ], attribute-item }, [ "]" ], "]" ;
+attribute-item = attribute-name, [ argument-list ] ;
+attribute-name = [ "::" ], IDENTIFIER, { "::", IDENTIFIER } ;
+legacy-attribute = attribute ;
+
+semantic-suffix = ":", semantic-item, { ":", semantic-item } ;
+semantic-item = IDENTIFIER
+              | SOFT("register"), "(", token-island-balanced, ")"
+              | SOFT("packoffset"), "(", token-island-balanced, ")"
+              | SOFT("read"), "(", token-island-balanced, ")"
+              | SOFT("write"), "(", token-island-balanced, ")" ;
+register-suffix = SOFT("register"), "(", token-island-balanced, ")" ;
+
+spirv-asm-expression = SOFT("spirv_asm"), "{", spirv-asm-token-island, "}" ;
+
+(* Extension points backed by versioned standard-environment syntax schemas. *)
+syntax-feature-payload = [ token-island-balanced ] ;
+token-island-until-semicolon = { TOKEN - ";" }, ";" ;
+token-island-balanced = { TOKEN, <delimiter stack remains balanced for (), [], and {}> } ;
+spirv-asm-token-island =
+    { TOKEN, <token prefix is accepted by the registered SPIR-V assembly subgrammar> } ;
