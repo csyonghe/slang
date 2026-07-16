@@ -136,6 +136,16 @@ struct IRUse
     void debugValidate();
 };
 
+// Optional observer for operand rewrites performed by replaceUsesWith and replaceOperand.
+// The callback runs immediately before the use is updated, so operandUse still identifies the old
+// value while newOperandValue is the final canonical replacement. Implementations must only record
+// the event; mutating IR from the callback would invalidate the use-list traversal in progress.
+struct IROperandReplacementSink
+{
+    virtual ~IROperandReplacementSink() = default;
+    virtual void onOperandReplacement(IRUse* operandUse, IRInst* newOperandValue) = 0;
+};
+
 struct IRBlock;
 struct IRDecoration;
 struct IRRate;
@@ -728,7 +738,7 @@ struct IRInst
 
     // Replace all uses of this value with `other`, so
     // that this value will now have no uses.
-    void replaceUsesWith(IRInst* other);
+    void replaceUsesWith(IRInst* other, IROperandReplacementSink* operandReplacementSink = nullptr);
 
     void insertAt(IRInsertLoc const& loc);
 

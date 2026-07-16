@@ -134,7 +134,7 @@ struct FunctionParameterSpecializationContext
     // With the basic state out of the way, let's walk
     // through the overall flow of the pass.
     //
-    bool processModule()
+    bool processModule(IRInst* rootInst)
     {
         // We will start by initializing our IR building state.
         //
@@ -143,7 +143,7 @@ struct FunctionParameterSpecializationContext
         // Next we will populate our initial work list by
         // recursively finding every single call site in the module.
         //
-        addCallsToWorkListRec(module->getModuleInst());
+        addCallsToWorkListRec(rootInst ? rootInst : module->getModuleInst());
 
         bool changed = false;
 
@@ -1231,14 +1231,15 @@ struct FunctionParameterSpecializationContext
 bool specializeFunctionCalls(
     CodeGenContext* codeGenContext,
     IRModule* module,
-    FunctionCallSpecializeCondition* condition)
+    FunctionCallSpecializeCondition* condition,
+    IRInst* rootInst)
 {
     FunctionParameterSpecializationContext context;
     context.codeGenContext = codeGenContext;
     context.module = module;
     context.condition = condition;
 
-    return context.processModule();
+    return context.processModule(rootInst);
 }
 
 } // namespace Slang

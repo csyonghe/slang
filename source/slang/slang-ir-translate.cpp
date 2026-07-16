@@ -1,7 +1,6 @@
 #include "slang-ir-translate.h"
 
 #include "slang-ir-insts.h"
-#include "slang-ir-loop-unroll.h"
 #include "slang-ir-peephole.h"
 #include "slang-ir-sccp.h"
 #include "slang-ir-specialize.h"
@@ -33,8 +32,8 @@ void clearTranslationDictionary(IRModule* module)
     if (auto translationDict = module->getTranslationDict())
     {
         translationDict->removeAndDeallocate();
+        module->setTranslationDict(nullptr);
     }
-    module->setTranslationDict(nullptr);
 }
 
 IRInst* TranslationContext::maybeTranslateInst(IRInst* inst)
@@ -472,29 +471,12 @@ IRInst* _resolveInstRec(TranslationContext* ctx, IRInst* inst)
 
                 if (specResult && as<IRGlobalValueWithCode>(specResult))
                 {
-                    // If we ended up with something that has code,
-                    // specialization may have opened up simplification opportunities.
-                    //
-
-                    // Specialize any child instructions. This handles any non-hoistable
-                    // instructions and peephole-style opportunities.
-                    // TODO: Should this just run both specialization and peephole in a loop until
-                    // we reach a fixed point?
-                    specializeChildInsts(ctx->getSpecializationContext(), specResult);
-
-                    // Fold any constants within the specialized code.
-                    applySparseConditionalConstantPropagation(
-                        specResult,
-                        ctx->getTargetProgram(),
-                        ctx->getSink(),
-                        ctx);
-
-                    if (!unrollLoopsInFunc(
-                            ctx->getTargetProgram(),
-                            ctx->getModule(),
-                            as<IRGlobalValueWithCode>(specResult),
-                            ctx->getSink()))
-                        return nullptr;
+                    // Type-flow may still have work items keyed by the specialize instruction that
+                    // produced this body. Running the concrete solver here could replace that key
+                    // (and cascade through global IR deduplication) while the analysis is using it.
+                    // Record the body for the next concrete epoch instead; the outer driver
+                    // discards all type-flow state before processing the root.
+                    ctx->deferGeneratedConcreteRoot(specResult);
                 }
 
                 auto currentSpecInst = as<IRSpecialize>(instRef->getOperand(0));

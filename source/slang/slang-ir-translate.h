@@ -26,11 +26,13 @@ public:
         TargetProgram* target,
         IRModule* module,
         SpecializationContext* specContext,
-        DiagnosticSink* inSink)
+        DiagnosticSink* inSink,
+        List<IRInst*>* inGeneratedConcreteRoots = nullptr)
         : irModule(module)
         , sink(inSink)
         , targetProgram(target)
         , specContext(specContext)
+        , generatedConcreteRoots(inGeneratedConcreteRoots)
         , autodiffContext(target, module->getModuleInst())
     {
         initializeTranslationDictionary(module);
@@ -59,6 +61,17 @@ public:
 
     SpecializationContext* getSpecializationContext() const { return specContext; }
 
+    // Record a concrete body materialized while type-flow owns instruction identities. The outer
+    // specialization epoch processes these roots only after the analysis context is discarded.
+    void deferGeneratedConcreteRoot(IRInst* inst)
+    {
+        materializedConcreteRoot = true;
+        if (generatedConcreteRoots)
+            generatedConcreteRoots->add(inst);
+    }
+
+    bool didMaterializeConcreteRoot() const { return materializedConcreteRoot; }
+
 private:
     IRModule* irModule;
 
@@ -71,6 +84,8 @@ private:
     // Shared context.
     AutoDiffSharedContext autodiffContext;
     SpecializationContext* specContext;
+    List<IRInst*>* generatedConcreteRoots;
+    bool materializedConcreteRoot = false;
 
     // Memo of `set` insts (any `IRSetBase`: type/func/witness-table/generic set) that
     // `resolveInst` returned unchanged. A set has one operand per dispatch member, so re-walking

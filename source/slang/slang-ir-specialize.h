@@ -8,6 +8,7 @@ struct IRInst;
 struct IRFunc;
 struct IRSpecialize;
 struct SpecializationContext;
+struct CodeGenContext;
 class DiagnosticSink;
 class TargetProgram;
 
@@ -20,6 +21,11 @@ struct SpecializationOptions
 
     // Option to report dynamic dispatch sites.
     bool reportDynamicDispatchSites = false;
+
+    // When non-null, higher-order function parameters are specialized by the same fixed-point
+    // driver as concrete opcode specialization and type-flow. A null context leaves that
+    // target-dependent transformation disabled.
+    CodeGenContext* higherOrderCodeGenContext = nullptr;
 };
 
 /// Specialize generic and interface-based code to use concrete types.

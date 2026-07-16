@@ -34,5 +34,6 @@ public:
 bool specializeFunctionCalls(
     CodeGenContext* codeGenContext,
     IRModule* module,
-    FunctionCallSpecializeCondition* condition);
+    FunctionCallSpecializeCondition* condition,
+    IRInst* rootInst = nullptr);
 } // namespace Slang

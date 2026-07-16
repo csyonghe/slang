@@ -17,7 +17,10 @@ struct IRInst;
 Result performTypeInlining(IRModule* module, TargetProgram* targetProgram, DiagnosticSink* sink);
 
 /// Inline any call sites to functions marked `[unsafeForceInlineEarly]`
-bool performMandatoryEarlyInlining(IRModule* module, HashSet<IRInst*>* modifiedFuncs = nullptr);
+bool performMandatoryEarlyInlining(
+    IRModule* module,
+    HashSet<IRInst*>* modifiedFuncs = nullptr,
+    IRInst* rootInst = nullptr);
 
 /// Inline any call sites to functions marked `[ForceInline]`
 void performForceInlining(IRModule* module);

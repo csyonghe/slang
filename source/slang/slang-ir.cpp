@@ -1385,7 +1385,10 @@ void IRBuilder::addInst(IRInst* inst)
         inst->insertAt(m_insertLoc);
 }
 
-IRInst* IRBuilder::replaceOperand(IRUse* use, IRInst* newValue)
+IRInst* IRBuilder::replaceOperand(
+    IRUse* use,
+    IRInst* newValue,
+    IROperandReplacementSink* operandReplacementSink)
 {
     auto user = use->getUser();
     if (user->getModule())
@@ -1397,6 +1400,8 @@ IRInst* IRBuilder::replaceOperand(IRUse* use, IRInst* newValue)
 
     if (!getIROpInfo(user->getOp()).isHoistable())
     {
+        if (operandReplacementSink && use->get() != newValue)
+            operandReplacementSink->onOperandReplacement(use, newValue);
         use->set(newValue);
         return user;
     }
@@ -1407,12 +1412,14 @@ IRInst* IRBuilder::replaceOperand(IRUse* use, IRInst* newValue)
     // we return the existing entry.
     auto builder = user->getModule()->getDeduplicationContext();
     builder->_removeGlobalNumberingEntry(user);
+    if (operandReplacementSink && use->get() != newValue)
+        operandReplacementSink->onOperandReplacement(use, newValue);
     use->init(user, newValue);
 
     IRInst* existingVal = nullptr;
     if (builder->getGlobalValueNumberingMap().tryGetValue(IRInstKey{user}, existingVal))
     {
-        user->replaceUsesWith(existingVal);
+        user->replaceUsesWith(existingVal, operandReplacementSink);
         return existingVal;
     }
     else
@@ -8827,7 +8834,10 @@ static void _maybeHoistOperand(IRUse* use)
     }
 }
 
-static void _replaceInstUsesWith(IRInst* thisInst, IRInst* other)
+static void _replaceInstUsesWith(
+    IRInst* thisInst,
+    IRInst* other,
+    IROperandReplacementSink* operandReplacementSink)
 {
     IRDeduplicationContext* dedupContext = nullptr;
 
@@ -8914,6 +8924,12 @@ static void _replaceInstUsesWith(IRInst* thisInst, IRInst* other)
                 else
                     dedupContext->_removeGlobalNumberingEntry(user);
             }
+
+            // Report the exact use before changing it. The callback only records the event; the
+            // replacement and any recursively deduplicated hoistable users remain owned by this
+            // routine.
+            if (operandReplacementSink)
+                operandReplacementSink->onOperandReplacement(uu, other);
 
             // Swap this use over to use the other value.
             uu->usedValue = other;
@@ -9030,7 +9046,7 @@ static void _replaceInstUsesWith(IRInst* thisInst, IRInst* other)
             // setInst was improperly ordered, so we need to replace its uses
             // and then delete it.
             //
-            setInst->replaceUsesWith(newSetInst);
+            setInst->replaceUsesWith(newSetInst, operandReplacementSink);
             setInst->removeAndDeallocate();
         }
 
@@ -9038,9 +9054,9 @@ static void _replaceInstUsesWith(IRInst* thisInst, IRInst* other)
     }
 }
 
-void IRInst::replaceUsesWith(IRInst* other)
+void IRInst::replaceUsesWith(IRInst* other, IROperandReplacementSink* operandReplacementSink)
 {
-    _replaceInstUsesWith(this, other);
+    _replaceInstUsesWith(this, other, operandReplacementSink);
 }
 
 // Insert this instruction into the same basic block

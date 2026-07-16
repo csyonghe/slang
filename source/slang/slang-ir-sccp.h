@@ -6,6 +6,7 @@ namespace Slang
 {
 struct IRModule;
 struct IRInst;
+struct IROperandReplacementSink;
 struct TranslationContext;
 class DiagnosticSink;
 class TargetProgram;
@@ -33,7 +34,11 @@ bool applySparseConditionalConstantPropagation(
     DiagnosticSink* sink,
     TranslationContext* translationContext = nullptr);
 
-IRInst* tryConstantFoldInst(IRModule* module, TargetProgram* targetProgram, IRInst* inst);
+IRInst* tryConstantFoldInst(
+    IRModule* module,
+    TargetProgram* targetProgram,
+    IRInst* inst,
+    IROperandReplacementSink* operandReplacementSink = nullptr);
 
 bool isEvaluableOpCode(IROp op);
 

@@ -4,6 +4,7 @@
 #include "../core/slang-performance-profiler.h"
 #include "slang-ir-clone.h"
 #include "slang-ir-dce.h"
+#include "slang-ir-defunctionalization.h"
 #include "slang-ir-inline.h"
 #include "slang-ir-insts.h"
 #include "slang-ir-loop-unroll.h"
@@ -49,7 +50,7 @@ IRInst* specializeGenericImpl(
     SpecializationContext* context,
     bool queueFollowUpWork);
 
-struct SpecializationContext
+struct SpecializationContext : IROperandReplacementSink
 {
     // For convenience, we will keep a pointer to the module
     // we are specializing.
@@ -58,22 +59,50 @@ struct SpecializationContext
     TargetProgram* targetProgram;
     SpecializationOptions options;
     bool changed = false;
+    bool allowDynamicSpecialization = false;
+    bool didMaterializeDynamicSpecialization = false;
     Dictionary<IRSimpleSpecializationKey, IRSpecialize*> activeGenericSpecializations;
 
 
     SpecializationContext(IRModule* inModule, TargetProgram* target, SpecializationOptions options)
         : workList(*inModule->getContainerPool().getList<IRInst>())
-        , workListSet(*inModule->getContainerPool().getHashSet<IRInst>())
+        , liveConcreteRoots(*inModule->getContainerPool().getHashSet<IRInst>())
+        , localLiveInsts(*inModule->getContainerPool().getHashSet<IRInst>())
+        , localLivenessSnapshotInsts(*inModule->getContainerPool().getHashSet<IRInst>())
+        , processedInsts(*inModule->getContainerPool().getList<IRInst>())
+        , operandReplacementUsers(*inModule->getContainerPool().getList<IRInst>())
+        , locallySimplifiedInsts(*inModule->getContainerPool().getHashSet<IRInst>())
+        , expandedDynamicCalls(*inModule->getContainerPool().getHashSet<IRInst>())
+        , terminalDispatcherCalls(*inModule->getContainerPool().getHashSet<IRInst>())
         , cleanInsts(*inModule->getContainerPool().getHashSet<IRInst>())
         , module(inModule)
         , targetProgram(target)
         , options(options)
     {
+        // The local solver owns the four high scratch bits while it is active. Clear only those
+        // bits on entry so an earlier IR pass cannot make an instruction appear recorded,
+        // processed, queued, or visited.
+        resetScratchDataBit(module->getModuleInst(), kOperandReplacementRecordedScratchBitIndex);
+        resetScratchDataBit(module->getModuleInst(), kProcessedScratchBitIndex);
+        resetScratchDataBit(module->getModuleInst(), kInvalidationVisitedScratchBitIndex);
+        resetScratchDataBit(module->getModuleInst(), kInWorkListScratchBitIndex);
     }
     ~SpecializationContext()
     {
+        clearProcessedInsts();
+        for (auto inst : operandReplacementUsers)
+            inst->scratchData &= ~kOperandReplacementRecordedScratchBit;
+        for (auto inst : workList)
+            inst->scratchData &= ~kInWorkListScratchBit;
         module->getContainerPool().free(&workList);
-        module->getContainerPool().free(&workListSet);
+        module->getContainerPool().free(&liveConcreteRoots);
+        module->getContainerPool().free(&localLiveInsts);
+        module->getContainerPool().free(&localLivenessSnapshotInsts);
+        module->getContainerPool().free(&processedInsts);
+        module->getContainerPool().free(&operandReplacementUsers);
+        module->getContainerPool().free(&locallySimplifiedInsts);
+        module->getContainerPool().free(&expandedDynamicCalls);
+        module->getContainerPool().free(&terminalDispatcherCalls);
         module->getContainerPool().free(&cleanInsts);
     }
 
@@ -279,22 +308,275 @@ struct SpecializationContext
         return true;
     }
 
-    // We will use a single work list of instructions that need
-    // to be considered for specialization or simplification,
-    // whether generic, existential, etc.
+    // We use one work list for all opcode-specific specialization and local folding rules.
+    // Ordinary queue insertion is local. Only a concrete operand replacement wakes the affected
+    // use chain, and that propagation stops at functions so a callee-local rewrite cannot
+    // invalidate its callers.
     //
+    // Local work is fully drained before type-flow can use scratchData, and popping an instruction
+    // clears its queue bit. State that must span a type-flow boundary stays in ordinary sets below.
+    static constexpr int kOperandReplacementRecordedScratchBitIndex = 60;
+    static constexpr UInt64 kOperandReplacementRecordedScratchBit =
+        1ULL << kOperandReplacementRecordedScratchBitIndex;
+    static constexpr int kProcessedScratchBitIndex = 61;
+    static constexpr UInt64 kProcessedScratchBit = 1ULL << kProcessedScratchBitIndex;
+    static constexpr int kInvalidationVisitedScratchBitIndex = 62;
+    static constexpr UInt64 kInvalidationVisitedScratchBit = 1ULL
+                                                             << kInvalidationVisitedScratchBitIndex;
+    static constexpr int kInWorkListScratchBitIndex = 63;
+    static constexpr UInt64 kInWorkListScratchBit = 1ULL << kInWorkListScratchBitIndex;
+
     List<IRInst*>& workList;
-    HashSet<IRInst*>& workListSet;
+    HashSet<IRInst*>& liveConcreteRoots;
+    HashSet<IRInst*>& localLiveInsts;
+    HashSet<IRInst*>& localLivenessSnapshotInsts;
+    List<IRInst*>& processedInsts;
+    List<IRInst*>& operandReplacementUsers;
+    HashSet<IRInst*>& locallySimplifiedInsts;
+    HashSet<IRInst*>& expandedDynamicCalls;
+    HashSet<IRInst*>& terminalDispatcherCalls;
     HashSet<IRInst*>& cleanInsts;
+
+    bool tryMarkInWorkList(IRInst* inst)
+    {
+        if (inst->scratchData & kInWorkListScratchBit)
+            return false;
+        inst->scratchData |= kInWorkListScratchBit;
+        return true;
+    }
+
+    void markInstProcessed(IRInst* inst)
+    {
+        if (!(inst->scratchData & kProcessedScratchBit))
+        {
+            inst->scratchData |= kProcessedScratchBit;
+            processedInsts.add(inst);
+        }
+    }
+
+    void invalidateProcessedInst(IRInst* inst) { inst->scratchData &= ~kProcessedScratchBit; }
+
+    void clearProcessedInsts()
+    {
+        // Removed IR instructions remain allocated in the module arena, so entries are safe to
+        // clear even when a rewrite detached the instruction after it was processed. An
+        // invalidated-and-reprocessed instruction may occur more than once in this reset list;
+        // clearing the same bit twice is harmless and keeps invalidation itself constant-time.
+        for (auto inst : processedInsts)
+            invalidateProcessedInst(inst);
+        processedInsts.clear();
+    }
+
     void addToWorkList(IRInst* inst)
     {
-        if (workListSet.add(inst))
-        {
+        // Only concrete, module-scope functions are call-graph roots. Functions nested in an
+        // IRGeneric are templates whose constant parameters are not ready for semantics-bearing
+        // transforms such as forced loop unrolling.
+        if (as<IRFunc>(inst) && inst->getParent() == module->getModuleInst())
+            liveConcreteRoots.add(inst);
+        if (inst->scratchData & kProcessedScratchBit)
+            return;
+        if (tryMarkInWorkList(inst))
             workList.add(inst);
+    }
 
-
-            addUsersToWorkList(inst);
+    // Opaque function transforms report a changed root rather than individual use mutations.
+    // Invalidate that subtree so its next traversal can discover both rewritten instructions and
+    // newly referenced concrete callees.
+    void addChangedRootToWorkList(IRInst* root)
+    {
+        List<IRInst*> pending;
+        pending.add(root);
+        while (pending.getCount())
+        {
+            auto inst = pending.getLast();
+            pending.removeLast();
+            invalidateProcessedInst(inst);
+            locallySimplifiedInsts.remove(inst);
+            for (auto child = inst->getLastDecorationOrChild(); child; child = child->getPrevInst())
+                pending.add(child);
         }
+        addToWorkList(root);
+    }
+
+    // Pull module-scope dependencies into the concrete solver only when a reachable instruction
+    // refers to them. Generic definitions are instantiated on demand by their reachable
+    // `specialize` instruction; walking the generic itself would eagerly process dead templates
+    // and witness-table paths.
+    void addReferencedGlobalOperandsToWorkList(IRInst* inst)
+    {
+        auto addIfGlobal = [&](IRInst* operand)
+        {
+            if (!operand)
+                return;
+
+            // An operand may name an instruction nested under a module-scope structural value,
+            // such as the body of IRExpand. Walk to that structural root so processing it sees the
+            // complete pack expansion. Stop at a generic: its nested values are templates and are
+            // reached only through a concrete specialization clone.
+            auto globalRoot = operand;
+            while (auto parent = globalRoot->getParent())
+            {
+                if (parent == module->getModuleInst())
+                    break;
+                if (as<IRGeneric>(globalRoot) || as<IRGeneric>(parent))
+                    return;
+                globalRoot = parent;
+            }
+
+            if (globalRoot->getParent() != module->getModuleInst() || as<IRGeneric>(globalRoot))
+                return;
+            addToWorkList(globalRoot);
+        };
+
+        addIfGlobal(inst->getFullType());
+        for (UInt i = 0; i < inst->getOperandCount(); ++i)
+            addIfGlobal(inst->getOperand(i));
+    }
+
+    void refreshLocalLivenessSnapshot()
+    {
+        localLiveInsts.clear();
+        localLivenessSnapshotInsts.clear();
+
+        // Use DCE's read-only mark phase to recognize obsolete executable IR without deleting it.
+        // Translation dictionaries may still cache such instructions for a later resolve, so the
+        // scheduler only suppresses work that was proven dead at the start of this drain.
+        Dictionary<IRInst*, bool> calleeSideEffectCache;
+        IRDeadCodeEliminationOptions dceOptions;
+        dceOptions.calleeSideEffectCache = &calleeSideEffectCache;
+        for (auto root : liveConcreteRoots)
+        {
+            if (!root->getParent())
+                continue;
+
+            List<IRInst*> pending;
+            pending.add(root);
+            while (pending.getCount())
+            {
+                auto inst = pending.getLast();
+                pending.removeLast();
+                if (!localLivenessSnapshotInsts.add(inst))
+                    continue;
+                for (auto child = inst->getLastDecorationOrChild(); child;
+                     child = child->getPrevInst())
+                    pending.add(child);
+            }
+            collectLiveInsts(root, localLiveInsts, dceOptions);
+        }
+    }
+
+    bool wasDeadAtLocalDrainStart(IRInst* inst)
+    {
+        // Instructions created during the drain are absent from the snapshot and must be handled
+        // conservatively. This is also how on-demand autodiff translations enter the same solver.
+        return localLivenessSnapshotInsts.contains(inst) && !localLiveInsts.contains(inst);
+    }
+
+    // A type-conformance component is an externally requested dynamic-dispatch root even though
+    // no shader instruction directly uses its witness table before type-flow constructs the
+    // dispatch set. Linking marks precisely those values with
+    // IRDynamicDispatchWitnessDecoration. Discover the marked roots without queuing neighboring
+    // witness tables, so ordinary conformances that are neither called nor requested remain dead.
+    void addExternallyRequestedWitnessRoots(IRInst* parent)
+    {
+        for (auto inst = parent->getFirstChild(); inst; inst = inst->getNextInst())
+        {
+            if (inst->findDecoration<IRDynamicDispatchWitnessDecoration>())
+                addToWorkList(inst);
+            addExternallyRequestedWitnessRoots(inst);
+        }
+    }
+
+    // Queue one dependent chain after a value actually changes. Readiness can propagate through
+    // instructions without replacing their identity: for example, GetPrimal can expose a value to
+    // a later specialization even though GetPrimal itself remains in the IR. Stop only when the
+    // chain reaches a function. The function is reconsidered, but a change inside its signature or
+    // body does not make callers of that function stale.
+    void addToWorkListWithUsersImpl(List<IRInst*>& pending)
+    {
+        // Use an explicit queue because type and pack use graphs can be both cyclic and deep. A
+        // separate temporary scratch bit tracks this invalidation traversal: an instruction that
+        // is already queued must still propagate invalidation to its users.
+        List<IRInst*> visited;
+        while (pending.getCount())
+        {
+            auto dependent = pending.getLast();
+            pending.removeLast();
+
+            if (dependent->scratchData & kInvalidationVisitedScratchBit)
+                continue;
+            dependent->scratchData |= kInvalidationVisitedScratchBit;
+            visited.add(dependent);
+            locallySimplifiedInsts.remove(dependent);
+            invalidateProcessedInst(dependent);
+            if (tryMarkInWorkList(dependent))
+                workList.add(dependent);
+            // Calls are dependents of their callee in the use graph. Do not cross this boundary
+            // merely because the function itself directly used the changed value.
+            if (!as<IRFunc>(dependent))
+                for (auto use = dependent->firstUse; use; use = use->nextUse)
+                    pending.add(use->getUser());
+        }
+        for (auto dependent : visited)
+            dependent->scratchData &= ~kInvalidationVisitedScratchBit;
+    }
+
+    void addToWorkListWithUsers(IRInst* inst)
+    {
+        List<IRInst*> pending;
+        pending.add(inst);
+        addToWorkListWithUsersImpl(pending);
+    }
+
+    // replaceUsesWith can recursively deduplicate hoistable users. Record its exact operand
+    // mutations while use lists are being relinked, then update the scheduler only after the core
+    // replacement routine has returned.
+    void onOperandReplacement(IRUse* operandUse, IRInst* newOperandValue) override
+    {
+        auto user = operandUse->getUser();
+
+        // A replacement can make a previously dead value reachable, or globally deduplicate its
+        // hoistable user into an existing instruction. Neither identity remains covered by the
+        // drain-start proof, so process it conservatively if the replacement queues it.
+        localLivenessSnapshotInsts.remove(user);
+        localLivenessSnapshotInsts.remove(newOperandValue);
+        if (!(user->scratchData & kOperandReplacementRecordedScratchBit))
+        {
+            user->scratchData |= kOperandReplacementRecordedScratchBit;
+            operandReplacementUsers.add(user);
+        }
+    }
+
+    void drainOperandReplacementUsers()
+    {
+        // One replaceUsesWith call can update many uses and recursively deduplicate several
+        // hoistable users. Seed one traversal with the entire callback batch so converging use
+        // chains are visited once rather than once per changed operand.
+        List<IRInst*> pending;
+        for (auto user : operandReplacementUsers)
+        {
+            user->scratchData &= ~kOperandReplacementRecordedScratchBit;
+            if (user->getParent())
+                pending.add(user);
+        }
+        operandReplacementUsers.clear();
+        addToWorkListWithUsersImpl(pending);
+    }
+
+    void replaceUsesWithAndQueue(IRInst* inst, IRInst* replacement)
+    {
+        SLANG_ASSERT(operandReplacementUsers.getCount() == 0);
+        inst->replaceUsesWith(replacement, this);
+        drainOperandReplacementUsers();
+    }
+
+    IRInst* replaceOperandAndQueue(IRBuilder& builder, IRUse* use, IRInst* replacement)
+    {
+        SLANG_ASSERT(operandReplacementUsers.getCount() == 0);
+        auto result = builder.replaceOperand(use, replacement, this);
+        drainOperandReplacementUsers();
+        return result;
     }
 
     static constexpr UInt kMaxIRSpecializationDepthBudget = 512;
@@ -385,8 +667,65 @@ struct SpecializationContext
         {
             auto user = use->getUser();
 
-            addToWorkList(user);
+            addToWorkListWithUsers(user);
         }
+    }
+
+    // Simplify one value from its already-canonical operands. The helper combines the instruction
+    // evaluator with local peepholes but does not propagate through blocks or reason about
+    // executable CFG edges. A specialization operand cannot be selected by dynamic control flow,
+    // so instruction-DAG simplification is the only value propagation this solver needs.
+    bool maybeSimplifyInstructionDAGNode(IRInst* inst)
+    {
+        // Keep the local solver on the scalar instruction-DAG contract advertised by the constant
+        // evaluator. Type, pack, shape, and other structural IR has dedicated specialization rules;
+        // feeding those graphs into the value evaluator duplicates that logic and can encounter
+        // cyclic type operands before their dedicated diagnostic runs.
+        auto op = inst->getOp();
+        bool isLocalPeephole = op == kIROp_SizeOf || op == kIROp_AlignOf;
+        bool isEvaluable = isEvaluableOpCode(op);
+        if ((!isEvaluable && !isLocalPeephole) || !inst->hasUses())
+            return false;
+
+        // Do not construct an evaluator for an unready scalar node. A changed operand invalidates
+        // this instruction through addToWorkListWithUsers(), so a constant DAG still folds from
+        // leaves to root without polling nodes whose inputs have not changed. Select only needs a
+        // constant condition because folding replaces it with the chosen arm.
+        if (isEvaluable)
+        {
+            if (inst->getOperandCount() == 0)
+                return false;
+            UInt requiredConstantOperandCount =
+                inst->getOp() == kIROp_Select || inst->getOp() == kIROp_ConstexprSelect
+                    ? 1
+                    : inst->getOperandCount();
+            for (UInt i = 0; i < requiredConstantOperandCount; ++i)
+            {
+                if (!as<IRConstant>(inst->getOperand(i)))
+                    return false;
+            }
+        }
+
+        if (!locallySimplifiedInsts.add(inst))
+            return false;
+
+        SLANG_ASSERT(operandReplacementUsers.getCount() == 0);
+        auto foldedInst = tryConstantFoldInst(module, targetProgram, inst, this);
+        drainOperandReplacementUsers();
+        if (foldedInst != inst)
+            return true;
+
+        // The remaining SizeOf/AlignOf peepholes do not yet accept a replacement sink. Preserve
+        // their direct users before the rewrite; the normal dependent-chain propagation below
+        // still stops when it reaches a function boundary.
+        ShortList<IRInst*> users;
+        for (auto use = inst->firstUse; use; use = use->nextUse)
+            users.add(use->getUser());
+        if (!tryReplaceInstUsesWithSimplifiedValue(targetProgram, module, inst))
+            return false;
+        for (auto user : users)
+            addToWorkListWithUsers(user);
+        return true;
     }
 
     // Of course, somewhere along the way we expect
@@ -429,11 +768,14 @@ struct SpecializationContext
             {
                 IRUse* argUse = specializeInst->getArgOperand(ii);
                 auto originalArg = argUse->get();
-                IRInst* foldedArg = tryConstantFoldInst(module, targetProgram, originalArg);
+                SLANG_ASSERT(operandReplacementUsers.getCount() == 0);
+                IRInst* foldedArg = tryConstantFoldInst(module, targetProgram, originalArg, this);
+                drainOperandReplacementUsers();
                 if (foldedArg == originalArg)
                     continue;
 
-                specializeInst = as<IRSpecialize>(builder.replaceOperand(argUse, foldedArg));
+                specializeInst =
+                    as<IRSpecialize>(replaceOperandAndQueue(builder, argUse, foldedArg));
             }
         }
 
@@ -634,11 +976,13 @@ struct SpecializationContext
         if (cleanInsts.contains(specInst))
             return false;
 
-        // We will only attempt to specialize when all of the
-        // operands to the `speicalize(...)` instruction are
-        // themselves fully specialized.
-        //
-        if (!areAllOperandsFullySpecialized(specInst))
+        // Set-specialized generics deliberately retain type/witness sets while type-flow computes
+        // the live dispatch graph. Materialize them only after an unchanged type-flow epoch; all
+        // ordinary specializations still require fully concrete operands immediately.
+        bool isDynamicSpecialization = isSetSpecializedGeneric(specInst);
+        if (isDynamicSpecialization && !allowDynamicSpecialization)
+            return false;
+        if (!isDynamicSpecialization && !areAllOperandsFullySpecialized(specInst))
             return false;
 
 
@@ -677,6 +1021,12 @@ struct SpecializationContext
         auto specializedVal = specializeGeneric(genericVal, specInst);
         if (!specializedVal)
         {
+            // Autodiff and type-flow can materialize a specialization before its existential
+            // arguments have reached their final concrete form. Keep that instruction intact for
+            // a later fixed-point epoch; surviving invalid sites are diagnosed after final DCE.
+            if (isInvalidExistentialSpecialization(specInst))
+                return false;
+
             // When specialization fails due to an invalid existential specialization
             // (e.g. genericFunc<IFoo>(...) with a missing witness table argument),
             // emit a diagnostic and replace the specialize instruction with a poison
@@ -700,7 +1050,7 @@ struct SpecializationContext
             IRBuilder builder(module);
             builder.setInsertBefore(specInst);
             auto poison = builder.getPoison(specInst->getFullType());
-            specInst->replaceUsesWith(poison);
+            replaceUsesWithAndQueue(specInst, poison);
             specInst->removeAndDeallocate();
             return true;
         }
@@ -709,13 +1059,12 @@ struct SpecializationContext
         // become uses of `specializeVal`, so we want to re-consider
         // them for subsequent transformations.
         //
-        addUsersToWorkList(specInst);
-
         // Then we simply replace any uses of the `specialize(...)`
         // instruction with the specialized value and delete
         // the `specialize(...)` instruction from existence.
         //
-        specInst->replaceUsesWith(specializedVal);
+        replaceUsesWithAndQueue(specInst, specializedVal);
+        didMaterializeDynamicSpecialization |= isDynamicSpecialization;
         specInst->removeAndDeallocate();
 
         return true;
@@ -893,9 +1242,8 @@ struct SpecializationContext
             newInst = builder.getTupleType(
                 flattendOperands.getCount(),
                 (IRType* const*)flattendOperands.getArrayView().getBuffer());
-        inst->replaceUsesWith(newInst);
+        replaceUsesWithAndQueue(inst, newInst);
         inst->removeAndDeallocate();
-        addUsersToWorkList(newInst);
         return true;
     }
 
@@ -937,9 +1285,8 @@ struct SpecializationContext
                 (UInt)flattendOperands.getCount(),
                 flattendOperands.getArrayView().getBuffer());
 
-        inst->replaceUsesWith(newInst);
+        replaceUsesWithAndQueue(inst, newInst);
         inst->removeAndDeallocate();
-        addUsersToWorkList(newInst);
         return true;
     }
 
@@ -1002,10 +1349,9 @@ struct SpecializationContext
 
         auto replacement = cardinality == PackBranchCardinality::Empty ? packBranch->getOperand(1)
                                                                        : packBranch->getOperand(2);
-        packBranch->replaceUsesWith(replacement);
+        replaceUsesWithAndQueue(packBranch, replacement);
         packBranch->removeAndDeallocate();
         addToWorkList(replacement);
-        addUsersToWorkList(replacement);
         return true;
     }
 
@@ -1049,8 +1395,7 @@ struct SpecializationContext
         IRBuilder builder(module);
         builder.setInsertBefore(inst);
         auto newInst = builder.getIntValue(inst->getDataType(), operand->getOperandCount());
-        addUsersToWorkList(inst);
-        inst->replaceUsesWith(newInst);
+        replaceUsesWithAndQueue(inst, newInst);
         inst->removeAndDeallocate();
         return true;
     }
@@ -1069,8 +1414,7 @@ struct SpecializationContext
         auto operand = inst->getOperand(0);
         if (auto func = as<IRFunc>(operand))
         {
-            addUsersToWorkList(inst);
-            inst->replaceUsesWith(func->getDataType());
+            replaceUsesWithAndQueue(inst, func->getDataType());
             inst->removeAndDeallocate();
             return true;
         }
@@ -1093,9 +1437,7 @@ struct SpecializationContext
                     }
                     auto funcTypeInst =
                         builder.emitSpecializeInst(builder.getTypeKind(), typeGeneric, args);
-                    addUsersToWorkList(inst);
-                    addUsersToWorkList(funcTypeInst);
-                    inst->replaceUsesWith(funcTypeInst);
+                    replaceUsesWithAndQueue(inst, funcTypeInst);
                     inst->removeAndDeallocate();
                     return true;
                 }
@@ -1163,15 +1505,14 @@ struct SpecializationContext
                     IRBuilder builder(module);
                     auto setOp = getSetOpFromType(lookupInst->getDataType());
                     auto newSet = builder.getSet(setOp, satisfyingValSet);
-                    addUsersToWorkList(lookupInst);
                     if (as<IRTypeSet>(newSet))
                     {
-                        lookupInst->replaceUsesWith(builder.getUntaggedUnionType(newSet));
+                        replaceUsesWithAndQueue(lookupInst, builder.getUntaggedUnionType(newSet));
                         lookupInst->removeAndDeallocate();
                     }
                     else if (as<IRWitnessTableSet>(newSet))
                     {
-                        lookupInst->replaceUsesWith(newSet);
+                        replaceUsesWithAndQueue(lookupInst, newSet);
                         lookupInst->removeAndDeallocate();
                     }
                     else
@@ -1249,8 +1590,7 @@ struct SpecializationContext
         // instruction to our work list, because subsequent
         // simplifications might be possible now.
         //
-        addUsersToWorkList(lookupInst);
-        lookupInst->replaceUsesWith(satisfyingVal);
+        replaceUsesWithAndQueue(lookupInst, satisfyingVal);
         lookupInst->removeAndDeallocate();
 
         return true;
@@ -1258,14 +1598,18 @@ struct SpecializationContext
 
     bool maybeSpecializeFoldableInst(IRInst* inst)
     {
-        auto firstUse = inst->firstUse;
-        bool instChanged = peepholeOptimizeInst(targetProgram, module, inst);
+        // Peephole folding can replace the instruction and thereby relink its use chain. Preserve
+        // the old users before invoking it, then invalidate their complete dependent chains. In
+        // particular, folding TrimFirstOfPack can make a TupleType concrete; CountOf downstream of
+        // that tuple must be reconsidered even when the tuple itself was already queued.
+        ShortList<IRInst*> users;
+        for (auto use = inst->firstUse; use; use = use->nextUse)
+            users.add(use->getUser());
 
-        for (auto use = firstUse; use; use = use->nextUse)
-        {
-            auto user = use->getUser();
-            addToWorkList(user);
-        }
+        bool instChanged = peepholeOptimizeInst(targetProgram, module, inst);
+        if (instChanged)
+            for (auto user : users)
+                addToWorkListWithUsers(user);
         return instChanged;
     }
 
@@ -1350,8 +1694,7 @@ struct SpecializationContext
         {
             if (!replacement)
                 return false;
-            addUsersToWorkList(inst);
-            inst->replaceUsesWith(replacement);
+            replaceUsesWithAndQueue(inst, replacement);
             inst->removeAndDeallocate();
             addToWorkList(replacement);
             return true;
@@ -1679,6 +2022,9 @@ struct SpecializationContext
         //
         specializeGlobalGenericParameters();
 
+        if (sink && sink->getErrorCount() != 0)
+            return;
+
         // Now that we've eliminated all cases of global generic parameters,
         // we should now have the properties that:
         //
@@ -1690,98 +2036,191 @@ struct SpecializationContext
         //    that specifies both the generic and the (concrete) type
         //    arguments that should be provided to it.
         //
-        // The basic approach now is to look for opportunities to apply
-        // our specialization rules (e.g., a `specialize` instruction
-        // where all the type arguments are concrete types) and then
-        // processing any additional opportunities created along the way.
-        //
-        // We start out simple by putting the root instruction for the
-        // module onto our work list.
-        //
+        // Seed the same externally callable roots used by type-flow. Concrete callees, types, and
+        // witness tables are pulled into the solver only when a reachable instruction refers to
+        // them, so unused witness tables and generic templates are never eagerly specialized.
+        for (auto globalInst : module->getGlobalInsts())
+            if (auto func = as<IRFunc>(globalInst))
+                if (isTypeFlowEntryPoint(func))
+                    addToWorkList(func);
+        addExternallyRequestedWitnessRoots(module->getModuleInst());
         for (;;)
         {
-            bool iterChanged = false;
-            for (;;)
-            {
-                bool hasSpecialization =
-                    processSpecializationWorkListFromRoot(module->getModuleInst());
-                if (hasSpecialization)
-                    iterChanged = true;
-                else
-                    break;
-            }
+            // Ordinary opcode specialization, local DAG folding, mandatory inlining, forced
+            // unrolling, and higher-order specialization share one local fixed point. Running
+            // higher-order work before type-flow ensures any dynamic call it materializes is part
+            // of the next live-call-graph analysis.
+            processLocalSpecializationFixedPoint(true);
 
             if (sink && sink->getErrorCount() != 0)
+                return;
+            if (!options.lowerWitnessLookups)
                 break;
 
-            if (iterChanged)
-                this->changed = true;
-
-            // This cleanup group must run on every round, not only after a round
-            // that performed specialization. `unrollLoopsInModule` in particular
-            // is semantics-bearing, not an optimization: it implements
-            // `[ForceUnroll]`/`[unroll]` and diagnoses loops that cannot be
-            // unrolled, and this is its only call site in the pipeline. Gating it
-            // on `iterChanged` used to be masked by every linked module containing
-            // auto-diff IR to specialize on the first round; with auto-diff
-            // link-time pruning a program with no specialization work would
-            // otherwise never have its loops unrolled.
-            eliminateDeadCode(module->getModuleInst());
-            peepholeOptimizeGlobalScope(targetProgram, this->module);
-            performMandatoryEarlyInlining(module);
-            applySparseConditionalConstantPropagation(this->module, targetProgram, this->sink);
-            bool unrolledAnyLoop = false;
-            unrollLoopsInModule(module, targetProgram, sink, &unrolledAnyLoop);
-            if (unrolledAnyLoop)
-            {
-                // Unrolling can expose new specialization opportunities (e.g. a
-                // `specialize` whose argument becomes a constant inside an
-                // unrolled body), so treat it as a change and take another
-                // round.
-                this->changed = true;
-                iterChanged = true;
-            }
+            // Type-flow starts from externally callable functions and discovers only the live call
+            // graph. The local queue is empty at this boundary, so type-flow and its function-local
+            // cleanup may use scratchData without invalidating queued specialization work.
+            SLANG_ASSERT(workList.getCount() == 0);
+            // Type-flow can replace and delete instructions. Release every scratch-backed
+            // processed record before crossing that ownership boundary, while all recorded
+            // pointers still belong to the local scheduler's live IR view.
+            clearProcessedInsts();
+            List<IRInst*> liveRoots;
+            List<InvalidExistentialSpecializationDiagnostic> existentialDiagnostics;
+            bool typeFlowChanged = specializeDynamicInsts(
+                module,
+                targetProgram,
+                sink,
+                this,
+                options.reportDynamicDispatchSites,
+                &liveRoots,
+                &existentialDiagnostics,
+                &expandedDynamicCalls,
+                &terminalDispatcherCalls);
+            changed |= typeFlowChanged;
 
             if (sink && sink->getErrorCount() != 0)
-                break;
-
-            // Once the work list has gone dry, we should have the invariant
-            // that there are no `specialize` instructions inside of non-generic
-            // functions that in turn reference a generic type/function unless the generic is
-            // for a builtin type/function, or some of the type arguments are unknown at compile
-            // time, in which case we will rely on a follow up pass the translate it into a
-            // dynamic dispatch function.
-            //
-            // Now we consider lower lookupWitnessMethod insts into dynamic dispatch calls,
-            // which may open up more specialization opportunities.
-            //
-            if (options.lowerWitnessLookups)
+                return;
+            if (existentialDiagnostics.getCount())
             {
-                bool dynPassChanged = specializeDynamicInsts(
-                    module,
-                    targetProgram,
-                    sink,
-                    this,
-                    options.reportDynamicDispatchSites);
+                // These candidates were observed at exact call-graph edges whose marked
+                // specialization arguments remain existential after this complete type-flow
+                // epoch. Stop before another epoch traverses that intentionally unsupported IR.
+                diagnoseInvalidExistentialSpecializations(existentialDiagnostics, sink);
+                return;
+            }
+            if (!typeFlowChanged)
+            {
+                // A set-specialized generic is the materialized result of the converged type-flow
+                // solution, not an input to that solution. Revisit only reachable set
+                // specializations with dynamic materialization enabled. The resulting functions
+                // have finalized runtime-tag signatures, but their new bodies can contain
+                // tag-driven witness lookups that require one more type-flow epoch. The scheduler's
+                // expanded-call set prevents that epoch from prepending the same tag arguments
+                // again at existing call sites.
+                allowDynamicSpecialization = true;
+                didMaterializeDynamicSpecialization = false;
+                HashSet<IRInst*> reachableInsts;
+                // The module-root mark follows calls into their global function bodies while
+                // treating compiler dictionaries as weak. Per-function marks intentionally stop
+                // at global operands and would therefore miss a hoisted specialization used in a
+                // reachable non-entry-point callee.
+                collectLiveInsts(module->getModuleInst(), reachableInsts);
+                for (auto inst : reachableInsts)
+                {
+                    auto specialize = as<IRSpecialize>(inst);
+                    if (!specialize || !isSetSpecializedGeneric(specialize))
+                        continue;
+                    invalidateProcessedInst(specialize);
+                    addToWorkList(specialize);
+                }
+                processLocalSpecializationFixedPoint(true);
+                allowDynamicSpecialization = false;
 
-                if (dynPassChanged)
-                    eliminateDeadCode(module->getModuleInst());
-
-                iterChanged |= dynPassChanged;
+                if (sink && sink->getErrorCount() != 0)
+                    return;
+                if (didMaterializeDynamicSpecialization)
+                    continue;
+                break;
             }
 
-            if (!iterChanged || sink->getErrorCount())
-                break;
+            // The analysis context is gone now, so global deduplication performed by lowering
+            // cannot leave stale type-flow facts behind. Reconsider the concrete live roots that
+            // the epoch actually processed instead of pruning and reseeding the entire module.
+            // Clear the local fold memo because type-flow may have changed an operand in place.
+            locallySimplifiedInsts.clear();
+            for (auto root : liveRoots)
+                addToWorkList(root);
         }
+
+        // Obsolete dynamic scaffolding and compiler-dictionary cache entries stay intact for the
+        // entire consolidated pass. `linkAndOptimizeIR` performs cleanup after the scheduler has
+        // been destroyed and after `finalizeAutoDiffPass` has consumed its cached IR.
     }
 
-    void addInstsToWorkListRec(IRInst* inst)
+    // Drain opcode-specific specialization and instruction-DAG folding together with the two
+    // semantics-bearing producers that can expose new work: mandatory early inlining and forced
+    // loop unrolling. Each producer reports the functions it changed (or is invoked per function),
+    // so only those subtrees are added to the queue.
+    void processLocalSpecializationFixedPoint(bool includeHigherOrderSpecialization)
     {
-        addToWorkList(inst);
-
-        for (auto child = inst->getLastChild(); child; child = child->getPrevInst())
+        for (;;)
         {
-            addInstsToWorkListRec(child);
+            refreshLocalLivenessSnapshot();
+            bool iterChanged = processSpecializationWorkList();
+            bool needsAnotherDrain = false;
+
+            // The transforms below own their rewrites and can delete instructions without going
+            // through the specialization replacement sink. Release scratch-backed scheduler
+            // records while the just-drained IR is still live; changed functions are explicitly
+            // requeued after each transform.
+            clearProcessedInsts();
+
+            // Snapshot the currently reachable concrete functions. The transforms below may
+            // materialize additional callees, which enter `liveConcreteRoots` through the next
+            // ordinary worklist drain rather than invalidating this traversal.
+            List<IRInst*> concreteRoots;
+            for (auto root : liveConcreteRoots)
+                if (root->getParent())
+                    concreteRoots.add(root);
+
+            HashSet<IRInst*> modifiedFuncs;
+            for (auto root : concreteRoots)
+            {
+                if (performMandatoryEarlyInlining(module, &modifiedFuncs, root))
+                {
+                    iterChanged = true;
+                    needsAnotherDrain = true;
+                }
+            }
+            for (auto func : modifiedFuncs)
+                addChangedRootToWorkList(func);
+
+            // Forced unrolling is semantics-bearing: it implements [ForceUnroll]/[unroll] and is
+            // also responsible for diagnosing loops that cannot be unrolled. Run it even when no
+            // specialization changed, but queue only functions whose loop bodies were rewritten.
+            for (auto root : concreteRoots)
+            {
+                auto func = as<IRGlobalValueWithCode>(root);
+                if (!func)
+                    continue;
+
+                bool funcChanged = false;
+                if (!unrollLoopsInFunc(targetProgram, module, func, sink, &funcChanged))
+                    return;
+                if (funcChanged)
+                {
+                    iterChanged = true;
+                    needsAnotherDrain = true;
+                    addChangedRootToWorkList(func);
+                }
+            }
+
+            bool higherOrderChanged = false;
+            if (includeHigherOrderSpecialization && options.higherOrderCodeGenContext)
+            {
+                for (auto root : concreteRoots)
+                    higherOrderChanged |=
+                        specializeHigherOrderParameters(root, options.higherOrderCodeGenContext);
+            }
+            if (higherOrderChanged)
+            {
+                iterChanged = true;
+                needsAnotherDrain = true;
+                // Rescanning the changed callers discovers their newly materialized concrete
+                // callees through addReferencedGlobalOperandsToWorkList().
+                for (auto root : concreteRoots)
+                    addChangedRootToWorkList(root);
+            }
+
+            if (sink && sink->getErrorCount() != 0)
+                return;
+
+            changed |= iterChanged;
+            // processSpecializationWorkList() drains all follow-up users it creates. Only a
+            // producer that runs after that drain requires another iteration.
+            if (!needsAnotherDrain)
+                return;
         }
     }
 
@@ -1803,19 +2242,32 @@ struct SpecializationContext
             }
 
             IRInst* inst = workList.getLast();
-
             workList.removeLast();
-            workListSet.remove(inst);
+            inst->scratchData &= ~kInWorkListScratchBit;
+            markInstProcessed(inst);
 
             if (!inst->getParent() && inst->getOp() != kIROp_ModuleInst)
                 continue;
 
-            // First, look for all the general-purpose specialization opportunities: generic
-            // specialization, existential specialization, pack simplifications, etc.
+            if (wasDeadAtLocalDrainStart(inst))
+                continue;
+
+            addReferencedGlobalOperandsToWorkList(inst);
+
+            // Dispatch opcode-specific specialization rules first: some of them validate their
+            // operands and emit diagnostics even when they cannot produce a replacement. A
+            // blocked specialization is still cheap because cleanInsts prevents re-testing it
+            // until a changed operand wakes its use chain. Then fold this instruction as a local
+            // DAG node; folding its operands wakes it for another specialization attempt.
             auto op = inst->getOp();
             bool instChanged = false;
             if (inst->hasUses() || inst->mightHaveSideEffects() || isWitnessTableType(inst))
                 instChanged = maybeSpecializeInst(inst);
+            // A specialization rule can diagnose malformed IR (for example, a cyclic forwarded
+            // pack type). Do not hand that IR to another transform in the same iteration; the
+            // worklist-level diagnostic check will terminate the solver on the next edge.
+            if (!sink || sink->getErrorCount() == 0)
+                instChanged |= maybeSimplifyInstructionDAGNode(inst);
 
             hasSpecialization |= instChanged;
 
@@ -1843,6 +2295,7 @@ struct SpecializationContext
             return false;
 
         addToWorkList(rootInst);
+        refreshLocalLivenessSnapshot();
         return processSpecializationWorkList();
     }
 
@@ -1957,9 +2410,8 @@ struct SpecializationContext
                         newCall,
                         slotOperandCount,
                         slotOperands.getArrayView().getBuffer());
-                    inst->replaceUsesWith(newWrapExistential);
+                    replaceUsesWithAndQueue(inst, newWrapExistential);
                     inst->removeAndDeallocate();
-                    addUsersToWorkList(newWrapExistential);
                     SLANG_ASSERT(!wrapExistential->hasUses());
                     wrapExistential->removeAndDeallocate();
                     return true;
@@ -2008,11 +2460,31 @@ struct SpecializationContext
     //
     bool maybeSpecializeExistentialsForCall(IRCall* inst)
     {
+        bool callChanged = false;
+
+        // Type-flow can refine a concrete callee's function type in a later fixed-point epoch.
+        // Keep direct calls synchronized here so the same scheduler invalidates tuple extracts and
+        // other users of the result; otherwise a retained autodiff helper can reach codegen with a
+        // call type from the previous epoch even though its users already use the refined type.
+        if (auto callee = as<IRFunc>(inst->getCallee()))
+        {
+            if (auto funcType = as<IRFuncType>(callee->getDataType()))
+            {
+                auto resultType = funcType->getResultType();
+                if (inst->getDataType() != resultType)
+                {
+                    inst->setFullType(resultType);
+                    addToWorkListWithUsers(inst);
+                    callChanged = true;
+                }
+            }
+        }
+
         // Handle a special case of `StructuredBuffer.operator[]/Load/Consume`
         // calls first. These calls on builtin generic types should be handled
         // the same way as a `load` inst.
         if (maybeSpecializeBufferLoadCall(inst))
-            return false;
+            return callChanged;
 
         // If any arguments are value packs, we need to flatten them.
         bool isCalleeFullyExpanded = false;
@@ -2022,7 +2494,7 @@ struct SpecializationContext
             inst = tryExpandArgPack((IRCall*)inst);
         }
 
-        return false;
+        return callChanged;
     }
 
     // The above `maybeSpecializeExistentialsForCall` routine needed
@@ -2491,9 +2963,7 @@ struct SpecializationContext
             // the users of this instruction could be a `lookup_witness_method`
             // that we can now specialize).
             //
-            addUsersToWorkList(inst);
-
-            inst->replaceUsesWith(witnessTable);
+            replaceUsesWithAndQueue(inst, witnessTable);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2518,9 +2988,7 @@ struct SpecializationContext
             //
             auto val = makeExistential->getWrappedValue();
 
-            addUsersToWorkList(inst);
-
-            inst->replaceUsesWith(val);
+            replaceUsesWithAndQueue(inst, val);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2546,9 +3014,7 @@ struct SpecializationContext
             auto val = makeExistential->getWrappedValue();
             auto valType = val->getFullType();
 
-            addUsersToWorkList(inst);
-
-            inst->replaceUsesWith(valType);
+            replaceUsesWithAndQueue(inst, valType);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2601,9 +3067,7 @@ struct SpecializationContext
                 slotOperandCount,
                 slotOperands.getArrayView().getBuffer());
 
-            addUsersToWorkList(inst);
-
-            inst->replaceUsesWith(newWrapExistentialInst);
+            replaceUsesWithAndQueue(inst, newWrapExistentialInst);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2736,8 +3200,7 @@ struct SpecializationContext
                 slotOperandCount,
                 slotOperands.getArrayView().getBuffer());
 
-            addUsersToWorkList(inst);
-            inst->replaceUsesWith(newWrapExistentialInst);
+            replaceUsesWithAndQueue(inst, newWrapExistentialInst);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2824,8 +3287,7 @@ struct SpecializationContext
                 slotOperandCount,
                 slotOperands.getArrayView().getBuffer());
 
-            addUsersToWorkList(inst);
-            inst->replaceUsesWith(newWrapExistentialInst);
+            replaceUsesWithAndQueue(inst, newWrapExistentialInst);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2866,8 +3328,7 @@ struct SpecializationContext
                 slotOperandCount,
                 slotOperands.getArrayView().getBuffer());
 
-            addUsersToWorkList(inst);
-            inst->replaceUsesWith(newWrapExistentialInst);
+            replaceUsesWithAndQueue(inst, newWrapExistentialInst);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2907,8 +3368,7 @@ struct SpecializationContext
                 slotOperandCount,
                 slotOperands.getArrayView().getBuffer());
 
-            addUsersToWorkList(inst);
-            inst->replaceUsesWith(newWrapExistentialInst);
+            replaceUsesWithAndQueue(inst, newWrapExistentialInst);
             inst->removeAndDeallocate();
             return true;
         }
@@ -2984,8 +3444,7 @@ struct SpecializationContext
             auto newVal =
                 builder.getBoundInterfaceType(baseInterfaceType, concreteType, witnessTable);
 
-            addUsersToWorkList(type);
-            type->replaceUsesWith(newVal);
+            replaceUsesWithAndQueue(type, newVal);
             type->removeAndDeallocate();
             return true;
         }
@@ -3021,11 +3480,10 @@ struct SpecializationContext
                 baseType->getOp(),
                 operands.getCount(),
                 operands.getArrayView().getBuffer());
-            addUsersToWorkList(type);
             addToWorkList(newPtrLikeType);
             addToWorkList(wrappedElementType);
 
-            type->replaceUsesWith(newPtrLikeType);
+            replaceUsesWithAndQueue(type, newPtrLikeType);
             type->removeAndDeallocate();
             return true;
         }
@@ -3064,8 +3522,6 @@ struct SpecializationContext
             auto entry =
                 builder.fetchCompilerDictionaryEntry(module->getTranslationDict(), keyInst);
 
-            addUsersToWorkList(type);
-
             IRStructType* newStructType = as<IRStructType>(entry->getValue());
 
             if (!newStructType)
@@ -3098,7 +3554,7 @@ struct SpecializationContext
                 builder.setCompilerDictionaryEntryValue(entry, newStructType);
             }
 
-            type->replaceUsesWith(newStructType);
+            replaceUsesWithAndQueue(type, newStructType);
             type->removeAndDeallocate();
             return true;
         }
@@ -3189,9 +3645,8 @@ struct SpecializationContext
         {
             auto resultPack =
                 makeSpecializedPack(builder, expandInst->getDataType(), elements.getArrayView());
-            expandInst->replaceUsesWith(resultPack);
+            replaceUsesWithAndQueue(expandInst, resultPack);
             expandInst->removeAndDeallocate();
-            addUsersToWorkList(resultPack);
             return true;
         }
 
@@ -3260,8 +3715,7 @@ struct SpecializationContext
                 nextInst = next;
             }
         }
-        addUsersToWorkList(expandInst);
-        expandInst->replaceUsesWith(resultPack);
+        replaceUsesWithAndQueue(expandInst, resultPack);
         expandInst->removeAndDeallocate();
         return true;
     }
@@ -3304,7 +3758,7 @@ struct SpecializationContext
             //
             auto param = bindInst->getParam();
             auto val = bindInst->getVal();
-            param->replaceUsesWith(val);
+            replaceUsesWithAndQueue(param, val);
         }
         {
             // Before removing anything, diagnose any global generic parameter
@@ -3482,9 +3936,8 @@ struct SpecializationContext
                 typePack,
                 (UInt)newParams.getCount(),
                 newParams.getArrayView().getBuffer());
-            param->replaceUsesWith(val);
+            replaceUsesWithAndQueue(param, val);
             param->removeAndDeallocate();
-            addUsersToWorkList(val);
         }
 
         fixUpFuncType(func);
@@ -3534,7 +3987,7 @@ struct SpecializationContext
         }
         auto newCall =
             builder.emitCallInst(call->getFullType(), call->getCallee(), newArgs.getArrayView());
-        call->replaceUsesWith(newCall);
+        replaceUsesWithAndQueue(call, newCall);
         call->transferDecorationsTo(newCall);
         call->removeAndDeallocate();
         return newCall;
@@ -3548,10 +4001,14 @@ bool specializeModule(
     SpecializationOptions options)
 {
     SLANG_PROFILE;
-    SpecializationContext context(module, target, options);
-    context.sink = sink;
-    context.processModule();
-    return context.changed;
+    bool changed = false;
+    {
+        SpecializationContext context(module, target, options);
+        context.sink = sink;
+        context.processModule();
+        changed = context.changed;
+    }
+    return changed;
 }
 
 bool specializeChildInsts(SpecializationContext* context, IRInst* rootInst)
@@ -3945,8 +4402,8 @@ IRInst* specializeGenericImpl(
         if (queueFollowUpWork)
         {
             // The module specialization pass wants cloned generic bodies to feed the shared
-            // follow-up queue. Type-flow callers can opt out and immediately process a specific
-            // result with `specializeChildInsts` instead.
+            // follow-up queue. Other callers can opt out when an enclosing analysis must preserve
+            // instruction identities until it has finished its current epoch.
             for (Index ii = pendingWorkList.getCount() - 1; ii >= 0; ii--)
             {
                 if (context)

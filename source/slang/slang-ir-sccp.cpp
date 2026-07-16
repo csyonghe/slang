@@ -2005,7 +2005,11 @@ bool applySparseConditionalConstantPropagation(
     return applySparseConditionalConstantPropagationRec(globalContext, func);
 }
 
-IRInst* tryConstantFoldInst(IRModule* module, TargetProgram* targetProgram, IRInst* inst)
+IRInst* tryConstantFoldInst(
+    IRModule* module,
+    TargetProgram* targetProgram,
+    IRInst* inst,
+    IROperandReplacementSink* operandReplacementSink)
 {
     SharedSCCPContext shared;
     shared.module = module;
@@ -2019,7 +2023,7 @@ IRInst* tryConstantFoldInst(IRModule* module, TargetProgram* targetProgram, IRIn
     {
         return inst;
     }
-    inst->replaceUsesWith(foldResult.value);
+    inst->replaceUsesWith(foldResult.value, operandReplacementSink);
     return foldResult.value;
 }
 
@@ -2059,11 +2063,28 @@ bool isEvaluableOpCode(IROp op)
     case kIROp_IntCast:
     case kIROp_FloatCast:
     case kIROp_Select:
+    case kIROp_ConstexprSelect:
     case kIROp_ConstexprAdd:
     case kIROp_ConstexprSub:
     case kIROp_ConstexprMul:
     case kIROp_ConstexprDiv:
     case kIROp_ConstexprNeg:
+    case kIROp_ConstexprIRem:
+    case kIROp_ConstexprEql:
+    case kIROp_ConstexprNeq:
+    case kIROp_ConstexprGreater:
+    case kIROp_ConstexprLess:
+    case kIROp_ConstexprLeq:
+    case kIROp_ConstexprGeq:
+    case kIROp_ConstexprAnd:
+    case kIROp_ConstexprOr:
+    case kIROp_ConstexprNot:
+    case kIROp_ConstexprBitAnd:
+    case kIROp_ConstexprBitOr:
+    case kIROp_ConstexprBitNot:
+    case kIROp_ConstexprBitXor:
+    case kIROp_ConstexprShl:
+    case kIROp_ConstexprShr:
     case kIROp_ConstexprIntCast:
     case kIROp_ConstexprCastIntToFloat:
     case kIROp_ConstexprCastFloatToInt:

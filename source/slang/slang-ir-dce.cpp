@@ -512,6 +512,15 @@ bool shouldInstBeLiveIfParentIsLive(IRInst* inst, IRDeadCodeEliminationOptions o
     // First, if `inst` is an instruction that might have some effects
     // when it is executed, then we should keep it around.
     //
+    // An IRExpand nested in executable code can expand to side-effecting instructions and must
+    // retain the conservative side-effect classification below. A module-scope IRExpand cannot
+    // execute, though: it is a structural compile-time value and is live only when another live
+    // instruction references it. Treating an unreferenced global expansion as effectful would
+    // force reachable specialization to process otherwise-dead module scaffolding just so codegen
+    // can traverse it.
+    if (inst->getOp() == kIROp_Expand && inst->getParent()->getOp() == kIROp_ModuleInst)
+        return false;
+
     SideEffectAnalysisOptions sideEffectOptions = options.useFastAnalysis
                                                       ? SideEffectAnalysisOptions::None
                                                       : SideEffectAnalysisOptions::UseDominanceTree;
@@ -674,6 +683,39 @@ bool isWeakReferenceOperand(IRInst* inst, UInt operandIndex)
         break;
     }
     return false;
+}
+
+void collectLiveInsts(
+    IRInst* root,
+    HashSet<IRInst*>& outLiveInsts,
+    IRDeadCodeEliminationOptions const& options)
+{
+    // This is DCE's mark phase with an ordinary set in place of scratchData. Instructions outside
+    // `root` can be operands of live local IR, but their children belong to another liveness root.
+    List<IRInst*> workList;
+    auto markLive = [&](IRInst* inst)
+    {
+        if (inst && outLiveInsts.add(inst))
+            workList.add(inst);
+    };
+
+    markLive(root);
+    while (workList.getCount())
+    {
+        auto inst = workList.getLast();
+        workList.removeLast();
+        if (!isChildInstOf(inst, root))
+            continue;
+
+        markLive(inst->getParent());
+        markLive(inst->getFullType());
+        for (UInt i = 0; i < inst->getOperandCount(); ++i)
+            if (!isWeakReferenceOperand(inst, i))
+                markLive(inst->getOperand(i));
+        for (auto child : inst->getDecorationsAndChildren())
+            if (shouldInstBeLiveIfParentIsLive(child, options))
+                markLive(child);
+    }
 }
 
 // The top-level function for invoking the DCE pass

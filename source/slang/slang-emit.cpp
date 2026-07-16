@@ -1375,16 +1375,13 @@ Result linkAndOptimizeIR(
         SpecializationOptions specOptions;
         specOptions.lowerWitnessLookups = true;
         specOptions.reportDynamicDispatchSites = codeGenContext->shouldReportDynamicDispatchSites();
+        if (requiredLoweringPassSet.higherOrderFunc)
+            specOptions.higherOrderCodeGenContext = codeGenContext;
         SLANG_PASS(specializeModule, targetProgram, codeGenContext->getSink(), specOptions);
     }
 
     if (sink->getErrorCount() != 0)
         return SLANG_FAIL;
-
-    if (requiredLoweringPassSet.higherOrderFunc)
-    {
-        SLANG_PASS(specializeHigherOrderParameters, codeGenContext);
-    }
 
     SLANG_PASS(finalizeAutoDiffPass, targetProgram);
     if (requiredLoweringPassSet.matrixSwizzleStore)

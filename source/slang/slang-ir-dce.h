@@ -45,6 +45,13 @@ bool eliminateDeadCode(
     IRInst* root,
     IRDeadCodeEliminationOptions const& options = IRDeadCodeEliminationOptions());
 
+// Compute DCE's live set without mutating IR or scratchData. The specialization scheduler uses
+// this snapshot to ignore obsolete executable instructions while preserving translation caches.
+void collectLiveInsts(
+    IRInst* root,
+    HashSet<IRInst*>& outLiveInsts,
+    IRDeadCodeEliminationOptions const& options = IRDeadCodeEliminationOptions());
+
 bool shouldInstBeLiveIfParentIsLive(IRInst* inst, IRDeadCodeEliminationOptions options);
 
 bool isWeakReferenceOperand(IRInst* inst, UInt operandIndex);

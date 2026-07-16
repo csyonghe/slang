@@ -4,6 +4,7 @@
 namespace Slang
 {
 struct CodeGenContext;
+struct IRInst;
 struct IRModule;
 struct IRType;
 
@@ -13,5 +14,5 @@ struct IRType;
 /// global functions with calls to specialized versions simply
 /// referencing the global.
 ///
-bool specializeHigherOrderParameters(IRModule* module, CodeGenContext* codeGenContext);
+bool specializeHigherOrderParameters(IRInst* rootInst, CodeGenContext* codeGenContext);
 } // namespace Slang

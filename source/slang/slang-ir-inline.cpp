@@ -1017,13 +1017,16 @@ struct MandatoryEarlyInliningPass : InliningPassBase
 };
 
 
-bool performMandatoryEarlyInlining(IRModule* module, HashSet<IRInst*>* modifiedFuncs)
+bool performMandatoryEarlyInlining(
+    IRModule* module,
+    HashSet<IRInst*>* modifiedFuncs,
+    IRInst* rootInst)
 {
     SLANG_PROFILE;
 
     MandatoryEarlyInliningPass pass(module);
     pass.m_modifiedFuncs = modifiedFuncs;
-    return pass.considerAllCallSites();
+    return rootInst ? pass.considerAllCallSitesRec(rootInst) : pass.considerAllCallSites();
 }
 
 namespace

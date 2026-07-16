@@ -3201,7 +3201,10 @@ public:
     // If the hoistable inst become duplicate of an existing inst,
     // all uses of the original user will be replaced with the existing inst.
     // The function returns the new user after any potential updates.
-    IRInst* replaceOperand(IRUse* use, IRInst* newValue);
+    IRInst* replaceOperand(
+        IRUse* use,
+        IRInst* newValue,
+        IROperandReplacementSink* operandReplacementSink = nullptr);
 
     IRInst* getBoolValue(bool value);
     IRInst* getIntValue(IRIntegerValue value);

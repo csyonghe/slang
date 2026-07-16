@@ -38,6 +38,33 @@ bool isAnyValueType(IRType* type)
     return false;
 }
 
+// Rebuild a tagged-union value using a smaller type/witness-table set. The dispatch branch that
+// selects a witness-table wrapper proves that the incoming value belongs to the implementation's
+// set, so translating the tags to the subsets and unpacking the payload is safe at this boundary.
+// The reverse conversion after an `inout` call continues to use `upcastSet`.
+IRInst* narrowTaggedUnionToSet(IRBuilder* builder, IRInst* arg, IRTaggedUnionType* destType)
+{
+    IRInst* typeTag = builder->emitGetTypeTagFromTaggedUnion(arg);
+    auto narrowedTypeTag = builder->emitIntrinsicInst(
+        builder->getSetTagType(destType->getTypeSet()),
+        kIROp_GetTagForSubSet,
+        1,
+        &typeTag);
+
+    IRInst* witnessTableTag = builder->emitGetTagFromTaggedUnion(arg);
+    auto narrowedWitnessTableTag = builder->emitIntrinsicInst(
+        builder->getSetTagType(destType->getWitnessTableSet()),
+        kIROp_GetTagForSubSet,
+        1,
+        &witnessTableTag);
+
+    auto value = builder->emitGetValueFromTaggedUnion(arg);
+    auto narrowedValue =
+        builder->emitUnpackAnyValue(builder->getUntaggedUnionType(destType->getTypeSet()), value);
+    return builder
+        ->emitMakeTaggedUnion(destType, narrowedTypeTag, narrowedWitnessTableTag, narrowedValue);
+}
+
 // Unpack an `arg` of `IRAnyValue` into concrete type if necessary, to make it feedable into the
 // parameter. If `arg` represents a AnyValue typed variable passed in to a concrete `out`
 // parameter, this function indicates that it needs to be packed after the call by setting
@@ -102,22 +129,31 @@ IRInst* maybeUnpackArg(
     if (as<IRTaggedUnionType>(paramValType) && as<IRTaggedUnionType>(argValType) &&
         paramValType != argValType)
     {
-        // if parameter expects an `out` pointer, store the unpacked val into a
-        // variable and pass in a pointer to that variable.
-        if (as<IROutParamType>(paramType))
+        auto narrowedArg = [&]()
+        {
+            IRInst* value = as<IRPtrTypeBase>(arg->getDataType()) ? builder->emitLoad(arg) : argVal;
+            return narrowTaggedUnionToSet(builder, value, cast<IRTaggedUnionType>(paramValType));
+        };
+
+        // A branch-local implementation can operate on a narrower tagged union than the
+        // dispatcher-wide argument. Pointer parameters therefore need a temporary so that an
+        // `inout` value can be narrowed before the call and widened again afterward. An `out`
+        // parameter skips initialization because the implementation overwrites it.
+        if (as<IRPtrTypeBase>(paramType))
         {
             auto tempVar = builder->emitVar(paramValType);
+            if (as<IRBorrowInOutParamType>(paramType))
+                builder->emitStore(tempVar, narrowedArg());
 
-            // tempVar needs to be unpacked into original var after the call.
+            // The implementation may change the concrete type, so write the complete tagged
+            // union back into the dispatcher's wider set after the call.
             packAfterCall.kind = ArgumentPackWorkItem::Kind::UpCast;
             packAfterCall.dstArg = arg;
             packAfterCall.concreteArg = tempVar;
             return tempVar;
         }
-        else
-        {
-            SLANG_UNEXPECTED("Unexpected upcast for non-out parameter");
-        }
+
+        return narrowedArg();
     }
     return arg;
 }
