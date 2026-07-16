@@ -14,14 +14,14 @@ A trial never mutates syntax, and committing a winner never repeats semantic sea
 ## Distinct type relations
 
 The replacement frontend does not use one implementation-shaped witness domain for unrelated
-relations. It does define a first-class interface-subtype witness algebra because interface
+relations. It does define a first-class subtype-witness algebra because interface
 evidence is an operational runtime value:
 
 ```text
 Δ ⊢ τ ≡ ρ       ⇝ TypeEqualityProof
 Δ ⊢ τ ≤repr ρ   ⇝ RepresentationAdjustmentPath
 Δ ⊢ I refines J ⇝ InterfaceRefinementProof
-Σ; Δ ⊢ τ <: I   ⇝ InterfaceSubtypeWitness
+Σ; Δ ⊢ τ <: I   ⇝ SubtypeWitness
 Σ; Δ ⊢ τ ↝ ρ    ⇝ ConversionResult
 ```
 
@@ -56,7 +56,7 @@ ConversionRequest = {
 ConversionEnvironment = {
     semanticEnvironment: SemanticEnvironmentId,
     genericEnvironment: GenericEnvironmentId,
-    accessContext: AccessContext,
+    visibilityContext: VisibilityContext,
     availableEffects: EffectAllowance,
     worldAssumption: BooleanCapabilityPredicate
 }
@@ -75,7 +75,7 @@ CoercionSite = General | Assignment | Argument | Return | Initializer |
 ```
 
 The source category is part of the request because loading, preserving a physical location, and
-passing an abstract place are not type-only operations.
+passing an abstract storage are not type-only operations.
 
 `CVR-CTX-000`: `ConversionRequest.expression.classifier` must be
 `ValueClassifier(source, sourceCategory)`. A non-value classifier is rejected before conversion
@@ -95,7 +95,7 @@ not an applicability predicate: the selected conversion records it as a `Capabil
 inference even when the current symbolic region does not already imply it.
 
 `PlanTypeCoercibility(TypeCoercibilityRequest)` searches with a symbolic `RValue` at the
-`GenericConstraint` site. It rejects load, physical-place, abstract-place, lambda-capture, initializer, and other
+`GenericConstraint` site. It rejects load, physical-storage, abstract-storage, lambda-capture, initializer, and other
 expression-dependent edges. Success produces `TypeCoercibilityEvidence` containing both the typed
 witness and rank under the exact environment revision; it does not manufacture a `TypedExpr`.
 
@@ -104,33 +104,33 @@ witness and rank under the exact environment revision; it does not manufacture a
 ```text
 StandardConversionId = StandardEnvironmentRuleId
 
-ValueReadPlan<S: WitnessUseStage> =
+ValueReadPlan<S: WitnessTableState> =
     LoadPhysicalStorage(proof: PhysicalStorageProof)
   | InvokeAbstractGetter(callable: CallableValue<S>)
   | ResolveAbstractStorageThroughReference(plan: InternalRefStoragePlanAt<S>)
 
-ConversionOperation<S: WitnessUseStage> =
+ConversionOperation<S: WitnessTableState> =
     Identity
-  | ReadPlace(place: PlaceRef, read: ValueReadPlan<S>)
+  | ReadStorage(storage: StorageRef, read: ValueReadPlan<S>)
   | Numeric(op: StandardConversionId)
   | BitCast(op: StandardConversionId)
   | PointerAdjustment(path: RepresentationAdjustmentPath)
-  | ReferenceAdjustment(storage: PhysicalStorageProof, access: AccessMode)
+  | ReferenceAdjustment(storage: PhysicalStorageProof, access: StorageAccessMode)
   | Aggregate(elements: NodeList<ConversionPlan<S>>)
   | Splat(element: ConversionPlan<S>, shape: ShapeValue)
   | Reshape(elements: NodeList<ConversionPlan<S>>, shape: ShapeValue)
   | OptionalInject(value: ConversionPlan<S>)
   | OptionalMap(value: ConversionPlan<S>)
   | EnumConvert(rule: StandardConversionId)
-  | PackExistential(witness: WitnessCallRef<S>)
+  | PackExistential(witness: SubtypeWitnessRef<S>)
   | OpenExistential(opening: OpenedTypeId, nested: ConversionPlan<S>)
   | UserDefined(callee: ResolvedDeclRefAt<S>, before: NodeList<ConversionPlan<S>>,
                 after: Option<ConversionPlan<S>>)
   | CapturelessLambdaToFunction(expected: CallableSignature,
                                 thunk: SynthesizedDeclId)
-  | LambdaToClosure(expected: TypeId, closure: SynthesizedDeclId,
-                    witness: Option<WitnessCallRef<S>>)
-  | Initialize(plan: InitializationPlanId<S>)
+  | LambdaToCallable(expected: TypeId, lambdaEnvironment: SynthesizedDeclId,
+                    witness: Option<SubtypeWitnessRef<S>>)
+  | Initialize(plan: InitializationPlanIdAt<S>)
   | Recovery(error: ErrorId)
 ```
 
@@ -148,12 +148,13 @@ perform lookup, generic inference, or further conversion search.
 compose and that the operation is permitted at the request's site/explicitness.
 
 `CVR-PLAN-003`: A lambda conversion chooses one explicit representation. A raw function conversion
-requires no captures and records the exact static-thunk declaration output. A capturing lambda produces a
-closure and, when required, callable-interface conformance evidence; it cannot use the raw-function
-alternative.
+requires no captures and records the exact static-thunk declaration output. A capturing lambda
+produces a synthesized lambda environment and, when required, callable-interface conformance
+evidence; it cannot use the raw-function alternative.
 
 The lambda alternatives name the exact synthesized declaration output, not merely its group: one
-group may contain the closure type, initializer, invocation method, thunk, and conformance. That
+group may contain the lambda-environment type, initializer, invocation method, thunk, and
+conformance. That
 output's semantic identity still contains its `SynthesisKey`, so validation can recover and check
 the owning atomic group.
 
@@ -170,43 +171,43 @@ conversion or embedding it in an access plan uses `CAP-SEL-004` under an identic
 union only ordinary uses, discard a concrete source, or reuse a proof from another region.
 
 `CVR-PLAN-005`: `PackExistential` and a lambda conversion's optional callable conformance store the
-exact stage-appropriate `WitnessCallRef<S>`, whose semantic operand is an
-`InterfaceSubtypeWitnessId`. A bound generic witness, specialized generic table, lookup, or
-existential witness is valid evidence; a bare `ConformanceId` is not. When evidence is synthesized,
+exact stage-appropriate `SubtypeWitnessRef<S>`, whose semantic operand is a
+`SubtypeWitnessId`. A bound generic witness, specialized generic table, lookup, or
+existential witness is valid evidence; a bare `WitnessTableId` is not. When evidence is synthesized,
 plan construction depends on publication of the complete atomic `SynthesisGroup` or carries the
 authorized construction-stage resolutions described in chapter 14; it never invents a frozen
 conformance reference for a runtime witness parameter.
 
-`CVR-PLAN-006`: `LoadPhysicalStorage` is valid only for `PhysicalPlace(storage)` and its proof names
-that exact storage. `InvokeAbstractGetter` is valid only for `AbstractPlace(storage)`, names the
+`CVR-PLAN-006`: `LoadPhysicalStorage` is valid only for `PhysicalStorage(storage)` and its proof names
+that exact storage. `InvokeAbstractGetter` is valid only for `AbstractStorage(storage)`, names the
 selected getter in its accessor contract, and retains the getter's effects, capabilities, receiver,
 and index evaluation requirements. `ResolveAbstractStorageThroughReference` is valid only when
-`PlanStorageAccessAt<S>` selected it for `ReadValueAccess` under `EXP-STO-002`: the getter was absent,
+`PlanStorageAccessAt<S>` selected it for `ReadValueAccess` under rule `EXP-STO-002`, where the getter was absent,
 a versioned fallback rule authorized the operation, and the stored internal plan immediately
 dereferences the raw ref-accessor result. A failed present getter can never produce this alternative.
-None of these read plans changes the source expression's abstract-place classifier or makes it
+None of these read plans changes the source expression's abstract-storage classifier or makes it
 eligible for a physical operand mode.
 
-`CVR-PLAN-007`: `ReferenceAdjustment` requires a `PhysicalPlace` and a
+`CVR-PLAN-007`: `ReferenceAdjustment` requires a `PhysicalStorage` and a
 `PhysicalStorageProof` for that exact endpoint and requested access/lifetime. It cannot consume an
 abstract property/subscript, getter/setter plan, write-back temporary, or rvalue. Passing a
 physical-operand parameter normally records the proof for its invocation-instantiated physical
-storage requirement in the `AccessPlan`; it does not rely on an implicit conversion to manufacture
+storage requirement in the `StorageAccessPlan`; it does not rely on an implicit conversion to manufacture
 referenceability.
 
 Conversion failure is structured output, not diagnostic text:
 
 ```text
-ConversionFailure<S: WitnessUseStage> =
+ConversionFailure<S: WitnessTableState> =
     NoConversionPath(source: TypeId, target: TypeId, site: CoercionSite)
   | ExplicitConversionRequired(rule: RuleId)
-  | AmbiguousMinimalPlans(plans: NonEmpty<ConversionPlan<S>>, rank: ConversionRank)
+  | AmbiguousMinimalPlans(plans: NonEmpty<ConversionPlan<S>>, rank: ConversionCost)
   | EffectNotAllowed(use: EffectUse<S>, allowance: EffectAllowance)
   | ConcreteCapabilityNotAvailable(requirement: CapabilityRequirement,
                                    assumption: BooleanCapabilityPredicate,
                                    failure: CapabilityFailure)
-  | AccessNotPermitted(decision: AccessDecision)
-  | RecursiveUserConversion(declaration: CanonicalDeclRef,
+  | AccessNotPermitted(decision: VisibilityDecision)
+  | RecursiveUserConversion(declaration: DeclRef,
                             source: TypeId, target: TypeId)
   | ConversionSearchLimit(visitedStates: UInt32,
                           configuredLimit: UInt32)
@@ -226,7 +227,7 @@ BoundedNat = {
     maximum: UInt64
 }
 
-ConversionRank = {
+ConversionCost = {
     class: RankClass,
     standardPriority: BoundedNat,
     distance: BoundedNat,
@@ -366,7 +367,7 @@ query may reuse this chapter's callable candidate machinery without conflating t
 argument is consumed exactly once. Pack bindings preserve source order and are keyed by parameter
 identity.
 
-`OVL-MAP-002`: The receiver maps only to `FunctionType.receiver`; it is never counted as ordinary
+`OVL-MAP-002`: The receiver maps only to `FuncType.receiver`; it is never counted as ordinary
 argument zero. Accessor/container parameters that current `getFuncType` prepends are explicit
 ordinary parameters with stable IDs in the checked signature.
 
@@ -409,25 +410,25 @@ RecoveryArgumentMap = {
 
 ## Passing-mode applicability
 
-Argument preparation branches first on the structural domain of `PassingMode`. An
+Argument preparation branches first on the structural domain of `ParamPassingMode`. An
 `AbstractOperand` may use ordinary conversion search. A `PhysicalOperand` selects a direct or exact
 accessor-produced physical endpoint first and then checks storage identity; it never asks ordinary
 conversion search to manufacture referenceability.
 
-| Mode              | Required source                                                                            | Plan                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `InMode`          | any convertible value/place                                                                | load if needed, implicit conversion, pass value                     |
-| `OutMode`         | writable physical or abstract destination, or permitted temporary/write-back               | abstract-domain uninitialized-destination plan plus post-conversion |
-| `InOutMode`       | exclusive readable/writable physical or abstract place, or permitted temporary/write-back  | abstract-domain pre/post-conversion plan plus exclusive claim       |
-| `ConstRefMode(r)` | direct physical place or exact `ReadAccess` reference accessor, with storage identity      | pass the exact physical endpoint through a read view                |
-| `RefMode(r)`      | direct physical place or exact `ReadWriteAccess` reference accessor, with storage identity | pass the exact physical endpoint through a read/write view          |
+| Mode              | Required source                                                                              | Plan                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `InMode`          | any convertible value/storage                                                                | load if needed, implicit conversion, pass value                     |
+| `OutMode`         | writable physical or abstract destination, or permitted temporary/write-back                 | abstract-domain uninitialized-destination plan plus post-conversion |
+| `InOutMode`       | exclusive readable/writable physical or abstract storage, or permitted temporary/write-back  | abstract-domain pre/post-conversion plan plus exclusive claim       |
+| `ConstRefMode(r)` | direct physical storage or exact `ReadAccess` reference accessor, with storage identity      | pass the exact physical endpoint through a read view                |
+| `RefMode(r)`      | direct physical storage or exact `ReadWriteAccess` reference accessor, with storage identity | pass the exact physical endpoint through a read/write view          |
 
 The receiver uses the same table with any receiver-specific restrictions.
 
 ```text
 AccessEnvironment = {
     semanticEnvironment: SemanticEnvironmentId,
-    accessContext: AccessContext,
+    visibilityContext: VisibilityContext,
     worldAssumption: BooleanCapabilityPredicate,
     invocationLifetime: LifetimeId,
     callOrigin: Origin
@@ -493,7 +494,7 @@ ArgumentPlanningContextFailure =
                                       actual: SemanticOperationSiteRole)
 
 instantiatePhysicalStorageRequirement(
-    mode: PassingMode,
+    mode: ParamPassingMode,
     invocationLifetime: LifetimeId)
     -> PhysicalStorageRequirement
 
@@ -503,7 +504,7 @@ PhysicalStorageIdentityProof = {
     equality: TypeEqualityProofId
 }
 
-PhysicalParameterSourceAt<S: WitnessUseStage> =
+PhysicalParameterSourceAt<S: WitnessTableState> =
     DirectPhysicalParameterSource(input: TypedExpr,
                                   storage: PhysicalStorageRef)
   | AccessorProducedPhysicalParameterSource(
@@ -514,55 +515,55 @@ physicalParameterStorage(DirectPhysicalParameterSource(_, s)) = s
 physicalParameterStorage(AccessorProducedPhysicalParameterSource(_, p)) =
     p.endpoint.output.storage
 
-PhysicalIdentityAdaptationAt<S: WitnessUseStage> = {
+PhysicalIdentityAdaptationAt<S: WitnessTableState> = {
     source: PhysicalParameterSourceAt<S>,
     identity: PhysicalStorageIdentityProof
 }
 
-ApplicableAbstractConversionAt<S: WitnessUseStage> = {
+ApplicableAbstractConversionAt<S: WitnessTableState> = {
     plan: ConversionPlan<S>,
-    rank: ConversionRank
+    rank: ConversionCost
 }
 
-ArgumentAdaptationAt<S: WitnessUseStage> =
+ArgumentAdaptationAt<S: WitnessTableState> =
     AbstractConversion(conversion: ApplicableAbstractConversionAt<S>)
   | PhysicalIdentity(adaptation: PhysicalIdentityAdaptationAt<S>)
 
-ArgumentAdaptationFailureAt<S: WitnessUseStage> =
+ArgumentAdaptationFailureAt<S: WitnessTableState> =
     InvalidArgumentPlanningContext(failure: ArgumentPlanningContextFailure)
   | AbstractConversionInapplicable(failure: ConversionFailure<S>)
   | AbstractConversionRecovered(plan: ConversionPlan<S>, error: ErrorId)
-  | PhysicalAdaptationFailed(failure: PassingModeFailureAt<S>)
+  | PhysicalAdaptationFailed(failure: ParamPassingModeFailureAt<S>)
 
-ArgumentAdaptationResultAt<S: WitnessUseStage> =
+ArgumentAdaptationResultAt<S: WitnessTableState> =
     AdaptedArgument(adaptation: ArgumentAdaptationAt<S>)
   | ArgumentNotAdapted(failure: ArgumentAdaptationFailureAt<S>)
 
-ArgumentAccessFailureAt<S: WitnessUseStage> =
-    InvalidArgumentAccessContext(failure: ArgumentPlanningContextFailure)
+ArgumentAccessFailureAt<S: WitnessTableState> =
+    InvalidArgumentVisibilityContext(failure: ArgumentPlanningContextFailure)
   | AdaptationDomainMismatch(required: OperandDomain,
                              actual: OperandDomain)
-  | PassingModeAccessFailed(failure: PassingModeFailureAt<S>)
+  | ParamPassingModeAccessFailed(failure: ParamPassingModeFailureAt<S>)
 
-ArgumentAccessResultAt<S: WitnessUseStage> =
-    PlannedArgumentAccess(plan: AccessPlan<S>)
+ArgumentAccessResultAt<S: WitnessTableState> =
+    PlannedArgumentAccess(plan: StorageAccessPlan<S>)
   | ArgumentAccessNotPlanned(failure: ArgumentAccessFailureAt<S>)
 
 PlanArgumentAdaptationAt<S>(slot: BoundCallSlot,
                             binding: ResolvedCallSlotBinding,
-                            parameter: ParameterType,
+                            parameter: FuncTypeParamInfo,
                             context: ArgumentPlanningContextId)
     -> CheckResult<ArgumentAdaptationResultAt<S>>
 
 PlanArgumentAccessAt<S>(slot: BoundCallSlot,
                         binding: ResolvedCallSlotBinding,
-                        parameter: ParameterType,
+                        parameter: FuncTypeParamInfo,
                         adaptation: ArgumentAdaptationAt<S>,
                         context: ArgumentPlanningContextId)
     -> CheckResult<ArgumentAccessResultAt<S>>
 
-PhysicalParameterBindingProofAt<S: WitnessUseStage> = {
-    mode: PassingMode,
+PhysicalParameterBindingProofAt<S: WitnessTableState> = {
+    mode: ParamPassingMode,
     source: PhysicalParameterSourceAt<S>,
     storage: PhysicalStorageRef,
     parameterValueType: TypeId,
@@ -583,12 +584,12 @@ PhysicalParameterBindingProof = PhysicalParameterBindingProofAt<Published>
 PlanArgumentAdaptation = PlanArgumentAdaptationAt<Published>
 PlanArgumentAccess = PlanArgumentAccessAt<Published>
 
-CheckCallAliasClaims(plans: NodeMap<BoundCallSlot, AccessPlan<Published>>,
+CheckCallAliasClaims(plans: NodeMap<BoundCallSlot, StorageAccessPlan<Published>>,
                      environment: AccessEnvironmentId)
     -> CallAliasCheck
 ```
 
-The successful output is the shared `AccessPlan` defined in chapter 11, including evaluate-once,
+The successful output is the shared `StorageAccessPlan` defined in chapter 11, including evaluate-once,
 any abstract-mode temporary/write-back, the exact physical endpoint for a physical mode, cleanup
 condition, and alias class.
 Its terminal is always `PassArgument`; storage-read and storage-write terminals belong only to
@@ -638,9 +639,9 @@ getter/setter merely to make a call applicable.
 `q = instantiatePhysicalStorageRequirement(mode, environment.invocationLifetime)`.
 `PlanArgumentAdaptationAt<S>` first selects `DirectPhysicalParameterSource(input, storage)` only
 when
-`input.classifier = ValueClassifier(storage.valueType, Place(PhysicalPlace(storage)))`. Otherwise,
+`input.classifier = ValueClassifier(storage.valueType, Storage(PhysicalStorage(storage)))`. Otherwise,
 only an input classified exactly as
-`ValueClassifier(a.valueType, Place(AbstractPlace(a)))` may proceed. It calls
+`ValueClassifier(a.valueType, Storage(AbstractStorage(a)))` may proceed. It calls
 `PlanParameterReferenceAccessorAt<S>` with the exact request
 `(input.id, pc.operationSite, a, mode, pc.accessEnvironment, pc.expressionContext)`. That query
 selects `a.accessors.referenceAccessors[mode.access]` by exact key, validates its invocation, admits
@@ -656,23 +657,23 @@ non-recovery equality endpoints are exactly `storage.valueType` and the substitu
 user-defined, initialization, load, and recovery operations are not physical identity. The
 resulting `PhysicalParameterBindingProofAt<S>` and access plan retain the exact source, endpoint,
 complete `q` proof, identity proof, and `accessEnvironment`; the plan records
-`ConsumedWithoutAccessConversion(PhysicalParameterIdentityPassingRule)` as its sole ranking
+`ConsumedWithoutStorageCoercion(PhysicalParameterIdentityPassingRule)` as its sole ranking
 authority. Elaboration performs no semantic search or reconstruction.
 
 ```text
-PassingModeFailureReasonAt<S: WitnessUseStage> =
+ParamPassingModeFailureReasonAt<S: WitnessTableState> =
     NotReadable
   | NotWritable
   | NotMutable
   | AtomicityMismatch
   | DirectSourceNotPhysical
-  | PhysicalReferenceAccessorMissing(required: AccessMode,
-                                      available: CanonicallyOrderedSet<AccessMode>)
+  | PhysicalReferenceAccessorMissing(required: StorageAccessMode,
+                                      available: CanonicallyOrderedSet<StorageAccessMode>)
   | PhysicalReferenceAccessorFailed(
         failure: ParameterReferenceAccessorFailureAt<S>)
   | PhysicalParameterValueTypeMismatch(expected: TypeId, actual: TypeId)
   | PhysicalParameterConversionForbidden(source: TypeId, target: TypeId)
-  | PhysicalAccessNotProvided(actual: AccessMode, required: AccessMode)
+  | PhysicalAccessNotProvided(actual: StorageAccessMode, required: StorageAccessMode)
   | PhysicalLifetimeTooShort(actual: LifetimeId, required: LifetimeId)
   | PhysicalAddressSpaceNotPermitted(actual: PhysicalStorageAddressSpace,
                                      required: AddressSpaceRequirement)
@@ -682,18 +683,18 @@ PassingModeFailureReasonAt<S: WitnessUseStage> =
   | TemporaryForbidden
   | WriteBackForbidden
 
-PassingModeFailureAt<S: WitnessUseStage> = {
+ParamPassingModeFailureAt<S: WitnessTableState> = {
     slot: BoundCallSlot,
-    required: PassingMode,
+    required: ParamPassingMode,
     instantiatedRequirement: Option<PhysicalStorageRequirement>,
     actualType: TypeId,
     actualCategory: ValueCategory,
-    reason: PassingModeFailureReasonAt<S>,
+    reason: ParamPassingModeFailureReasonAt<S>,
     origin: Origin
 }
 
-PassingModeFailureReason = PassingModeFailureReasonAt<Published>
-PassingModeFailure = PassingModeFailureAt<Published>
+ParamPassingModeFailureReason = ParamPassingModeFailureReasonAt<Published>
+ParamPassingModeFailure = ParamPassingModeFailureAt<Published>
 ```
 
 `OVL-MODE-004`: For either physical mode, `instantiatedRequirement` is
@@ -713,7 +714,7 @@ if an `AbstractConversion` is supplied for a physical mode, even if its result t
 `identity.equality` are exactly `storage.valueType` and `parameterValueType` in either
 direction, and the equality does not use recovery. Physical identity contributes no semantic uses.
 The enclosing access plan has
-`rankingConversion = Some(ConsumedWithoutAccessConversion(PhysicalParameterIdentityPassingRule))`,
+`rankingCoercion = Some(ConsumedWithoutStorageCoercion(PhysicalParameterIdentityPassingRule))`,
 from which chapter 7 derives comparison rank `zeroRank`. The instantiated requirement is
 the result of instantiating the proof's complete, well-formed `PhysicalOperand` `mode` in its exact
 `accessEnvironment`; its access equals `mode.access`. An accessor-produced source validates the
@@ -722,14 +723,14 @@ entire stored `ParameterReferenceAccessorPlanAt<S>`, requires that plan's `mode`
 endpoint. For `AccessorProducedPhysicalParameterSource(input, plan)`,
 `input.classifier` is exactly
 `ValueClassifier(plan.invocation.storage.valueType,
-                 Place(AbstractPlace(plan.invocation.storage)))`, and
+                 Storage(AbstractStorage(plan.invocation.storage)))`, and
 `ValidateSemanticOperationSite(input.id, plan.invocation.site) = Success(Unit)`; the invocation
 storage is the byte-identical abstract storage from that classifier. Its dereference site is the
 fixed child of that invocation site. A direct source's typed input is exactly
-`ValueClassifier(storage.valueType, Place(PhysicalPlace(storage)))`. Thus an equal-classified
+`ValueClassifier(storage.valueType, Storage(PhysicalStorage(storage)))`. Thus an equal-classified
 sibling node, a sibling slot's site, or the enclosing call node can never be paired with the plan.
 The enclosing candidate and call-slot plan store the identical environment. The access plan passes
-one physical-place runtime argument carrying this proof and stores no unused value-conversion plan.
+one physical-storage runtime argument carrying this proof and stores no unused value-conversion plan.
 
 `OVL-MODE-006`: `PlanArgumentAdaptationAt<S>` and `PlanArgumentAccessAt<S>` are the only ordered
 parameter-planning pair. The first returns `AbstractConversion` only for `AbstractOperand` and
@@ -745,7 +746,7 @@ The second primitive consumes only the byte-identical successful adaptation retu
 slot, binding, parameter, and context; a domain mismatch is a closed
 `AdaptationDomainMismatch`. It may retain named temporary/write-back machinery for
 `InMode`, `OutMode`, or `InOutMode`; a physical mode instead retains the complete physical source
-and proof and has exactly one physical-place `PassArgument` terminal. Neither primitive delegates
+and proof and has exactly one physical-storage `PassArgument` terminal. Neither primitive delegates
 parameter semantics to chapter 6's ordinary `PlanStorageAccessAt<S>`; only the dedicated
 mode-specific reference-accessor plan may call the shared accessor-validation primitives. Both
 queries preserve diagnostics in their outer `CheckResult`; dependency blocking remains a scheduler
@@ -764,15 +765,15 @@ requirement.
 An rvalue is never applicable. A getter-only, setter-only, or get-plus-set property/subscript is not
 physical and remains inapplicable. In particular, a getter-based `StructuredBuffer`-like surface is
 not accepted merely because its getter reads from memory. An explicitly checked dereference is
-applicable because it already produced a distinct proof-carrying `PhysicalPlace`; a bare reference
-handle is not a place and is inapplicable.
+applicable because it already produced a distinct proof-carrying `PhysicalStorage`; a bare reference
+handle is not a storage and is inapplicable.
 
 `OVL-MODE-008`: An abstract property or subscript may satisfy a physical mode only through
 `AccessorProducedPhysicalParameterSource`. The selected accessor key equals `mode.access` exactly:
-source `constref` contributes `AccessorRole.Ref(ReadAccess)` for `ConstRefMode`, and source `ref`
-contributes `AccessorRole.Ref(ReadWriteAccess)` for `RefMode`. The plan stores the typed input, selected
-`AbstractRefAccessor`, complete invocation and semantic uses, admitted handle, explicit dereference,
-and exact physical endpoint. It does not reclassify the original abstract place. Access inclusion
+source `constref` contributes `RefAccessor(ReadAccess)` for `ConstRefMode`, and source `ref`
+contributes `RefAccessor(ReadWriteAccess)` for `RefMode`. The plan stores the typed input, selected
+`AbstractStorageRefAccessor`, complete invocation and semantic uses, admitted handle, explicit dereference,
+and exact physical endpoint. It does not reclassify the original abstract storage. Access inclusion
 does not select a sibling key: a `ref` accessor alone does not satisfy `ConstRefMode`, and a
 `constref` accessor alone does not satisfy `RefMode`; both may coexist in the map. This implicit
 parameter operation is distinct from explicit first-class reference formation but reuses the same
@@ -807,7 +808,7 @@ reason. Different registered rules must themselves have a versioned compatibilit
 `UnknownAliasRoot` therefore does not fail by itself, but it forces this conservative `MayOverlap`
 rule evaluation. The selected candidate stores the complete successful
 `CompatibleCallAliasClaims`; a conflict rejects it with both slots, claims, overlap reason, and precise
-`PassingModeFailure` whose reason is
+`ParamPassingModeFailure` whose reason is
 `AliasClaimConflict(theExactConflictingCallAliasClaims)`. Because that record stores an
 `AliasOverlapReason` rather than `AliasOverlapResult`, a `ProvenDisjoint` pair cannot inhabit either
 the conflict or its diagnostic payload. Neither plan iteration order nor a diagnostic heuristic can
@@ -1064,7 +1065,7 @@ zipExpand(pattern, P, Q) has cardinality n
 ```
 
 Unknown but equated symbolic counts are valid with `PackCountWitness`; unequal concrete counts fail.
-`nonempty(P)` requires chapter 4's `PackNonEmptyWitness`: a
+`nonempty(P)` requires chapter 4's `NonEmptyPackWitness`: a
 `ConcreteNonEmptyPackWitness` for a known pack, a `DeclaredNonEmptyPackWitness` tied to the exact
 canonical generic constraint, or a derived positive-count proof. First/last operations consume the
 same pack-specific evidence and do not rely on a runtime bounds guard.
@@ -1075,17 +1076,17 @@ Candidate ranking stores a canonical projection of every fact used by pairwise c
 
 ```text
 SourceAdaptationRank =
-    AbstractConversionRank(ConversionRank)
+    AbstractConversionCost(ConversionCost)
   | ConversionFreeAccessRank(rule: RuleId)
 
-comparisonRank(AbstractConversionRank(r)) = r
+comparisonRank(AbstractConversionCost(r)) = r
 comparisonRank(ConversionFreeAccessRank(_)) = zeroRank
 
 sourceAdaptationRank(plan) =
-    AbstractConversionRank(r)
-        when plan.rankingConversion = Some(ConvertedAccess(_, r, _))
+    AbstractConversionCost(r)
+        when plan.rankingCoercion = Some(AppliedStorageCoercion(_, r, _))
     ConversionFreeAccessRank(rule)
-        when plan.rankingConversion = Some(ConsumedWithoutAccessConversion(rule))
+        when plan.rankingCoercion = Some(ConsumedWithoutStorageCoercion(rule))
 
 PackPreference = {
     parameter: SourceParameterKey,
@@ -1115,7 +1116,7 @@ different parameter identities still compare corresponding source inputs. `Argum
 source-to-parameter binding and each
 `ApplicableCallSlotPlan.access` owns the adaptation that elaboration will execute: an abstract
 conversion or a proof-carrying physical identity. `sourceAdaptationRank` is defined exactly when
-that candidate plan has `Some(rankingConversion)`; `None` makes a call-slot plan invalid. The
+that candidate plan has `Some(rankingCoercion)`; `None` makes a call-slot plan invalid. The
 conversion-free rule remains in `ConversionFreeAccessRank` so validators can prove why no converted
 input exists even though its comparison projection is `zeroRank`.
 `PhysicalParameterIdentityPassingRule` is the only conversion-free rule admitted for a
@@ -1140,7 +1141,7 @@ For each lookup candidate:
    call input, argument map, expression context, and authenticated slot site. Pass that context first
    to `PlanArgumentAdaptation` and then to `PlanArgumentAccess`; only their nested successful
    alternatives construct an `ApplicableCallSlotPlan`. Every slot stores the shared access-environment
-   ID and its complete `AccessPlan` determines its `SourceAdaptationRank`;
+   ID and its complete `StorageAccessPlan` determines its `SourceAdaptationRank`;
 8. validate `selectionEffects` and visibility; construct the direct call's exact keyed use for
    `inferredCapabilities`, resolve every source in the optional callable `concreteAvailability` set,
    and merge it with the ordinary-use sidecar and concrete applicability selection of every
@@ -1161,7 +1162,7 @@ CandidateFailureStage =
   | FailedArgumentMap
   | FailedInference
   | FailedConversion
-  | FailedPassingMode
+  | FailedParamPassingMode
   | FailedEffects
   | FailedConcreteAvailability
   | FailedVisibility
@@ -1175,7 +1176,7 @@ CandidateFailure =
   | GenericInferenceFailure(GenericFailure)
   | ArgumentConversionFailure(slot: BoundCallSlot,
                               failure: ConversionFailure)
-  | ArgumentPassingFailure(PassingModeFailure)
+  | ArgumentPassingFailure(ParamPassingModeFailure)
   | EffectSelectionFailure(required: EffectSet,
                            allowance: EffectAllowance,
                            excess: EffectSet)
@@ -1184,7 +1185,7 @@ CandidateFailure =
         combinedRequirement: CapabilityRequirement,
         assumption: BooleanCapabilityPredicate,
         failure: CapabilityFailure)
-  | VisibilitySelectionFailure(AccessDecision)
+  | VisibilitySelectionFailure(VisibilityDecision)
 ```
 
 The ordered list above records diagnostic progress, not semantic preference.
@@ -1257,7 +1258,7 @@ result types do not permit reusing another declaration's authority.
 
 `OVL-CAN-005`: `FailedConversion` and `ArgumentConversionFailure` are reachable only while
 constructing `AbstractConversion` for an `AbstractOperand` mode. Failure to select/prove a physical
-endpoint or physical identity is `FailedPassingMode` with the structured `PassingModeFailureReason`;
+endpoint or physical identity is `FailedParamPassingMode` with the structured `ParamPassingModeFailureReason`;
 ordinary coercion search is never run merely to populate a physical-mode rejection trace.
 
 ## Semantic comparison of applicable candidates
@@ -1330,8 +1331,8 @@ SpecificityComparisonProof =
                            substitution: CanonicalSubstitution,
                            strictSlots: NonEmpty<BoundCallSlot>)
   | ConstraintStrength(GenericConstraintImplicationProof)
-  | NonGenericPreference(preferred: CanonicalDeclRef,
-                         generic: CanonicalDeclRef)
+  | NonGenericPreference(preferred: DeclRef,
+                         generic: DeclRef)
   | DefaultPackPreference(preferredDefaults: CanonicallyOrderedSet<ParameterKey>,
                           otherDefaults: CanonicallyOrderedSet<ParameterKey>,
                           preferredPacks: NodeMap<SourceParameterKey, PackPreference>,
@@ -1343,11 +1344,11 @@ SpecificityComparisonProof =
                          rule: RuleId)
   | RegisteredLanguagePreference(rule: RuleId,
                                  inputs: CanonicalArguments,
-                                 preferred: CanonicalDeclRef)
+                                 preferred: DeclRef)
 
 CandidateComparisonProof = {
-    left: CanonicalDeclRef,
-    right: CanonicalDeclRef,
+    left: DeclRef,
+    right: DeclRef,
     leftRank: CandidateRank,
     rightRank: CandidateRank,
     conversions: PointwiseConversionComparison,
@@ -1375,7 +1376,7 @@ maximal = { c ∈ applicable | no d ∈ applicable strictlyBetter(d,c) }
 - only recovery candidates → recovered call retaining the root errors.
 
 The winning `OverloadResult` contains the fully substituted `CallableSignature`, a specialized
-`BoundDeclUse` whose `CanonicalDeclRef` solely owns all frozen specialization frames, the inference
+`BoundDeclUse` whose `DeclRef` solely owns all frozen specialization frames, the inference
 trace, argument map, unified call-slot plans, direct effect use, keyed capability use, optional
 concrete-availability proof, and result type. Typed call construction is a pure projection of this
 record.
@@ -1386,7 +1387,7 @@ Failure ranking is explicitly not overload semantics:
 
 ```text
 FailureProgress = Signature < ExplicitGenerics < ArgumentMap < Inference <
-                  Conversion < PassingMode < Effects < ConcreteAvailability < Visibility
+                  Conversion < ParamPassingMode < Effects < ConcreteAvailability < DeclVisibility
 ```
 
 Choose failures with greatest progress, then smallest structured edit distance (arity difference,
@@ -1433,8 +1434,10 @@ A generic value may be partially applied only when the grammar/context expects a
 the remaining parameters/constraints can be represented as a new binder:
 
 ```text
-PartialGeneric = {
-    declaration: CanonicalDeclRef,
+PartiallyAppliedGenericValueId = ContentId<PartiallyAppliedGenericValue>
+
+PartiallyAppliedGenericValue = {
+    declaration: DeclRef,
     partialFrame: CanonicalPartialSpecializationFrame,
     callable: Option<CallableValue>
 }
@@ -1454,9 +1457,9 @@ CanonicalPartialSpecializationFrame = {
 ```
 
 `GEN-PART-001`: Ordinary call resolution requires a complete solution. A residual generic cannot
-reach elaborated call or IR accidentally; it must be an explicit `PartialGeneric` typed value.
+reach elaborated call or IR accidentally; it must be an explicit `PartiallyAppliedGenericValue`.
 
-`GEN-PART-002`: The outer `CanonicalDeclRef` owns only complete specialization frames.
+`GEN-PART-002`: The outer `DeclRef` owns only complete specialization frames.
 `partialFrame` is the single authority for supplied arguments/evidence and the alpha-normalized
 residual binder; its source/residual ordinal map is total exactly on unbound source parameters.
 For a callable partial value, `callable` is present and its contract is

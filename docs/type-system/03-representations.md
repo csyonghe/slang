@@ -7,8 +7,8 @@ layouts are not normative.
 ## Source snapshots
 
 ```text
-SourceSnapshot = {
-    document: SourceDocumentId,
+SourceFileSnapshot = {
+    file: SourceFileId,
     revision: RevisionId,
     bytes: ByteString,
     encoding: Utf8,
@@ -16,16 +16,42 @@ SourceSnapshot = {
     contentHash: Hash256
 }
 
-SourceDocument = {
-    id: SourceDocumentId,
+SourceFileRecord = {
+    id: SourceFileId,
     physicalBytes: ByteString,
-    decoded: SourceSnapshotId,
+    decoded: SourceFileSnapshotId,
     decodingMap: OffsetMap,
     encoding: DetectedEncoding
 }
 
+SourceViewUse =
+    PrimarySourceView
+  | IncludedSourceView(initiatingRange: SourceRange)
+  | GeneratedSourceView(rule: RuleId, anchor: Option<SourceRange>)
+
+SourceLineDirective = {
+    byteOffset: UInt64,
+    presumedPath: Option<Utf8String>,
+    presumedLine: UInt32,
+    resetToFileDefault: Bool
+}
+
+SourceViewKey = {
+    snapshot: SourceFileSnapshotId,
+    use: SourceViewUse,
+    viewPath: Option<Utf8String>,
+    lineDirectives: NodeList<SourceLineDirective>
+}
+
+SourceViewId = ContentId<SourceViewKey>
+
+SourceView = {
+    id: SourceViewId,
+    key: SourceViewKey
+}
+
 SourceRange = {
-    snapshot: SourceSnapshotId,
+    view: SourceViewId,
     startByte: UInt64,
     endByte: UInt64
 }
@@ -40,49 +66,63 @@ ByteRange = {
 }
 
 SourceTextSlice = {
-    snapshot: SourceSnapshotId,
+    snapshot: SourceFileSnapshotId,
     range: ByteRange
 }
 ```
 
-Source offsets are byte offsets into `bytes`. A source range is half-open `[start, end)` and belongs
-to exactly one snapshot. Line and column are derived views and are not serialized as authority.
+`SourceFileSnapshot` is the immutable decoded-content counterpart of the codebase's `SourceFile`;
+`SourceFileRecord` additionally retains the original encoded bytes and their decoding map. An
+immutable `SourceView` is one interpretation/use of that content for a particular lex/parse, just
+as in the current source manager. Re-including equal file contents may therefore reuse a snapshot
+while producing a distinct view with a different initiating range or line-directive interpretation.
+
+Source offsets are byte offsets into the snapshot selected by the range's `SourceView`. A source
+range is half-open `[start, end)` and belongs to exactly one view. Line and column are derived from
+that view's snapshot and line directives and are not serialized as competing authority.
 
 `REP-SRC-001`: A snapshot is immutable. Editing creates a new snapshot and an explicit change map
 from old byte ranges to new byte ranges.
 
-`REP-SRC-002`: Source locations in tokens and syntax nodes identify a snapshot and byte range; they
+`REP-SRC-002`: Source locations in tokens and syntax nodes identify a source view and byte range; they
 must not be raw pointers into a mutable source manager.
 
-`REP-SRC-003`: Every range satisfies `startByte <= endByte <= snapshot.bytes.count`.
+`REP-SRC-003`: Every range satisfies
+`startByte <= endByte <= resolve(resolve(range.view).key.snapshot).bytes.count`.
 `SourceRangeSet.ranges` is duplicate-free and in token-origin traversal order; adjacent ranges are
-coalesced only when they belong to the same snapshot and no origin boundary would be lost. A macro-
+coalesced only when they belong to the same view and no origin boundary would be lost. A macro-
 derived red node may therefore name ranges in several snapshots without inventing one contiguous
 span.
 
 `REP-SRC-004`: `ByteRange` is half-open and satisfies `startByte <= endByte` in the coordinate
 space of its containing field. A `SourceTextSlice` range is bounded by its named snapshot. For a
-`PhysicalSlice`, `rawText.snapshot = span.snapshot` and its byte range equals
+`PhysicalSlice`, `rawText.snapshot = resolve(span.view).key.snapshot` and its byte range equals
 `[span.startByte, span.endByte)`; the two fields provide a lazy byte view and an explicit source
 location, not competing extents.
 
-`REP-SRC-005`: `SourceSnapshot.bytes` is well-formed UTF-8,
+`REP-SRC-005`: `SourceFileSnapshot.bytes` is well-formed UTF-8,
 `contentHash = SHA256(bytes)`, and `lineMap = buildUtf8LineMap(bytes)`. The canonical line map starts
 with byte offset zero and adds the offset immediately after every LF byte; CR in a CRLF pair remains
 part of the preceding line. It stores no redundant line/column cache. These equations are checked
 when a snapshot is interned and again when it is deserialized.
 
-`REP-SRC-006`: Resolving `SourceDocument.decoded` yields a snapshot whose `document` equals the
-document's `id` and whose bytes equal `decode(physicalBytes, encoding)`. `DetectedEncoding` includes
+`REP-SRC-006`: Resolving `SourceFileRecord.decoded` yields a snapshot whose `file` equals the
+record's `id` and whose bytes equal `decode(physicalBytes, encoding)`. `DetectedEncoding` includes
 the BOM decision. `OffsetMap` is the canonical, total, monotone segment map produced by that same
 decode operation: it maps every physical and decoded segment boundary, including a consumed BOM and
 replacement spans for invalid input, and no independently supplied map is accepted. Consequently
 the decoded snapshot is the semantic source of truth while `(physicalBytes, encoding, decodingMap)`
 is sufficient to reproduce and diagnose the original file exactly.
 
+`REP-SRC-007`: `SourceView.id = ContentId(SourceView.key)`. Line directives are in strictly
+increasing `byteOffset` order and are bounded by the selected snapshot. An included view's
+initiating range resolves to its parent view; a generated view records its rule and optional source
+anchor. Equal decoded bytes do not merge views whose include use, view path, or line-directive
+interpretation differs.
+
 ## Physical tokens, trivia, and preprocessing
 
-The frontend maintains a byte-partitioning physical tape, logical lexer tokens, and expanded
+The frontend maintains a byte-partitioning physical token list, logical lexer tokens, and expanded
 preprocessor tokens so that formatting and semantic compilation do not fight over one lossy stream.
 
 ```text
@@ -90,7 +130,7 @@ PhysicalSlice = {
     id: PhysicalSliceId,
     span: SourceRange,
     rawText: SourceTextSlice,
-    role: TokenPiece(token: PhysicalTokenId, pieceIndex: UInt32)
+    role: TokenPiece(token: TokenId, pieceIndex: UInt32)
         | TriviaPiece(trivia: TriviaId)
         | PreprocessorMarker(marker: PpMarkerId)
 }
@@ -109,36 +149,43 @@ TriviaRange = {
     span: SourceRange
 }
 
+Token = {
+    id: TokenId,
+    type: TokenType,
+    pieces: NonEmpty<PhysicalSliceId>,
+    logicalSpelling: Text,
+    leadingGap: TriviaRangeId,
+    trailingGap: TriviaRangeId,
+    interstitialTrivia: NodeList<TriviaId>,
+    flags: TokenFlags
+}
+
 PhysicalToken =
-    LexicalToken {
-        id: PhysicalTokenId,
-        kind: TokenKind,
-        pieces: NonEmpty<PhysicalSliceId>,
-        logicalSpelling: Text,
-        leadingGap: TriviaRangeId,
-        trailingGap: TriviaRangeId,
-        interstitialTrivia: NodeList<TriviaId>,
-        lexicalFlags: TokenFlags
-    }
+    SourceToken(Token)
   | BoundaryToken {
-        id: PhysicalTokenId,
+        id: BoundaryTokenId,
         boundary: StartOfFile | EndOfFile,
         adjacentGap: TriviaRangeId
     }
 
-PhysicalTokenTape = {
+PhysicalTokenList = {
     slices: NodeList<PhysicalSlice>,
     tokens: NodeList<PhysicalToken>,
     trivia: NodeList<Trivia>,
     gaps: NodeList<TriviaRange>,
-    document: SourceDocumentId,
-    decodedSource: SourceSnapshotId
+    view: SourceViewId
 }
+
+PhysicalTokenListId = ContentId<PhysicalTokenList>
 
 TokenFlag = StartOfLogicalLine | EscapedIdentifier | ContextualKeywordCandidate |
             InvalidSpelling | StandardTokenFlag(StandardTokenFlagId)
 TokenFlags = CanonicalFiniteSet<TokenFlag>
 ```
+
+`PhysicalTokenList` is the lossless replacement form of the codebase's `TokenList`. Each
+`SourceToken` contains the established `Token`/`TokenType` concept with added immutable trivia and
+slice links; `BoundaryToken` is a list sentinel, not a renamed lexical token.
 
 Ordered `PhysicalSlice`s, not logical token extents, partition the source. Most tokens have one
 piece. A token containing a spliced backslash-newline has multiple token pieces separated by a
@@ -147,7 +194,7 @@ splice. Thus neither a fake contiguous source range nor discarded bytes are requ
 
 Ordinary trivia is stored once in immutable inter-token gaps. The gap between token `i` and token `i+1` is
 visible as `i.trailingGap` and `i+1.leadingGap`; both fields refer to the same `TriviaRangeId`.
-Start/end `BoundaryToken`s own no source slice and anchor the outer gaps. Every `LexicalToken` has at
+Start/end `BoundaryToken`s own no source slice and anchor the outer gaps. Every `Token` has at
 least one piece and exposes both surrounding gaps. `isDocumentation` is valid only on line/block
 comments, so documentation classification preserves the base comment form. Documentation
 extraction is a view over trivia and never removes comments from the CST.
@@ -160,14 +207,15 @@ well-defined outer gap. These rules make shared leading/trailing trivia serializ
 duplicating ownership.
 
 `REP-TOK-001`: Ordered physical slices partition the decoded source snapshot. Their raw text
-concatenates to its exact UTF-8 bytes. The tape retains `SourceDocumentId`, so identity output of an
-unmodified non-UTF-8/BOM input can reproduce the original encoded `physicalBytes`.
+concatenates to its exact UTF-8 bytes. The list retains `SourceViewId`; resolving the view and its
+snapshot yields the `SourceFileRecord`, so identity output of an unmodified non-UTF-8/BOM input can
+reproduce the original encoded `physicalBytes`.
 
 `REP-TOK-002`: Token spelling is preserved independently of its decoded value. `0x10`, `020`, and
 `16` may have the same integer value but different raw text.
 
 `REP-TOK-003`: Invalid bytes and malformed literals produce tokens with lexical diagnostics; the
-token tape remains lossless.
+physical token list remains lossless.
 
 Preprocessing produces an immutable tree and a view, not a second unrelated token list:
 
@@ -176,18 +224,18 @@ PreprocessorTree = {
     root: SourceGreenNodeId,
     macroDefinitions: NodeMap<PpMacroDefinitionId, PpMacroDefinition>,
     macroInvocations: NodeMap<PpInvocationId, PpMacroInvocation>,
-    physicalTape: PhysicalTokenTapeId
+    physicalTokens: PhysicalTokenListId
 }
 
 ExpandedToken = {
     id: ExpandedTokenId,
-    kind: TokenKind,
+    kind: TokenType,
     spelling: Text,
     origin: TokenOriginId
 }
 
 TokenOrigin =
-    Physical(token: PhysicalTokenId)
+    Physical(token: TokenId)
   | MacroExpansion(invocation: PpInvocationId, definition: PpMacroDefinitionId,
                    arguments: NodeList<TokenOriginId>, step: ExpansionStep)
   | Synthesized(rule: RuleId, anchor: SourceRange)
@@ -205,7 +253,7 @@ The grammar parser normally consumes the active `ExpandedTokenView`; tooling may
 regions speculatively without changing the authoritative presence condition.
 
 Preprocessor identities are allocated entirely in the lexical/preprocessing domain. They never
-refer to grammar `CstNodeId` or semantic `DeclId`, because neither exists when expansion provenance
+refer to grammar `CSTNodeId` or semantic `DeclId`, because neither exists when expansion provenance
 is constructed. Later CST and AST nodes point back to these IDs.
 
 ## Lossless CST
@@ -223,7 +271,7 @@ SourceGreenElement = PhysicalSliceElement(PhysicalSliceId) |
 ExpandedTokenSliceId = {
     parent: ExpandedTokenId,
     spellingRange: ByteRange,
-    virtualKind: TokenKind
+    virtualKind: TokenType
 }
 
 GrammarTokenRef = Whole(ExpandedTokenId) | Slice(ExpandedTokenSliceId)
@@ -235,30 +283,30 @@ ExpandedTokenRange = {
     endIndex: UInt64
 }
 
-CstNodeId = SourceCstNode(SourceGreenNodeId)
-          | GrammarCstNode(GrammarGreenNodeId)
+CSTNodeId = SourceCSTNode(SourceGreenNodeId)
+          | GrammarCSTNode(GrammarGreenNodeId)
 
 SourceGreenNode = {
-    kind: SourceCstKind,
+    kind: SourceCSTKind,
     children: NodeList<SourceGreenElement>,
     byteWidth: UInt32,
-    flags: SourceCstFlags
+    flags: SourceCSTFlags
 }
 
-SourceCstFlag = ContainsDirective | ContainsInactiveText | ContainsMacroSpelling |
+SourceCSTFlag = ContainsDirective | ContainsInactiveText | ContainsMacroSpelling |
                 ContainsSourceRecovery | ContainsDiagnostics
-SourceCstFlags = CanonicalFiniteSet<SourceCstFlag>
+SourceCSTFlags = CanonicalFiniteSet<SourceCSTFlag>
 
 GrammarGreenNode = {
-    kind: CstKind,
+    kind: CSTKind,
     children: NodeList<GrammarGreenElement>,
     expandedTokenCount: UInt32,
-    flags: CstFlags
+    flags: CSTFlags
 }
 
-CstFlag = ContainsMissingToken | ContainsSkippedToken | ContainsAmbiguity |
+CSTFlag = ContainsMissingToken | ContainsSkippedToken | ContainsAmbiguity |
           MacroDerived | ContainsDiagnostics
-CstFlags = CanonicalFiniteSet<CstFlag>
+CSTFlags = CanonicalFiniteSet<CSTFlag>
 
 RedNode = {
     green: SourceGreenNodeId | GrammarGreenNodeId,
@@ -327,63 +375,63 @@ or diagnoses an alternative and records the selected descriptor in provenance.
 The semantic tree is a family of representations, not a mutable object gradually filled in:
 
 ```text
-Stage = Surface | Scoped | Bound | Typed | Elaborated | Core
+Stage = Surface | Scoped | Bound | Typed | Elaborated | IRReady
 LocalNodeIndex = UInt64
 
-AstNode<S> = {
+SyntaxNode<S> = {
     id: NodeId<S>,
-    kind: AstKind<S>,
+    kind: ASTNodeType<S>,
     fields: NodeFields<S>
 }
 
-AstOriginField: FieldName = FieldName(text: "origin", wireTag: 1)
+ASTOriginField: FieldName = FieldName(text: "origin", wireTag: 1)
 
-AstSnapshot<S> = {
-    id: AstSnapshotId<S>,
+ASTSnapshot<S> = {
+    id: ASTSnapshotId<S>,
     stage: S,
     schema: SchemaVersion,
     roots: NonEmpty<NodeId<S>>,
-    nodes: CanonicallyOrderedMap<NodeId<S>, AstNode<S>>,
-    sourceDependencies: CanonicallyOrderedSet<SourceSnapshotId>,
+    nodes: CanonicallyOrderedMap<NodeId<S>, SyntaxNode<S>>,
+    sourceDependencies: CanonicallyOrderedSet<SourceFileSnapshotId>,
     semanticSnapshot: SemanticSnapshotId,
     externalDependencies: CanonicallyOrderedSet<ExternalRef>
 }
 
-AstSnapshotId<S> = ContentId<CanonicalAstSnapshotRecord<S>>
+ASTSnapshotId<S> = ContentId<CanonicalASTSnapshotRecord<S>>
 
 CanonicalLocalNodeFields<S> =
     canonical projection of NodeFields<S> with each same-snapshot AST reference encoded by
     LocalNodeIndex
 
-CanonicalAstSnapshotRecord<S> = {
+CanonicalASTSnapshotRecord<S> = {
     stage: S,
     schema: SchemaVersion,
     roots: NonEmpty<LocalNodeIndex>,
-    nodes: NodeList<CanonicalAstNodeRecord<S>>,
-    sourceDependencies: CanonicallyOrderedSet<SourceSnapshotId>,
+    nodes: NodeList<CanonicalSyntaxNodeRecord<S>>,
+    sourceDependencies: CanonicallyOrderedSet<SourceFileSnapshotId>,
     semanticSnapshot: SemanticSnapshotId,
     externalDependencies: CanonicallyOrderedSet<ExternalRef>
 }
 
-CanonicalAstNodeRecord<S> = {
-    kind: AstKind<S>,
+CanonicalSyntaxNodeRecord<S> = {
+    kind: ASTNodeType<S>,
     fields: CanonicalLocalNodeFields<S>
 }
 ```
 
-`CanonicalAstSnapshotRecord` encodes same-snapshot AST references by `LocalNodeIndex`, not by the
-enclosing `AstSnapshotId`; publication derives that ID from the canonical record and then derives
-each `NodeId<S>` from `(AstSnapshotId<S>, LocalNodeIndex)`. This removes an identity-hash cycle.
-`CanonicalAstNodeRecord.fields` is derived bijectively from the published fields; decoding supplies
+`CanonicalASTSnapshotRecord` encodes same-snapshot AST references by `LocalNodeIndex`, not by the
+enclosing `ASTSnapshotId`; publication derives that ID from the canonical record and then derives
+each `NodeId<S>` from `(ASTSnapshotId<S>, LocalNodeIndex)`. This removes an identity-hash cycle.
+`CanonicalSyntaxNodeRecord.fields` is derived bijectively from the published fields; decoding supplies
 the enclosing snapshot ID to restore each local reference. The node map contains exactly the
 derived IDs, every root belongs to that map, every
 same-snapshot structural AST edge resolves in it, and `stage = S`. Cross-snapshot structural or
 semantic edges occur only through `ExternalRef`; an `Origin` may separately retain its specified
-provenance identity in an earlier snapshot. Thus `AstSnapshot<S>` is the immutable owning unit
-missing from a naked `AstNode<S>`; copying a node reference never extends the lifetime of mutable
+provenance identity in an earlier snapshot. Thus `ASTSnapshot<S>` is the immutable owning unit
+missing from a naked `SyntaxNode<S>`; copying a node reference never extends the lifetime of mutable
 builder state.
 
-Every AST descriptor contains exactly one required, serialized `AstOriginField` whose value is an
+Every AST descriptor contains exactly one required, serialized `ASTOriginField` whose value is an
 `Origin` and whose edge category is `Provenance`. Thus `origin` is ordinary schema-visible storage,
 not a header field hidden from generic traversal. Typed node notation may continue to write
 `node.origin` as sugar for reading that field.
@@ -403,12 +451,12 @@ order. Names are text plus hygiene/origin identity; no name has been resolved.
 
 ### Scoped AST
 
-`ScopedAST` assigns stable `DeclarationFragmentId` and `ScopeId` values, classifies parsed modifiers
+`ScopedAST` assigns stable `DeclFragmentId` and `ScopeId` values, classifies parsed modifiers
 and attributes, and records written scope membership/order in a `FragmentScopeGraph`. It does not
 resolve arbitrary name references or pretend that each written redeclaration is a distinct logical
 entity.
 
-The `FreezeDeclarationIndex` boundary groups compatible fragments, freezes logical `DeclId` values,
+The `FreezeDeclIndex` boundary groups compatible fragments, freezes logical `DeclId` values,
 and rewrites the fragment graph into a `FrozenScopeGraph`. `BoundAST` and all later stages use only
 the frozen graph and retain fragment origins separately.
 
@@ -439,7 +487,7 @@ represented as plans.
 ```text
 TypedValueProvenance =
     NoAdditionalValueProvenance
-  | ReferenceHandleProvenance(proof: ReferenceHandleProof)
+  | PointerLikeProvenance(proof: PointerLikeProof)
 
 TypedExpr = {
     ...,
@@ -451,14 +499,14 @@ TypedExpr = {
 }
 ```
 
-`REP-TYP-001`: `ReferenceHandleProvenance(p)` is permitted exactly for
+`REP-TYP-001`: `PointerLikeProvenance(p)` is permitted exactly for
 `ValueClassifier(p.resultType, RValue)`. Every typed reference/pointer value that may be
 dereferenced has this provenance; a type alone cannot authorize dereference. Ordinary values,
-places, type-level expressions, overload sets, and errors use `NoAdditionalValueProvenance` unless
+storage, type-level expressions, overload sets, and errors use `NoAdditionalValueProvenance` unless
 their closed recovery alternative explicitly carries a typed error handle.
 
 `REP-TYP-002`: Identity-preserving binding, copy, reference-view formation, argument passing, and
-return preserve the complete reference handle shape. A registered handle conversion supplies a new
+return preserve the complete pointer-like shape. A registered pointer-like conversion supplies a new
 checked proof. Control-flow merge requires equal referent, address-space, access, mutability,
 lifetime, and physical-source-provenance facts and joins only alias provenance through `joinAlias`;
 otherwise the merge has a structured incompatibility or uses a named registered representation
@@ -478,18 +526,20 @@ rule. No operation derives provenance from the destination node ID or from equal
 
 An elaborated call is therefore directly interpretable without re-running overload resolution.
 
-### Core AST
+### IR-ready AST
 
-`CoreAST` uses a small, typed set of constructs that map structurally to frontend IR. Surface-only
+`IRReadyAST` uses a small, typed set of constructs that map structurally to frontend IR. Surface-only
 forms such as operator syntax, lambdas, properties, `defer`, and target switches have been rewritten
-to explicit core forms. Generated declarations are ordinary immutable Core nodes with
+to explicit IR-ready forms. Generated declarations are ordinary immutable IR-ready nodes with
 `Synthesized` provenance.
 
 Abstract storage is also eliminated at this boundary. A property or declared subscript has become
-explicit getter, setter, or ref-accessor calls with captured receiver/index evaluation; every Core
-place is proven physical storage. Core and IR therefore cannot reinterpret an assignable abstract
+explicit getter, setter, or ref-accessor calls with captured receiver/index evaluation; every
+IR-ready storage is proven physical storage. The IR-ready AST and IR therefore cannot reinterpret
+an assignable abstract
 projection as a valid `__ref`/`__constref` argument or silently allocate a reference temporary. A
-physical-mode property argument reaches Core only after its exact access-indexed accessor call and
+physical-mode property argument reaches the IR-ready AST only after its exact access-indexed
+accessor call and
 stored dereference have produced a distinct proof-carrying physical endpoint.
 
 `REP-STG-001`: A node in stage `S+1` refers to its stage-`S` origin but never mutates or embeds a
@@ -522,7 +572,7 @@ NodeKind = {
     stableName: QualifiedName
 }
 
-AstKind<S> = { k: NodeKind | descriptor(k).family = AST and S in descriptor(k).stages }
+ASTNodeType<S> = { k: NodeKind | descriptor(k).family = AST and S in descriptor(k).stages }
 NodeFields<S> = CanonicallyOrderedMap<FieldName, FieldValue>
 
 FieldValueKind = ScalarKind(T)
@@ -549,10 +599,10 @@ NodeDescriptor = {
     invariants: NodeList<RuleId>
 }
 
-AnySchemaNodeRef = AstNodeRef(AnyNodeId)
+AnySchemaNodeRef = SyntaxNodeRef(AnyNodeId)
                  | SourceGreenRef(SourceGreenNodeId)
                  | GrammarGreenRef(GrammarGreenNodeId)
-                 | SemanticValueRef(ContentId<SemanticValue>)
+                 | SchemaValueRef(ContentId<SchemaValue>)
 
 FieldMapEntry = {
     key: FieldValue,
@@ -579,11 +629,11 @@ ProductionId = {
     qualifiedName: QualifiedName
 }
 
-SourceCstKind = SourceRoot | Directive | MacroDefinition | MacroInvocation |
+SourceCSTKind = SourceRoot | Directive | MacroDefinition | MacroInvocation |
                 IncludeBoundary | ConditionalRegion | InactiveRegion |
                 SourceRecovery | RegisteredSourceKind(NodeKind)
 
-CstKind = GrammarRoot | Production(ProductionId) | Ambiguity |
+CSTKind = GrammarRoot | Production(ProductionId) | Ambiguity |
           MissingToken | SkippedTokens | RegisteredGrammarKind(NodeKind)
 
 NonOwningParseAlternative = {
@@ -616,7 +666,7 @@ SchemaMigrationDescriptor = {
 Every named production in `grammar.ebnf` has exactly one `ProductionId` and registry entry. A
 production node's descriptor names each semantic child/range role; punctuation remains token leaves
 and need not become a semantic field. Recovery and ambiguity use the dedicated closed kinds above.
-Every `AstKind<S>` and semantic value constructor likewise has exactly one descriptor. Stable names
+Every `ASTNodeType<S>` and semantic value constructor likewise has exactly one descriptor. Stable names
 are diagnostic labels; `(family, wireTag)` is the wire discriminator, and wire tags are never reused
 after publication.
 
@@ -658,7 +708,7 @@ field(node, i) -> FieldValue
 operandCount(node) -> UInt32
 operand(node, i) -> AnySchemaNodeRef
 
-AstEditFailure =
+ASTEditFailure =
     UnknownField(kind: NodeKind, field: FieldName)
   | FieldValueMismatch(field: FieldName, expected: FieldValueKind, actual: FieldValue)
   | CrossStageReference(field: FieldName, expected: Stage, actual: Stage)
@@ -666,39 +716,39 @@ AstEditFailure =
   | InvariantViolation(rule: RuleId)
   | InvalidRewriteReplacement(expectedKind: NodeKind, actualKind: NodeKind)
 
-AstEditResult<S, K> = {
-    snapshot: AstSnapshot<S>,
+ASTEditResult<S, K> = {
+    snapshot: ASTSnapshot<S>,
     node: NodeRef<S, K>
 }
 
 StagePreservingRewriter<S> =
-    forall K . NodeRef<S, K> -> Result<NodeRef<S, K>, AstEditFailure>
+    forall K . NodeRef<S, K> -> Result<NodeRef<S, K>, ASTEditFailure>
 
-withField<S, K>(snapshot: AstSnapshot<S>, node: NodeRef<S, K>,
+withField<S, K>(snapshot: ASTSnapshot<S>, node: NodeRef<S, K>,
                 fieldName: FieldName, value: FieldValue,
                 originRule: OriginUpdateRule)
-    -> Result<AstEditResult<S, K>, AstEditFailure>
+    -> Result<ASTEditResult<S, K>, ASTEditFailure>
 
-withOrigin<S, K>(snapshot: AstSnapshot<S>, node: NodeRef<S, K>, origin: Origin)
-    -> Result<AstEditResult<S, K>, AstEditFailure>
+withOrigin<S, K>(snapshot: ASTSnapshot<S>, node: NodeRef<S, K>, origin: Origin)
+    -> Result<ASTEditResult<S, K>, ASTEditFailure>
 
-rewrite<S, K>(snapshot: AstSnapshot<S>, node: NodeRef<S, K>,
+rewrite<S, K>(snapshot: ASTSnapshot<S>, node: NodeRef<S, K>,
               rewriter: StagePreservingRewriter<S>)
-    -> Result<AstEditResult<S, K>, AstEditFailure>
+    -> Result<ASTEditResult<S, K>, ASTEditFailure>
 ```
 
 Here `K` is the statically accepted node-kind family of the input position. `withField` and
 `withOrigin` retain the exact dynamic kind; `rewrite` may choose another dynamic kind only when it
 belongs to the same `K`. All three retain stage `S`, validate the complete result, and return a new
 owning snapshot plus a reference into it. A transformation between stages is instead a named query
-such as `Bind`, `Check`, `ElaborateNode`, or `LowerToCore`; it cannot masquerade as a generic edit.
+such as `Bind`, `Check`, `ElaborateNode`, or `LowerToIRReadyAST`; it cannot masquerade as a generic edit.
 
 `withField` is functional: it validates the descriptor and returns a new snapshot, sharing
 unchanged subtree storage where possible while leaving the input snapshot byte-identical. Typed
 accessors are generated over the same storage and cannot disagree with the generic view.
 
 `PreserveExplicitOrigin` retains the node's current origin (or, when the edited field is
-`AstOriginField`, accepts that explicit new value). `DeriveOrigin(rule)` writes
+`ASTOriginField`, accepts that explicit new value). `DeriveOrigin(rule)` writes
 `Derived(previous: node.id, rule)` while changing the requested field. `ReplaceOrigin(origin)` writes
 the supplied complete origin and is the only generic recovery/synthesis/import route. These policies
 make a transform's provenance decision explicit without maintaining a second header value.
@@ -712,9 +762,9 @@ the specification of a role.
 `REP-SCH-003`: A generic rewriter must preserve node invariants or return a validation error; it
 cannot create a partially initialized node.
 
-`REP-SCH-005`: For every AST node, descriptor lookup of `AstOriginField` succeeds exactly once,
+`REP-SCH-005`: For every AST node, descriptor lookup of `ASTOriginField` succeeds exactly once,
 `origin(node)` returns that field, and `withOrigin(snapshot, node, origin)` has exactly the result of
-`withField(snapshot, node, AstOriginField, origin, PreserveExplicitOrigin)` with the same type
+`withField(snapshot, node, ASTOriginField, origin, PreserveExplicitOrigin)` with the same type
 parameters. Provenance-filtered traversal observes the field; structural-only traversal does not.
 Serialization, copying, and generic rewriting therefore cannot omit or disagree with typed
 provenance access.
@@ -728,7 +778,7 @@ invariants.
 
 This design document specifies the registry format and completeness laws; the exhaustive per-node
 registry is intentionally a review follow-up before implementation begins, because freezing field
-roles now would prejudge the surface-to-Core node taxonomy under review. Its absence is tracked as
+roles now would prejudge the surface-to-IR-ready node taxonomy under review. Its absence is tracked as
 a blocking specification item in chapter 12, not silently treated as an implementation detail.
 
 ## Types, values, and semantic graphs
@@ -739,8 +789,8 @@ by content inside a `SemanticSnapshot`. Recursive nominal and conformance values
 identity/definition split: an identity may be referenced before its separately published definition,
 and the frozen snapshot validates the resulting strongly connected graph.
 
-Interface-subtype witnesses—including generic table values, specializations, bound parameters,
-keyed lookups, and existential extractions—are registered `SemanticValue` alternatives, not opaque
+Subtype witnesses—including generic table values, specializations, bound parameters,
+keyed lookups, and existential extractions—are registered `SchemaValue` alternatives, not opaque
 side-table handles. Generic operand enumeration, `withField`, substitution, copying, and
 serialization therefore work through the same node schema used for types and constants; chapter 14
 defines their classifier and operational validation.
@@ -759,19 +809,19 @@ frozen IDs may occur in serialized nodes or persistent query keys.
 Snapshot-local frozen handles are namespaced by snapshot:
 
 ```text
-NodeId<S>   = (AstSnapshotId<S>, LocalNodeIndex, StageTag)
-ScopeId     = (SnapshotId, LocalScopeIndex)
+NodeId<S>   = (ASTSnapshotId<S>, LocalNodeIndex, StageTag)
+ScopeId     = (SemanticSnapshotId, LocalScopeIndex)
 TypeHandle  = (SemanticSnapshotId, CanonicalValueIndex)
 
 ExportedId = {
     module: ModuleStableId,
-    path: CanonicalDeclarationPath,
+    path: CanonicalDeclPath,
     kind: DeclKind,
     signature: CanonicalSignatureEncoding
 }
 ```
 
-`DeclId`, `CanonicalDeclarationPath`, `DeclarationDisambiguator`, and
+`DeclId`, `CanonicalDeclPath`, `DeclDisambiguator`, and
 `CanonicalSignatureEncoding` are defined once in chapter 4. They are revision-independent nominal
 identities and therefore deliberately do not share the snapshot-local tuple form above.
 
@@ -838,28 +888,28 @@ Bound:
        [IntLiteral(value=1)])
 
 Typed:
-  Call(result=Selected(winner.use=BoundDeclUse(CanonicalDeclRef(f_int))),
+  Call(result=Selected(winner.use=BoundDeclUse(DeclRef(f_int))),
        args=[IntLiteral(value=1, classifier=ValueClassifier(int, RValue))],
        classifier=ValueClassifier(R, RValue))
 
 Elaborated:
   ElaboratedCall(
       callee=CallableValue(
-          dispatch=Direct(CanonicalDeclRef(f_int)),
+          dispatch=Direct(DeclRef(f_int)),
           contract=Effective(contract_f_int)),
       receiver=None, signature=sig_f_int,
-      args=[BoundAccessPlan(
+      args=[BoundStorageAccessPlan(
           identityRecipe(terminal=PassArgument(ImmediateValue(arg0))),
           operandBindings)], result=R)
 
-Core:
+IR-ready:
   CallRegion(preparation=[Let(arg0, ConstInt(1))],
              call=DirectCall(f_int, [arg0]),
              normalCompletion=[], exceptionalCompletion=[], result=R)
 ```
 
 Each line is a new node graph with an origin edge to the preceding line. Overload candidates and
-the chosen conversion remain inspectable even though Core AST no longer needs the overload set.
+the chosen conversion remain inspectable even though the IR-ready AST no longer needs the overload set.
 
 ## Compatibility notes
 

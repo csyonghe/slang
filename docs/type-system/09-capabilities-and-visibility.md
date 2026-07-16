@@ -1,6 +1,6 @@
 # Capabilities and visibility
 
-Visibility and capabilities answer different questions. Visibility determines whether a source
+Visibility and capabilities answer different questions. Declaration visibility determines whether a source
 use may name a declaration and whether a declaration may expose another declaration. A capability
 contract determines the compilation worlds in which an already accessible declaration is usable.
 Neither relation changes name lookup identity or canonical function-type identity.
@@ -14,7 +14,7 @@ language version, and target profile are explicit query-key inputs.
 The semantic visibility lattice is:
 
 ```text
-Visibility = Private | Internal | Public
+DeclVisibility = Private | Internal | Public
 
 Private < Internal < Public
 meetVisibility(x, y) = min(x, y)
@@ -26,7 +26,7 @@ meetVisibility(x, y) = min(x, y)
 `VIS-DOM-001`: `meetVisibility` is associative, commutative, and idempotent, with `Public` as its
 identity. Its result is the greatest visibility at which all inputs may be exposed.
 
-`VIS-DOM-002`: Visibility is attached to canonical declaration identity. A declaration use,
+`VIS-DOM-002`: `DeclVisibility` is attached to canonical declaration identity. A declaration use,
 generic specialization, or lookup path cannot raise or lower the declaration's visibility.
 
 ## Declared and default visibility
@@ -34,18 +34,18 @@ generic specialization, or lookup path cannot raise or lower the declaration's v
 ```text
 DeclaredVisibilityInput = {
     declaration: DeclId,
-    explicitModifier: Option<Visibility>,
+    explicitModifier: Option<DeclVisibility>,
     owner: Option<DeclId>,
     module: ModuleId,
     languageRules: LanguageRuleSetId
 }
 
-ComputeDeclaredVisibility(DeclaredVisibilityInput) -> CheckResult<VisibilityFact>
+ComputeDeclaredVisibility(DeclaredVisibilityInput) -> CheckResult<DeclVisibilityFact>
 
 VisibilityDefaultRule =
     NamespaceScopeDefault
   | LegacyPublicDefault(languageRules: LanguageRuleSetId)
-  | ModuleDeclaredDefault(module: ModuleId, value: Visibility)
+  | ModuleDeclaredDefault(module: ModuleId, value: DeclVisibility)
   | ModernImplicitInternalDefault(module: ModuleId)
 
 VisibilityDerivation =
@@ -54,11 +54,11 @@ VisibilityDerivation =
   | DefaultedVisibility(rule: VisibilityDefaultRule)
   | OwnerCappedVisibility(input: VisibilityDerivation, owner: DeclId)
 
-VisibilityFact = {
+DeclVisibilityFact = {
     declaration: DeclId,
     module: ModuleId,
     privateOwner: Option<PrivateOwnerKey>,
-    value: Visibility,
+    value: DeclVisibility,
     source: VisibilityDerivation
 }
 ```
@@ -123,7 +123,7 @@ ModuleReachability = {
 
 ModuleReachabilityId = ContentId<ModuleReachability>
 
-AccessContext = {
+VisibilityContext = {
     useOrigin: Origin,
     useScope: ScopeId,
     module: ModuleId,
@@ -135,12 +135,12 @@ PrivateOwnerKey =
     NamespaceOwner(canonicalNamespace: DeclId)
   | TypeOwner(nominalDefinition: DeclId)
 
-AccessEvidence =
+VisibilityEvidence =
     PublicImport(path: ImportPath)
   | SameModule(module: ModuleId)
   | SamePrivateOwner(owner: PrivateOwnerKey, lexicalPath: ScopePath)
 
-InaccessibleReason =
+VisibilityFailureReason =
     PublicModuleUnreachable {
         declaration: DeclId,
         declarationModule: ModuleId,
@@ -157,12 +157,12 @@ InaccessibleReason =
         enclosingOwners: CanonicallyOrderedSet<PrivateOwnerKey>
     }
 
-AccessDecision =
-    Allowed(AccessEvidence)
-  | Denied(InaccessibleReason)
+VisibilityDecision =
+    Allowed(VisibilityEvidence)
+  | Denied(VisibilityFailureReason)
 ```
 
-The denial alternatives are exhaustive for a validated `VisibilityFact`: public access can fail
+The denial alternatives are exhaustive for a validated `DeclVisibilityFact`: public access can fail
 only reachability, internal access can fail only module equality, and private access can fail only
 owner membership. Each alternative retains the endpoints needed to reproduce the failed premise;
 diagnostics do not infer a reason later from rendered text. Malformed visibility facts are rejected
@@ -207,7 +207,7 @@ its target root is the same nominal definition. Similar spelling, a conversion, 
 user-defined equality witness is insufficient.
 
 `VIS-ACC-006`: Lookup retains inaccessible candidates as rejected candidates with
-`AccessDecision`; overload resolution and conformance matching may use them for diagnostics but
+`VisibilityDecision`; overload resolution and conformance matching may use them for diagnostics but
 must not select them. Language-service recovery may display such a candidate without changing the
 typed result.
 
@@ -222,25 +222,25 @@ SemanticFieldPathStep =
     VariantPayload(variantTag: UInt32)
   | RecordField(field: FieldName)
   | ListElement(index: UInt32)
-  | MapKey(key: ContentId<SemanticValue>)
-  | MapValue(key: ContentId<SemanticValue>)
+  | MapKey(key: ContentId<SchemaValue>)
+  | MapValue(key: ContentId<SchemaValue>)
 
 SemanticFieldPath = NodeList<SemanticFieldPathStep>
 
 ExposureReference = {
-    declaration: CanonicalDeclRef,
+    declaration: DeclRef,
     role: ExposureRole,
     origin: Origin,
     path: SemanticFieldPath
 }
 
 VisibilityFootprint = {
-    maximumVisibility: Visibility,
+    maximumVisibility: DeclVisibility,
     references: CanonicallyOrderedSet<ExposureReference>
 }
 
 ComputeVisibilityFootprint(value, role) -> VisibilityFootprint
-ComputeEffectiveVisibility(value) -> Visibility
+ComputeEffectiveVisibility(value) -> DeclVisibility
 ```
 
 For `NameExposed` and `OpaqueSemanticDependency`, the traversal follows every structural semantic
@@ -254,7 +254,7 @@ recursive semantic values finite.
 - the nominal declaration and all type, value, and pack specialization arguments;
 - element types and constant extents of arrays, vectors, matrices, tuples, and optionals;
 - pointee, reference, access, address-space, resource-shape, and modifier operands;
-- every component of union, intersection, existential, `Self`, and associated-type projection
+- every component of union, intersection, existential, `This`, and associated-type projection
   types, including the interface requirement and evidence identities;
 - generic binder kinds, defaults, and constraints;
 - a function's receiver type/mode/qualifiers, parameter types/modes/traits, result and error types,
@@ -296,10 +296,10 @@ three-element fixpoint domain.
 The exposed surface of a declaration is classified explicitly:
 
 ```text
-DeclarationSurface = {
-    nameExposed: NodeList<ContentId<SemanticValue>>,
-    opaqueSemantic: NodeList<ContentId<SemanticValue>>,
-    implementationOnly: NodeList<ContentId<SemanticValue>>
+DeclSurface = {
+    nameExposed: NodeList<ContentId<SchemaValue>>,
+    opaqueSemantic: NodeList<ContentId<SchemaValue>>,
+    implementationOnly: NodeList<ContentId<SchemaValue>>
 }
 ```
 
@@ -312,7 +312,7 @@ specialization, constant evaluation, or witness construction is opaque semantic 
 code may consume it but source lookup must not reveal its hidden declarations.
 
 ```text
-visibility(d) <= footprint(DeclarationSurface(d).nameExposed).maximumVisibility
+visibility(d) <= footprint(DeclSurface(d).nameExposed).maximumVisibility
 ------------------------------------------------------------------------------- VIS-EXP-001
 surface(d) is visibility-safe
 ```
@@ -365,11 +365,11 @@ visibility plan:
 
 ```text
 SynthesisVisibilityPlan = {
-    requested: Visibility,
-    ownerLimit: Visibility,
-    requirementLimit: Visibility,
-    exposedOperandLimit: Visibility,
-    result: Visibility
+    requested: DeclVisibility,
+    ownerLimit: DeclVisibility,
+    requirementLimit: DeclVisibility,
+    exposedOperandLimit: DeclVisibility,
+    result: DeclVisibility
 }
 
 result = meetVisibility(requested, ownerLimit, requirementLimit, exposedOperandLimit)
@@ -389,19 +389,19 @@ the reference is `NameExposed` and the ordinary exposure rule rejects it.
 Capabilities are interpreted relative to a finite, versioned standard-environment value:
 
 ```text
-CapabilityAtomId = QualifiedName
-CapabilityNameId = QualifiedName
+CapabilityAtom = QualifiedName
+CapabilityName = QualifiedName
 KeyholeId = QualifiedName
 KeyholeBranchId = QualifiedName
 
 AtomImplication = {
-    stronger: CapabilityAtomId,
-    weaker: CapabilityAtomId
+    stronger: CapabilityAtom,
+    weaker: CapabilityAtom
 }
 
 CanonicalAtomPair = {
-    first: CapabilityAtomId,
-    second: CapabilityAtomId
+    first: CapabilityAtom,
+    second: CapabilityAtom
 }
 
 AtomPreorder = CanonicallyOrderedSet<AtomImplication>
@@ -413,8 +413,8 @@ KeyholeDefinition = {
 }
 
 CapabilityUniverseDefinition = {
-    atoms: CanonicallyOrderedMap<CapabilityAtomId, AtomDefinition>,
-    names: CanonicallyOrderedMap<CapabilityNameId, CapabilityNameDefinition>,
+    atoms: CanonicallyOrderedMap<CapabilityAtom, AtomDefinition>,
+    names: CanonicallyOrderedMap<CapabilityName, CapabilityNameDefinition>,
     keyholes: CanonicallyOrderedMap<KeyholeId, KeyholeDefinition>
 }
 
@@ -423,7 +423,7 @@ CapabilityUniverseRevision = ContentId<CapabilityUniverseDefinition>
 CapabilityUniverse = {
     revision: CapabilityUniverseRevision,
     definition: CapabilityUniverseDefinition,
-    expandedNames: CanonicallyOrderedMap<CapabilityNameId, CapabilityFormula>,
+    expandedNames: CanonicallyOrderedMap<CapabilityName, CapabilitySet>,
     implication: AtomPreorder,
     incompatibility: SymmetricAtomRelation
 }
@@ -431,18 +431,18 @@ CapabilityUniverse = {
 AtomDefinition = {
     stableName: QualifiedName,
     key: Option<KeyChoice>,
-    directlyImplies: CanonicallyOrderedSet<CapabilityAtomId>,
-    directlyIncompatible: CanonicallyOrderedSet<CapabilityAtomId>,
+    directlyImplies: CanonicallyOrderedSet<CapabilityAtom>,
+    directlyIncompatible: CanonicallyOrderedSet<CapabilityAtom>,
     rankMetadata: Option<UInt32>
 }
 
 RawCapabilityExpr =
-    RawAtom(CapabilityAtomId)
-  | RawName(CapabilityNameId)
+    RawAtom(CapabilityAtom)
+  | RawName(CapabilityName)
   | RawRequireAll(CanonicallyOrderedSet<RawCapabilityExpr>)
   | RawAllowEither(CanonicallyOrderedSet<RawCapabilityExpr>)
 
-CapabilityNameDefinition = Atom(CapabilityAtomId) | Alias(RawCapabilityExpr)
+CapabilityNameDefinition = Atom(CapabilityAtom) | Alias(RawCapabilityExpr)
 KeyChoice = { keyhole: KeyholeId, branch: KeyholeBranchId }
 ```
 
@@ -479,7 +479,7 @@ distinct IDs in canonical order.
 ```text
 WorldAtomSet = {
     universe: CapabilityUniverseRevision,
-    atoms: CanonicallyOrderedSet<CapabilityAtomId>
+    atoms: CanonicallyOrderedSet<CapabilityAtom>
 }
 ```
 
@@ -491,10 +491,10 @@ closure needed to answer positive and negative region predicates.
 ## Canonical DNF
 
 ```text
-CapabilityClause = CanonicallyOrderedSet<CapabilityAtomId>       // conjunction
-CapabilityFormula = {
+CapabilityAtomSet = CanonicallyOrderedSet<CapabilityAtom>       // conjunction
+CapabilitySet = {
     universe: CapabilityUniverseRevision,
-    clauses: CanonicallyOrderedSet<CapabilityClause>              // disjunction
+    clauses: CanonicallyOrderedSet<CapabilityAtomSet>              // disjunction
 }
 
 TrueFormula(U)  = { universe: U, clauses: { {} } }
@@ -546,30 +546,30 @@ never receive an error requirement.
 
 ### Generic capability schemes
 
-A closed specialization has a `CapabilityFormula`. A generic declaration whose compile-time
+A closed specialization has a `CapabilitySet`. A generic declaration whose compile-time
 control flow still depends on its parameters has a symbolic scheme instead of pretending that one
 formula describes every specialization:
 
 ```text
 CapabilityRequirement =
-    Closed(CapabilityFormula)
+    Closed(CapabilitySet)
   | Generic(CapabilityScheme)
   | ErrorCapabilityRequirement(ErrorId)
 
 CapabilityScheme = {
     binder: CanonicalGenericBinder,
-    root: CapabilityContractExprId
+    root: CapabilityRequirementExprId
 }
 
-CapabilityContractExpr =
-    Formula(CapabilityFormula)
-  | RequireAll(NodeList<CapabilityContractExprId>)
-  | AllowEither(NodeList<CapabilityContractExprId>)
-  | IfConst(predicate: SymbolicBoolValue, thenExpr: CapabilityContractExprId,
-            elseExpr: CapabilityContractExprId)
-  | ErrorContract(ErrorId)
+CapabilityRequirementExpr =
+    Formula(CapabilitySet)
+  | RequireAll(NodeList<CapabilityRequirementExprId>)
+  | AllowEither(NodeList<CapabilityRequirementExprId>)
+  | IfConst(predicate: SymbolicBoolValue, thenExpr: CapabilityRequirementExprId,
+            elseExpr: CapabilityRequirementExprId)
+  | ErrorCapabilityRequirementExpr(ErrorId)
 
-CapabilityContractExprId = ContentId<CapabilityContractExpr>
+CapabilityRequirementExprId = ContentId<CapabilityRequirementExpr>
 
 CapabilityImplicationProof = {
     premise: CapabilityRequirement,
@@ -638,7 +638,7 @@ canonicalization. They distribute over one another. `TrueFormula` is the identit
 `CAP-ALG-002`: Availability is logical implication:
 
 ```text
-requirementView(world) = canon({ world.supportedAtoms })
+requirementView(world) = canon({ world.atoms })
 requirementView(world) entails requiredFormula
 ------------------------------------------------
 requiredFormula is available
@@ -653,7 +653,7 @@ overload rule, but cannot make a concretely unavailable candidate applicable.
 
 ### Boolean capability regions
 
-Positive `CapabilityFormula` values describe monotone availability requirements. Conditional
+Positive `CapabilitySet` values describe monotone availability requirements. Conditional
 witness maps and target/stage branch partitions additionally need complement and difference, so
 they use a separate domain:
 
@@ -661,7 +661,7 @@ they use a separate domain:
 CapabilityPredicateExpr =
     PredicateTrue
   | PredicateFalse
-  | HasAtom(CapabilityAtomId)
+  | HasAtom(CapabilityAtom)
   | Not(CapabilityPredicateExprId)
   | And(NodeList<CapabilityPredicateExprId>)
   | Or(NodeList<CapabilityPredicateExprId>)
@@ -691,9 +691,9 @@ returns a structured revision mismatch and is never compared by atom IDs alone.
 `CAP-REG-001`: A `BooleanCapabilityPredicate` is a region selector, not a declaration requirement.
 It may contain negative tests. `EffectiveConformanceContract.availability`, callable effective
 ordinary requirements, and closed `ConcreteAvailability` requirements remain positive
-`CapabilityFormula` values.
+`CapabilitySet` values.
 
-`CAP-REG-002`: Chapter 8's `ConditionalSatisfaction` guards are canonical predicates intersected
+`CAP-REG-002`: Chapter 8's `ConditionalRequirementWitnessAt<K, S>` guards are canonical predicates intersected
 with the conformance's positive availability formula. Guards must be disjoint or carry equivalent
 evidence on their overlap, and their union must cover that availability. Complement used to split
 overlap does not become a negative conformance contract.
@@ -731,7 +731,7 @@ ConcreteAvailability = {
 }
 
 ConcreteAvailabilitySubject =
-    DeclarationAvailability(declaration: CanonicalDeclRef)
+    DeclAvailability(declaration: DeclRef)
   | RegisteredStandardOperationAvailability(
         registration: RegisteredDataOperationRegistration)
   | LanguageRuleAvailability(languageRules: LanguageRuleSetId,
@@ -763,7 +763,7 @@ ConcreteAvailabilitySelection =
         proof: CapabilityRegionAvailabilityProof
     }
 
-CapabilitySelectionAt<S: WitnessUseStage> = {
+CapabilitySelectionAt<S: WitnessTableState> = {
     region: BooleanCapabilityPredicate,
     inferredCapabilityUses:
         CanonicallyOrderedMap<CapabilityUseId, CapabilityUse<S>>,
@@ -801,7 +801,7 @@ mismatch or error input returns its structured requirement error. It does not cl
 generic scheme by consulting an ambient specialization.
 
 `CAP-SEL-001`: `ComputeConcreteAvailability` is the sole source-declaration producer used by
-`BindHeader`; when it returns `Some(a)`, the published header stores `Some(a.id)` and
+`BindDeclHeader`; when it returns `Some(a)`, the published header stores `Some(a.id)` and
 `a.id = ContentId(a.key)`. `ResolveConcreteAvailability` validates its subject: a declaration
 source must equal the availability ID stored by its `DeclHeader` and substitutes that declaration's
 canonical specialization spine into the key requirement; a registered or language-rule source
@@ -840,27 +840,27 @@ therefore proves that both the requirement and implementation are available thro
 guarded region without claiming availability outside it. Every availability record satisfies
 `id = ContentId(key)`; `origin` supports diagnostics and does not change semantic identity.
 
-## Declared, inferred, and effective contracts
+## Declared, inferred, and effective capability requirements
 
-Capability contracts are declaration facts, not function-type operands. The same canonical
-`FunctionType` can be called directly, through a witness, or under different capability variants.
+Capability requirements are declaration facts, not function-type operands. The same canonical
+`FuncType` can be called directly, through a witness, or under different capability variants.
 
 ```text
-DeclaredCapabilityContract = {
+DeclaredCapabilityRequirements = {
     requirement: CapabilityRequirement,
     explicitOrigin: Option<Origin>,
     inheritedOrigins: NodeList<Origin>
 }
 
-DeclaredCapabilityContractId = ContentId<DeclaredCapabilityContract>
+DeclaredCapabilityRequirementsId = ContentId<DeclaredCapabilityRequirements>
 
-InferredCapabilityContract = {
+InferredCapabilityRequirements = {
     requirement: CapabilityRequirement,
     uses: CapabilityUseGraphId,
     universe: CapabilityUniverseRevision
 }
 
-CapabilityContractProvenance = {
+CapabilityRequirementProvenance = {
     contract: EffectiveCallableContractId,
     uses: CapabilityUseGraphId
 }
@@ -868,11 +868,11 @@ CapabilityContractProvenance = {
 
 `EffectiveCallableContract` is the single schema defined in chapter 4. Its `signature` field is a
 `CallableSignatureId`, preserving parameter-slot identity, and its capability fields are closed
-`CapabilityFormula` values for one complete specialization. A generic declaration stores the
+`CapabilitySet` values for one complete specialization. A generic declaration stores the
 corresponding declared/inferred `CapabilityRequirement` schemes until substitution closes them.
 Capability provenance is a separate fact so the callable contract schema is not duplicated.
 
-The effective closed capability formula is a pure accessor:
+The effective closed capability set is a pure accessor:
 
 ```text
 effectiveCapabilities(c) =
@@ -938,7 +938,7 @@ CallableVariantSet = {
 }
 
 CallableVariant = {
-    declaration: CanonicalDeclRef,
+    declaration: DeclRef,
     signature: CallableSignatureId,
     concreteAvailability: ConcreteAvailabilityId,
     stableOrder: StableOrderKey
@@ -950,8 +950,8 @@ CapabilityVariantSelectionResult =
   | AmbiguousVariants(NonEmpty<CallableVariant>, NodeList<CapabilityComparisonProof>)
 
 CapabilityComparisonProof = {
-    preferred: CanonicalDeclRef,
-    rejected: CanonicalDeclRef,
+    preferred: DeclRef,
+    rejected: DeclRef,
     basis: StrictCapabilitySpecificity {
                preferredAvailability: CapabilityRequirement,
                rejectedAvailability: CapabilityRequirement,
@@ -965,16 +965,16 @@ CapabilityComparisonProof = {
 }
 
 ConcreteVariantAvailabilityProof = {
-    variant: CanonicalDeclRef,
+    variant: DeclRef,
     availability: ResolvedConcreteAvailability,
     world: WorldAtomSet,
-    supportingClause: CapabilityClause
+    supportingClause: CapabilityAtomSet
 }
 
 CapabilityVariantSelectionProof = {
     set: CallableVariantSetId,
     world: WorldAtomSet,
-    selected: CanonicalDeclRef,
+    selected: DeclRef,
     applicable: NonEmpty<ConcreteVariantAvailabilityProof>,
     dominance: NodeList<CapabilityComparisonProof>,
     rankingRule: Option<StandardEnvironmentRuleId>
@@ -987,7 +987,7 @@ CapabilityVariantSelectionProof = {
 permitted by the canonical symbol. Duplicate canonical declaration references are rejected. These
 invariants keep capability alternatives from becoming accidental ordinary overloads. Each
 `concreteAvailability` resolves in the variant's semantic environment; an ordinary
-`DeclaredCapabilityContract` or `EffectiveCallableContract` cannot occupy that field.
+`DeclaredCapabilityRequirements` or `EffectiveCallableContract` cannot occupy that field.
 
 Let `availability(v)` be the closed requirement reached through `v.concreteAvailability`. A variant
 is applicable in world `W` exactly when `W` satisfies `availability(v)`, witnessed by its
@@ -1001,7 +1001,7 @@ filtering or ranking inputs.
 `CAP-VAR-001`: `CapabilityVariantSelectionProof.applicable` is the duplicate-free canonical list of
 exactly the variants with valid availability proofs for the stored world; each proof resolves that
 variant's exact `ConcreteAvailabilityId`, has
-`availability.subject = DeclarationAvailability(variant)`, and retains the specialized closed
+`availability.subject = DeclAvailability(variant)`, and retains the specialized closed
 requirement. The selection proof also contains a checked
 dominance/rank proof from every rejected maximal candidate to the selected declaration. Formula hash,
 container order, and `stableOrder` are not semantic premises.
@@ -1019,7 +1019,7 @@ ranking. The selected variant is recorded in `CallableValue`; variants do not ma
 distinct function types. Ordinary inferred requirements neither filter nor rank the variants.
 
 `CAP-CON-005`: Two local variants may be distinguished by capability availability only when each
-has an explicit validated `ConcreteAvailability`. `ResolveCall` reads those pre-inference
+has an explicit validated `ConcreteAvailability`. `ResolveOverload` reads those pre-inference
 availability facts and never requests a local body-inferred contract. An unannotated local callable
 has no concrete filter; its ordinary requirement propagates through the eventual caller contract and
 is checked at a constrained declaration or compilation-world boundary. An imported variant is
@@ -1037,9 +1037,9 @@ preInference(d).inferredCapabilities =
 
 preInference(d).concreteAvailability =
     Some({
-        sources = { resolveConcreteAvailability(DeclarationAvailability(d)) },
+        sources = { resolveConcreteAvailability(DeclAvailability(d)) },
         combinedRequirement =
-            resolveConcreteAvailability(DeclarationAvailability(d)).requirement
+            resolveConcreteAvailability(DeclAvailability(d)).requirement
     })
                                                 when d declares/imports a validated concrete filter
   | None                                        otherwise
@@ -1067,28 +1067,28 @@ candidate rejection.
 
 ```text
 CapabilityUseKey = {
-    owner: CanonicalDeclRef,
+    owner: DeclRef,
     origin: Origin,
     ordinal: UInt32
 }
 
 CapabilityUseId = ContentId<CapabilityUseKey>
 
-CapabilityUse<S: WitnessUseStage> = {
+CapabilityUse<S: WitnessTableState> = {
     key: CapabilityUseKey,
     requirement: CapabilityUseRequirement<S>,
     reason: DirectOperation | TypeUse | DeclUse | WitnessUse |
             AttributeUse | EntryPointStage
 }
 
-CapabilityUseRequirement<S: WitnessUseStage> =
+CapabilityUseRequirement<S: WitnessTableState> =
     Direct(CapabilityRequirement)
   | LocalCallable(declaration: ResolvedDeclRefAt<S>)
   | ImportedCallable(contract: CapabilityRequirement)
-  | WitnessEntry(witness: WitnessCallRef<S>, entry: WitnessRuntimeEntryKey)
+  | WitnessEntry(witness: SubtypeWitnessRef<S>, entry: RuntimeInterfaceRequirementKey)
 
-CapabilityUseGraph<S: WitnessUseStage> = {
-    root: CanonicalDeclRef,
+CapabilityUseGraph<S: WitnessTableState> = {
+    root: DeclRef,
     rootWitnessResolutions: WitnessResolutionSetAt<S>,
     uses: CanonicallyOrderedMap<CapabilityUseId, CapabilityUse<S>>
 }
@@ -1096,9 +1096,9 @@ CapabilityUseGraph<S: WitnessUseStage> = {
 CapabilityUseGraphId = ContentId<CapabilityUseGraph<Published>>
 
 CapabilityUsePathStep = {
-    owner: CanonicalDeclRef,
+    owner: DeclRef,
     use: CapabilityUseId,
-    next: Option<CanonicalDeclRef | WitnessRuntimeEntryKey>
+    next: Option<DeclRef | RuntimeInterfaceRequirementKey>
 }
 ```
 
@@ -1127,10 +1127,10 @@ region proof never enter the use graph. If one operation independently declares 
 concrete formulas, the ordinary formula still contributes one use and the concrete formula still
 has one availability proof; neither is deduplicated across those different semantic roles.
 
-`CanonicalDeclRef` is the sole owner of callable specialization frames. A local callable use wraps
+`DeclRef` is the sole owner of callable specialization frames. A local callable use wraps
 that stable target in `ResolvedDeclRefAt<S>` solely to retain the exact definition dependencies of
 witness evidence in those frames. A witness use is already specialized by its stage-appropriate
-`WitnessCallRef` and `WitnessRuntimeEntryKey`; capability edges do not repeat a frame ID that could
+`SubtypeWitnessRef` and `RuntimeInterfaceRequirementKey`; capability edges do not repeat a frame ID that could
 diverge from those identities. Property and subscript calls retain their exact accessor role in
 that entry key.
 
@@ -1158,7 +1158,7 @@ truth.
 
 `CAP-INF-004`: An unreferenced source declaration does not contribute merely because it shares a
 scope. Synthesized declarations contribute only when the synthesis rule makes them part of the
-declaration's signature, body, witness map, or emitted Core AST.
+declaration's signature, body, witness map, or emitted `IRReadyAST`.
 
 `CAP-INF-005`: Constructing a typed local call and resolving its overload set requires callable
 signatures, the pre-inference ordinary requirement, and optional concrete availability only.
@@ -1172,8 +1172,8 @@ A concrete compilation request supplies a canonical `CompilationWorld`:
 
 ```text
 CompilationWorld = {
-    target: CapabilityAtomId,
-    stage: Option<CapabilityAtomId>,
+    target: CapabilityAtom,
+    stage: Option<CapabilityAtom>,
     supportedAtoms: WorldAtomSet,
     universe: CapabilityUniverseRevision
 }
@@ -1181,7 +1181,7 @@ CompilationWorld = {
 
 `supportedAtoms` is implication-closed and must agree with the target/stage key choices. Entry
 point checking evaluates `world entails effective(entryPoint)` and reports a capability failure
-before IR legalization. `WorldAtomSet` is intentionally distinct from `CapabilityClause`: a world
+before IR legalization. `WorldAtomSet` is intentionally distinct from `CapabilityAtomSet`: a world
 retains its complete implication closure, while clause canonicalization removes weaker atoms that
 are already implied.
 
@@ -1193,7 +1193,7 @@ Target/stage switches use first-match regions, including an explicit residual re
 ```text
 CapabilityBranchSelection = NodeList<{
     region: BooleanCapabilityPredicate,
-    bodyRequirement: CapabilityFormula,
+    bodyRequirement: CapabilitySet,
     origin: Origin
 }>
 ```
@@ -1296,8 +1296,8 @@ CapabilityValidation =
 
 CapabilityAvailability =
     AvailableInWorld(world: WorldAtomSet,
-                     requirement: CapabilityFormula,
-                     supportingClause: CapabilityClause)
+                     requirement: CapabilitySet,
+                     supportingClause: CapabilityAtomSet)
   | UnavailableInWorld(failure: CapabilityFailure)
   | RecoveredAvailability(error: ErrorId)
 
@@ -1308,9 +1308,9 @@ ResolveConcreteAvailability(subject, environment)
     -> QueryStep<Option<ResolvedConcreteAvailability>>
 SelectCapabilitiesAt<S>(region, inferredUses, concreteSources)
     -> CheckResult<CapabilitySelectionAt<S>>
-InferCapabilities(decl, specialization) -> InferredCapabilityContract
+InferCapabilities(decl, specialization) -> InferredCapabilityRequirements
 ValidateDeclaredCapability(decl, specialization) -> CapabilityValidation
-EffectiveCapabilityContract(decl, specialization) -> EffectiveCallableContract
+EffectiveCapabilityRequirements(decl, specialization) -> EffectiveCallableContract
 CheckWorldAvailability(use, world) -> CapabilityAvailability
 ```
 
@@ -1322,7 +1322,7 @@ callable signatures, but not on the declaration's inferred contract. `InferCapab
 every local callee `c`, whether or not that edge is currently known to be cyclic. Both ends
 therefore have the same least-fixpoint policy. It also requests the pre-inference declared contract
 of `c`. Imported call uses are leaves containing their provider's already published effective
-contract. No `InferCapabilities` query requests `EffectiveCapabilityContract`.
+contract. No `InferCapabilities` query requests `EffectiveCapabilityRequirements`.
 
 For an SCC of closed `InferCapabilities` queries, the scheduler uses the requirement-order least
 fixpoint:
@@ -1346,7 +1346,7 @@ available before body inference. It participates in each call edge but is not us
 validation still detects a body that needs more than it declared.
 
 For a generic scheme, the same equations operate pointwise over the finite canonical decision
-regions in `CapabilityContractExpr`; each leaf uses the closed-formula lattice. A newly discovered
+regions in `CapabilityRequirementExpr`; each leaf uses the closed-formula lattice. A newly discovered
 predicate or call edge restarts dependency closure for the SCC epoch.
 
 `CAP-FIX-001`: The transfer function is monotone under `<=req`. The universe is finite, so the
@@ -1363,12 +1363,12 @@ direct use.
 
 `CAP-FIX-004`: A deterministic per-root term-growth and formula-complexity budget detects infinite
 acyclic generic instantiation such as `F<N+1>`. Exceeding it returns recovered
-`InferredCapabilityContract` data containing `ErrorCapabilityRequirement(error)`; it is not
+`InferredCapabilityRequirements` data containing `ErrorCapabilityRequirement(error)`; it is not
 reported as fixpoint convergence, inserted into the formula lattice, or widened unsafely.
 
 Declared-contract validation runs only after inference stabilizes. Therefore an explicit
 capability contract constrains/validates a recursive SCC but is not substituted as the SCC's
-initial inferred value. `EffectiveCapabilityContract` then combines the stable declared/inferred
+initial inferred value. `EffectiveCapabilityRequirements` then combines the stable declared/inferred
 facts with the pure accessor above and has a one-way dependency on inference; because inference
 never requests it, this post-fixpoint query cannot join the capability SCC.
 
@@ -1383,8 +1383,8 @@ CapabilityFailure = {
           InterfaceInferredContractMismatch |
           InterfaceConcreteAvailabilityMismatch |
           InheritanceContractMismatch | NonMonotoneSelection | InvalidUniverse,
-    availableOrDeclared: CapabilityFormula,
-    requiredOrInferred: CapabilityFormula,
+    availableOrDeclared: CapabilitySet,
+    requiredOrInferred: CapabilitySet,
     counterexample: Option<CapabilityCounterexample>,
     usePath: NodeList<CapabilityUsePathStep>,
     origin: Origin,
@@ -1392,10 +1392,10 @@ CapabilityFailure = {
 }
 
 CapabilityCounterexample = {
-    failingSourceClause: CapabilityClause,
+    failingSourceClause: CapabilityAtomSet,
     alternatives: NodeList<{
-        requiredClause: CapabilityClause,
-        missingAtoms: CapabilityClause
+        requiredClause: CapabilityAtomSet,
+        missingAtoms: CapabilityAtomSet
     }>
 }
 ```
@@ -1426,10 +1426,10 @@ access context or exposed field path, actual/required visibility, import path, o
 ```text
 VisibilityFailure = {
     declaration: DeclId,
-    context: Option<AccessContext>,
+    context: Option<VisibilityContext>,
     exposedPath: Option<SemanticFieldPath>,
-    actual: Visibility,
-    required: Visibility,
+    actual: DeclVisibility,
+    required: DeclVisibility,
     importPath: Option<ImportPath>,
     origin: Origin,
     rule: RuleId
@@ -1451,7 +1451,7 @@ revisions. Adding an implication edge, incompatibility edge, alias expansion, ta
 changes the universe hash and invalidates every formula operation that depends on it. It does not
 retroactively reinterpret cached module artifacts.
 
-`VIS-DET-001`: Visibility and exposure results serialize declaration IDs, module identities,
+`VIS-DET-001`: `DeclVisibility` and exposure results serialize declaration IDs, module identities,
 semantic field paths, and module-graph revision. Reordering independent declarations, imports with
 equivalent reachability, or parallel tasks cannot change their bytes or diagnostics.
 
@@ -1463,7 +1463,7 @@ The remaining primitive inputs and results are closed serializable values:
 ExportEnvironment = {
     exportingModule: ModuleId,
     reachableModules: ModuleReachabilityId,
-    requiredVisibility: Visibility,
+    requiredVisibility: DeclVisibility,
     moduleGraph: ContentId<ModuleGraph>,
     schema: SchemaVersion
 }
@@ -1473,13 +1473,13 @@ ExposureValidation =
   | ExposureInvalid(failures: NonEmpty<VisibilityFailure>)
 
 UniverseValidationFailure =
-    DuplicateCapabilityIdentity(ContentId<SemanticValue>)
-  | UnknownCapabilityReference(ContentId<SemanticValue>)
-  | CyclicCapabilityAlias(cycle: NonEmpty<CapabilityNameId>)
-  | InvalidImplicationEndpoint(atom: CapabilityAtomId)
-  | InvalidIncompatibilityEndpoint(atom: CapabilityAtomId)
+    DuplicateCapabilityIdentity(ContentId<SchemaValue>)
+  | UnknownCapabilityReference(ContentId<SchemaValue>)
+  | CyclicCapabilityAlias(cycle: NonEmpty<CapabilityName>)
+  | InvalidImplicationEndpoint(atom: CapabilityAtom)
+  | InvalidIncompatibilityEndpoint(atom: CapabilityAtom)
   | InvalidKeyhole(keyhole: KeyholeId)
-  | UnsatisfiableStandardProfile(name: CapabilityNameId)
+  | UnsatisfiableStandardProfile(name: CapabilityName)
   | DerivedUniverseMismatch(field: FieldName)
 
 UniverseValidation =
@@ -1500,22 +1500,22 @@ that positive-DNF upward closure failed, not an implementation-specific BDD node
 The following functions are public frontend primitives and accept only immutable values:
 
 ```text
-meetVisibility(Visibility, Visibility) -> Visibility
-decideAccess(VisibilityFact, AccessContext, ModuleGraph) -> AccessDecision
-computeVisibilityFootprint(SemanticValue, NodeSchemaRegistry) -> VisibilityFootprint
-validateExposure(DeclId, DeclarationSurface, ExportEnvironment) -> ExposureValidation
+meetVisibility(DeclVisibility, DeclVisibility) -> DeclVisibility
+decideVisibility(DeclVisibilityFact, VisibilityContext, ModuleGraph) -> VisibilityDecision
+computeVisibilityFootprint(SchemaValue, NodeSchemaRegistry) -> VisibilityFootprint
+validateExposure(DeclId, DeclSurface, ExportEnvironment) -> ExposureValidation
 
 validateUniverse(CapabilityUniverse) -> UniverseValidation
-canonicalize(CapabilityFormula, CapabilityUniverse) -> CapabilityFormula
-entails(CapabilityFormula, CapabilityFormula, CapabilityUniverse) -> Bool
-requireAll(CapabilityFormula, CapabilityFormula, CapabilityUniverse) -> CapabilityFormula
-allowEither(CapabilityFormula, CapabilityFormula, CapabilityUniverse) -> CapabilityFormula
+canonicalize(CapabilitySet, CapabilityUniverse) -> CapabilitySet
+entails(CapabilitySet, CapabilitySet, CapabilityUniverse) -> Bool
+requireAll(CapabilitySet, CapabilitySet, CapabilityUniverse) -> CapabilitySet
+allowEither(CapabilitySet, CapabilitySet, CapabilityUniverse) -> CapabilitySet
 explainImplicationFailure(...) -> CapabilityCounterexample
 validateDeclaredContract(...) -> CapabilityValidation
 canonicalizePredicate(CapabilityPredicateExpr, CapabilityUniverse)
     -> BooleanCapabilityPredicate
 projectPositive(BooleanCapabilityPredicate, CapabilityUniverse)
-    -> Result<CapabilityFormula, NonMonotoneRegion>
+    -> Result<CapabilitySet, NonMonotoneRegion>
 specializeCapabilityScheme(CapabilityScheme, SpecializationFrame)
     -> CapabilityRequirement
 combineConcreteAvailability(NonEmpty<ResolvedConcreteAvailability>)
@@ -1524,7 +1524,7 @@ SelectCapabilitiesAt<S>(BooleanCapabilityPredicate,
                         CanonicallyOrderedMap<CapabilityUseId, CapabilityUse<S>>,
                         NodeList<ResolvedConcreteAvailability>)
     -> CheckResult<CapabilitySelectionAt<S>>
-effectiveCapabilities(EffectiveCallableContract) -> CapabilityFormula
+effectiveCapabilities(EffectiveCallableContract) -> CapabilitySet
 ```
 
 None of these functions loads a module, checks a body, reads a global target, or emits a
@@ -1533,7 +1533,7 @@ diagnostic. Query adapters gather those inputs and convert failure values into d
 Representative isolated tests use these fakes:
 
 ```text
-FakeVisibilityFacts {
+FakeDeclVisibilityFacts {
     visibility(PublicAPI) -> Public
     visibility(HiddenType) -> Internal
     privateOwner(secret) -> TypeOwner(S)

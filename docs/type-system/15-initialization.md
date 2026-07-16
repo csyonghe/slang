@@ -12,22 +12,24 @@ Binding classifies the following forms without selecting a strategy:
 
 ```text
 InitializationForm =
-    OmittedDeclaration
+    OmittedDecl
   | CopyFromExpression
   | DirectArguments
   | ExplicitSingle
-  | BracedElements
+  | InitializerListElements
   | RequestedDefault
   | AllocatingArguments
 
+InitializerExpr =
+    InvokeExpr(argumentCount: UInt32)       // T(e0, ... en), including T()
+  | ExplicitCastExpr                       // (T)e
+  | InitializerListExpr                    // { ... }, only under a target
+  | NewExpr(argumentCount: UInt32)         // new T(...)
+
 InitializationSyntax =
-    DeclEqualsExpr                 // T x = e
-  | DeclEqualsBraces               // T x = { ... }
-  | TypeApplication                // T(e0, ... en)
-  | CStyleExplicitCast             // (T)e
-  | EmptyTypeApplication           // T()
-  | BareBraces                     // { ... }, only under a target
-  | NewTypeApplication             // new T(...)
+    DeclEqualsExpr                          // T x = e
+  | DeclEqualsInitializerList               // T x = { ... }
+  | InitializerExpr
   | NoWrittenInitializer
 
 InitializationDesignator =
@@ -35,14 +37,16 @@ InitializationDesignator =
   | ElementDesignator(index: ConstValue)
 ```
 
-`INI-SYN-001`: `T(e)` with exactly one argument and `(T)e` both bind to `ExplicitSingle` and invoke
+`INI-SYN-001`: an `InvokeExpr` for `T(e)` with exactly one argument and an `ExplicitCastExpr` for
+`(T)e` both bind to `ExplicitSingle` and invoke
 the same initialization-resolution relation. Their CST nodes, bound input identities, and `Origin`
 values remain distinct, so separately written occurrences need not have the same memoization key.
 After erasing those source identities, both forms enumerate and compare the same semantic
 strategies; neither form uses a second checker path or “try cast, then constructor” fallback.
 
-`INI-SYN-002`: `T(e0, ... en)` with arity other than one binds to `DirectArguments`. `T()` binds to
-`RequestedDefault`; it is not the same form as omitting an initializer.
+`INI-SYN-002`: an `InvokeExpr` for `T(e0, ... en)` with arity other than one binds to
+`DirectArguments`. An `InvokeExpr` for `T()` has arity zero and binds to `RequestedDefault`; it is
+not the same form as omitting an initializer.
 
 `INI-SYN-003`: A braced list is an immutable syntax input, not an independently typed expression.
 It is checked separately for each proposed target and initialization strategy. It cannot first
@@ -64,7 +68,7 @@ InitializationInputId = NodeId<Bound>
 
 InitializationInputKey =
     ExpressionInput(expression: NodeId<Bound>)
-  | BracedInput(elements: NodeList<InitializationInputId>,
+  | InitializerListInput(elements: NodeList<InitializationInputId>,
                 designator: Option<InitializationDesignator>)
 
 InitializationInput = {
@@ -93,14 +97,14 @@ InitializationGoal =
   | InitializeStorage(destination: InitializationDestination, type: TypeId)
 
 InitializationSite =
-    LocalDeclaration | GlobalDeclaration | FieldDeclaration |
+    LocalDecl | GlobalDecl | FieldDecl |
     ParameterDefault | ReturnConstruction | ExplicitExpression |
     Allocation | SynthesizedStorage
 
 InitializationEnvironment = {
     semantic: SemanticEnvironmentId,
     conversion: ConversionEnvironmentId,
-    access: AccessContext,
+    access: VisibilityContext,
     effectAllowance: EffectAllowance,
     contractSelection: ContractSelectionContext
 }
@@ -129,7 +133,7 @@ InitializationRequest = {
 the closed `InitializationDestinationStorage` sum. A supplied alternative contains its
 `PhysicalStorageRef` and proof; plan-owned, allocated-object, and projected alternatives resolve the
 immutable physical endpoint introduced by the enclosing plan. A property, declared subscript,
-abstract swizzle, setter-backed place, or ephemeral write-back destination has no constructor in
+abstract swizzle, setter-backed storage, or ephemeral write-back destination has no constructor in
 this sum. Assignment to such storage is an access plan applied after a value has been constructed,
 not storage initialization.
 
@@ -140,7 +144,7 @@ language-rule set (through `SemanticEnvironment`), and source form are all part 
 excluded from semantic query identity.
 
 `INI-REQ-003`: Every request input ID resolves to one `InitializationInput` with the same ID in the
-request's bound snapshot. A `BracedInput` stores child IDs, not embedded child records; those IDs
+request's bound snapshot. A `InitializerListInput` stores child IDs, not embedded child records; those IDs
 form a finite ordered tree and each child's origin remains on its resolved input. Neither an input's
 `origin` nor the request's `origin` enters `InitializationRequestId`, while the bound input IDs keep
 separately written occurrences distinct for diagnostics and evaluate-once semantics.
@@ -153,22 +157,22 @@ and plan prove that object/handle relation; `AllocatingArguments` does not admit
 initialized object and the returned handle.
 
 ```text
-ApplicableInitializationCandidateKey<S: WitnessUseStage> = {
+ApplicableInitializationCandidateKey<S: WitnessTableState> = {
     strategy: InitializationStrategy,
-    plan: InitializationPlanId<S>,
+    plan: InitializationPlanIdAt<S>,
     rank: InitializationRank
 }
 
-ApplicableInitializationCandidateId<S: WitnessUseStage> =
+ApplicableInitializationCandidateId<S: WitnessTableState> =
     ContentId<ApplicableInitializationCandidateKey<S>>
 
-ApplicableInitializationCandidate<S: WitnessUseStage> = {
+ApplicableInitializationCandidate<S: WitnessTableState> = {
     id: ApplicableInitializationCandidateId<S>,
     key: ApplicableInitializationCandidateKey<S>,
     trace: InitializationTraceId
 }
 
-InitializationCandidateResult<S: WitnessUseStage> =
+InitializationCandidateResultAt<S: WitnessTableState> =
     Applicable(candidate: ApplicableInitializationCandidate<S>)
   | RejectedBeforeStrategy(failure: InitializationFailure,
                            trace: InitializationTraceId)
@@ -176,22 +180,22 @@ InitializationCandidateResult<S: WitnessUseStage> =
              failure: InitializationFailure,
              trace: InitializationTraceId)
   | Recovered(strategy: InitializationStrategy,
-              plan: InitializationPlanId<S>,
+              plan: InitializationPlanIdAt<S>,
               trace: InitializationTraceId,
               errors: NonEmpty<ErrorId>)
 
-InitializationResult<S: WitnessUseStage> =
+InitializationResultAt<S: WitnessTableState> =
     Selected(winner: ApplicableInitializationCandidate<S>,
              comparisons: NodeList<InitializationComparisonProofAt<S>>,
-             considered: NonEmpty<InitializationCandidateResult<S>>)
-  | NoApplicable(considered: NonEmpty<InitializationCandidateResult<S>>)
+             considered: NonEmpty<InitializationCandidateResultAt<S>>)
+  | NoApplicable(considered: NonEmpty<InitializationCandidateResultAt<S>>)
   | Ambiguous(maximal: NonEmpty<ApplicableInitializationCandidate<S>>,
               incomparability: NodeList<InitializationComparisonProofAt<S>>)
-  | RecoveredInitialization(plan: InitializationPlanId<S>,
+  | RecoveredInitialization(plan: InitializationPlanIdAt<S>,
                             errors: NonEmpty<ErrorId>)
 
-InitializationCandidateResult = InitializationCandidateResult<Published>
-InitializationResult = InitializationResult<Published>
+InitializationCandidateResult = InitializationCandidateResultAt<Published>
+InitializationResult = InitializationResultAt<Published>
 
 BuildInitializationModel(type: TypeId,
                          environment: SemanticEnvironmentId)
@@ -201,10 +205,10 @@ InitializationResolutionContextAt<Published> = PublishedInitializationResolution
 InitializationResolutionContextAt<Construction> =
     ConstructionInitializationResolution(scope: ConformanceConstructionScope)
 
-ResolveInitializationAt<S: WitnessUseStage>(
+ResolveInitializationAt<S: WitnessTableState>(
     request: InitializationRequest,
     context: InitializationResolutionContextAt<S>)
-    -> QueryStep<InitializationResult<S>>
+    -> QueryStep<InitializationResultAt<S>>
 
 ResolveInitialization(request) =
     ResolveInitializationAt<Published>(request, PublishedInitializationResolution)
@@ -226,7 +230,7 @@ empty form/site intersection.
 
 `INI-RES-002`: `ResolveInitializationAt<S>` is the sole query that turns an initialization request
 into candidates and a result. Once its dependencies are available, it completes with exactly one
-`InitializationResult<S>` alternative. `NoApplicable` and `Ambiguous` are ordinary negative
+`InitializationResultAt<S>` alternative. `NoApplicable` and `Ambiguous` are ordinary negative
 semantic results, not scheduler states; `Blocked` occurs only in the enclosing `QueryStep`.
 Candidate enumeration consumes
 `BuildInitializationModel(request.key.target, resolve(request.key.environment).semantic)`; it never
@@ -247,8 +251,8 @@ lookup never changes it.
 ```text
 InitializationStrategy =
     ExpressionConversionStrategy
-  | DeclaredInitializerStrategy
-  | SynthesizedInitializerStrategy
+  | DeclaredConstructorStrategy
+  | SynthesizedConstructorStrategy
   | AggregateStrategy
   | StandardInitializationStrategy(rule: StandardInitializationRuleId)
   | AllocationStrategy
@@ -262,7 +266,7 @@ InitializationStrategyPolicy = {
 
 CallableGroupKey = {
     target: TypeId,
-    members: CanonicallyOrderedSet<CanonicalDeclRef>
+    members: CanonicallyOrderedSet<DeclRef>
 }
 
 CallableGroupId = ContentId<CallableGroupKey>
@@ -270,20 +274,20 @@ CallableGroupId = ContentId<CallableGroupKey>
 CallableGroup = {
     id: CallableGroupId,
     key: CallableGroupKey,
-    presentationOrder: NodeList<CanonicalDeclRef>
+    presentationOrder: NodeList<DeclRef>
 }
 
 InitializationStrategyDescriptor =
     ExpressionConversionDescriptor(policy: RuleId)
-  | DeclaredInitializerDescriptor(initializers: CallableGroupId)
-  | SynthesizedInitializerDescriptor(initializers: CallableGroupId)
+  | DeclaredConstructorDescriptor(constructors: CallableGroupId)
+  | SynthesizedConstructorDescriptor(constructors: CallableGroupId)
   | AggregateInitializationDescriptor(shape: AggregateInitializationShapeId)
   | StandardInitializationDescriptor(rule: StandardInitializationRuleId)
   | AllocationInitializationDescriptor(rule: StandardEnvironmentRuleId)
 
 strategyOf(ExpressionConversionDescriptor(_)) = ExpressionConversionStrategy
-strategyOf(DeclaredInitializerDescriptor(_)) = DeclaredInitializerStrategy
-strategyOf(SynthesizedInitializerDescriptor(_)) = SynthesizedInitializerStrategy
+strategyOf(DeclaredConstructorDescriptor(_)) = DeclaredConstructorStrategy
+strategyOf(SynthesizedConstructorDescriptor(_)) = SynthesizedConstructorStrategy
 strategyOf(AggregateInitializationDescriptor(_)) = AggregateStrategy
 strategyOf(StandardInitializationDescriptor(r)) = StandardInitializationStrategy(r)
 strategyOf(AllocationInitializationDescriptor(_)) = AllocationStrategy
@@ -316,12 +320,12 @@ AllocationProviderRank =
         components: NodeMap<RuleId, BoundedNat>)
 
 InitializationRankDetailFor<ExpressionConversionStrategy> =
-    ConversionInitializationRank(rank: ConversionRank)
+    ConversionInitializationRank(rank: ConversionCost)
 
-InitializationRankDetailFor<DeclaredInitializerStrategy> =
+InitializationRankDetailFor<DeclaredConstructorStrategy> =
     CallableInitializationRank(rank: CandidateRank)
 
-InitializationRankDetailFor<SynthesizedInitializerStrategy> =
+InitializationRankDetailFor<SynthesizedConstructorStrategy> =
     CallableInitializationRank(rank: CandidateRank)
 
 InitializationRankDetailFor<AggregateStrategy> =
@@ -375,8 +379,8 @@ AllocationProviderComparisonProof =
                                       outcome: InitializationComparisonOutcome)
 
 InitializationRankComparisonStep =
-    ConversionRankComparison(left: ConversionRank,
-                             right: ConversionRank,
+    ConversionCostComparison(left: ConversionCost,
+                             right: ConversionCost,
                              outcome: InitializationComparisonOutcome)
   | CallableRankComparison(proof: CandidateComparisonProof)
   | AggregateRankComparison(rule: RuleId,
@@ -398,7 +402,7 @@ InitializationRankComparisonProof = {
 
 InitializationRankComparisonProofId = ContentId<InitializationRankComparisonProof>
 
-InitializationComparisonStepAt<S: WitnessUseStage> =
+InitializationComparisonStepAt<S: WitnessTableState> =
     IdenticalInitializationCandidate(candidate: ApplicableInitializationCandidateId<S>)
   | StrategyPriorityStep(preferred: InitializationStrategy,
                          other: InitializationStrategy,
@@ -406,7 +410,7 @@ InitializationComparisonStepAt<S: WitnessUseStage> =
   | RankComparisonStep(proof: InitializationRankComparisonProofId)
   | CanonicalPlanEquivalenceStep(rule: RuleId, inputs: CanonicalArguments)
 
-InitializationComparisonProofAt<S: WitnessUseStage> = {
+InitializationComparisonProofAt<S: WitnessTableState> = {
     left: ApplicableInitializationCandidateId<S>,
     right: ApplicableInitializationCandidateId<S>,
     policy: InitializationStrategyPriorityId,
@@ -425,9 +429,9 @@ implementation cannot try constructors and then expose aggregate initialization 
 fail. If both are present, both are evaluated and their ordering requires an
 `InitializationComparisonProof` from the model's named priority relation.
 
-`INI-MOD-002`: An extension may contribute initializer declarations only under a policy explicitly
-admitting extension initializers. Model construction incorporates all applicable extensions into
-the `DeclaredInitializerDescriptor` callable group before the model freezes. Later lookup cannot
+`INI-MOD-002`: An extension may contribute constructor declarations only under a policy explicitly
+admitting extension constructors. Model construction incorporates all applicable extensions into
+the `DeclaredConstructorDescriptor` callable group before the model freezes. Later lookup cannot
 create or mutate that descriptor, alter an aggregate descriptor's slots, or remove an existing
 strategy. The compatibility ledger freezes the default policy per language version.
 
@@ -438,7 +442,7 @@ requirement cannot be reinterpreted as a concrete selection filter.
 
 `INI-MOD-004`: `CallableGroupId` is the content identity of its target and canonical member set.
 `presentationOrder` is a duplicate-free bijection onto that set and affects diagnostics only. Every
-member resolves to an `InitializerCallable` for `key.target`. `NonInitializable` records a stable
+member resolves to an `ConstructorCallable` for `key.target`. `NonInitializable` records a stable
 property of the target definition or a named language rule; failed lookup, an inapplicable call, or
 a blocked dependency is not a non-initializable model.
 
@@ -572,7 +576,7 @@ An initializer has an explicit construction target in its checked callable type:
 ```text
 InitializationTargetMode = FreshStorage | DelegatingStorage
 
-InitializerResultConvention =
+ConstructorResultConvention =
     InitializedTarget(type: TypeId)
   | ReturnedValue(type: TypeId)
 
@@ -595,7 +599,7 @@ PlanInitializationStorage = {
     id: PlanInitializationStorageId,
     key: PlanInitializationStorageKey,
     valueType: TypeId,
-    access: AccessMode,
+    access: StorageAccessMode,
     mutability: Mutability,
     addressSpace: AddressSpace,
     lifetime: LifetimeId
@@ -603,8 +607,8 @@ PlanInitializationStorage = {
 
 CallablePurpose =
     OrdinaryCallable
-  | InitializerCallable(target: InitializationTargetSlot,
-                        resultConvention: InitializerResultConvention)
+  | ConstructorCallable(target: InitializationTargetSlot,
+                        resultConvention: ConstructorResultConvention)
 
 InitializationTargetDestination = {
     destination: InitializationDestination,
@@ -631,11 +635,11 @@ InitializationEntryStateEqualityProof = {
 }
 ```
 
-`CallablePurpose` is a structural `FunctionType` field. The target is neither ordinary parameter
+`CallablePurpose` is a structural `FuncType` field. The target is neither ordinary parameter
 zero nor an implicit receiver recovered from declaration nesting. An ordinary instance receiver
 may coexist only for a language-defined delegating form, with both roles explicit.
 
-`INI-CTR-001`: Calling an `InitializerCallable(target, resultConvention)` requires an explicit
+`INI-CTR-001`: Calling a `ConstructorCallable(target, resultConvention)` requires an explicit
 `InitializationTargetBinding`. Its destination is the request destination or an internal destination
 created by the enclosing plan. The compatibility requirement equals `target.requiredStorage`; the
 resolved physical shape has `target.selfType`, provides the required effective access, belongs to a
@@ -664,11 +668,11 @@ not disguised as a synthesized callable invocation.
 the enclosing type's canonical binder and the partially initialized target. Instantiation applies
 the exact specialization and records which earlier fields may be read.
 
-`INI-CTR-004`: `InitializerCallable(target, InitializedTarget(T))` has logical result `UnitType` and
+`INI-CTR-004`: `ConstructorCallable(target, InitializedTarget(T))` has logical result `VoidType` and
 requires `target.selfType = T`; the initialized storage is observed through the separate target
-role. `InitializerCallable(target, ReturnedValue(T))` has logical result `T`, and its selected
+role. `ConstructorCallable(target, ReturnedValue(T))` has logical result `T`, and its selected
 initializer operation contains an explicit transfer from that returned value into the target. The
-`FunctionType.result`, result convention, target type, and stored completion operation are validated
+`FuncType.result`, result convention, target type, and stored completion operation are validated
 together and cannot be independent authorities.
 
 ## Plans
@@ -684,7 +688,7 @@ OperationQualifiedInitializationOrder<R> = {
     subobjects: NodeList<R>
 }
 
-InitializationCallOperandRole =
+ConstructorCallOperandRole =
     InitializationTargetCallOperand
   | BoundCallOperand(slot: BoundCallSlot)
 
@@ -702,7 +706,7 @@ RegisteredInitializationResultKey = {
 
 PhysicalStorageEndpointShape = {
     valueType: TypeId,
-    access: AccessMode,
+    access: StorageAccessMode,
     mutability: Mutability,
     addressSpace: PhysicalStorageAddressSpace,
     lifetime: LifetimeId,
@@ -738,11 +742,11 @@ InitializationSubobjectStorageProjection = {
     shape: PhysicalStorageEndpointShape
 }
 
-InitializationEndpointSourceAt<S: WitnessUseStage> =
+InitializationEndpointSourceAt<S: WitnessTableState> =
     RequestInputEndpoint(input: InitializationInputId)
   | CheckedExpressionEndpoint(expression: NodeId<Typed>)
-  | NestedInitializationResultEndpoint(plan: InitializationPlanId<S>)
-  | InitializationCallResultEndpoint(call: InitializationCallPlanId<S>)
+  | NestedInitializationResultEndpoint(plan: InitializationPlanIdAt<S>)
+  | ConstructorCallResultEndpoint(call: ConstructorCallPlanId<S>)
   | RegisteredInitializationResultEndpoint(
         execution: RegisteredInitializationExecutionId<S>,
         result: RegisteredInitializationResultKey)
@@ -754,30 +758,32 @@ InitializationEndpointSourceAt<S: WitnessUseStage> =
         projection: InitializationSubobjectStorageProjection)
   | AllocationHandleEndpoint(object: AllocationObjectId)
 
-InitializationEndpointAt<S: WitnessUseStage> = {
+InitializationEndpointAt<S: WitnessTableState> = {
     source: InitializationEndpointSourceAt<S>,
     shape: InitializationEndpointShape
 }
 
-InitializationCallPlanKeyAt<S: WitnessUseStage> = {
+ConstructorCallPlanKeyAt<S: WitnessTableState> = {
     operation: InitializationPath,
     call: TypedCallAt<S>,
     operands:
-        CanonicallyOrderedMap<InitializationCallOperandRole,
+        CanonicallyOrderedMap<ConstructorCallOperandRole,
                               InitializationEndpointAt<S>>,
     evaluationOrder:
-        OperationQualifiedEvaluationOrder<InitializationCallOperandRole>
+        OperationQualifiedEvaluationOrder<ConstructorCallOperandRole>
 }
 
-InitializationCallPlanId<S: WitnessUseStage> =
-    ContentId<InitializationCallPlanKeyAt<S>>
+ConstructorCallPlanId<S: WitnessTableState> =
+    ContentId<ConstructorCallPlanKeyAt<S>>
 
-InitializationCallPlanAt<S: WitnessUseStage> = {
-    id: InitializationCallPlanId<S>,
-    key: InitializationCallPlanKeyAt<S>
+ConstructorCallPlanAt<S: WitnessTableState> = {
+    id: ConstructorCallPlanId<S>,
+    key: ConstructorCallPlanKeyAt<S>
 }
 
-RegisteredInitializationSelectionAt<S: WitnessUseStage> = {
+ConstructorCallPlan = ConstructorCallPlanAt<Published>
+
+RegisteredInitializationSelectionAt<S: WitnessTableState> = {
     registration: RegisteredDataOperationRegistration,
     selectionEffects: EffectSet,
     effectAllowance: EffectAllowanceValidation,
@@ -785,7 +791,7 @@ RegisteredInitializationSelectionAt<S: WitnessUseStage> = {
     capabilities: CapabilitySelectionAt<S>
 }
 
-RegisteredInitializationExecutionKeyAt<S: WitnessUseStage> = {
+RegisteredInitializationExecutionKeyAt<S: WitnessTableState> = {
     operation: InitializationPath,
     selection: RegisteredInitializationSelectionAt<S>,
     operands:
@@ -798,23 +804,23 @@ RegisteredInitializationExecutionKeyAt<S: WitnessUseStage> = {
         OperationQualifiedEvaluationOrder<RegisteredInitializationOperandKey>
 }
 
-RegisteredInitializationExecutionId<S: WitnessUseStage> =
+RegisteredInitializationExecutionId<S: WitnessTableState> =
     ContentId<RegisteredInitializationExecutionKeyAt<S>>
 
-RegisteredInitializationExecutionAt<S: WitnessUseStage> = {
+RegisteredInitializationExecutionAt<S: WitnessTableState> = {
     id: RegisteredInitializationExecutionId<S>,
     key: RegisteredInitializationExecutionKeyAt<S>
 }
 
-TransferOperationAt<S: WitnessUseStage> =
+TransferOperationAt<S: WitnessTableState> =
     TrivialValueTransfer(type: TypeId, rule: StandardEnvironmentRuleId)
-  | CopyTransfer(call: InitializationCallPlanId<S>)
-  | MoveTransfer(call: InitializationCallPlanId<S>)
+  | CopyTransfer(call: ConstructorCallPlanId<S>)
+  | MoveTransfer(call: ConstructorCallPlanId<S>)
   | RegisteredTransfer(execution: RegisteredInitializationExecutionId<S>)
 
 TransferEvaluationRole = TransferSourceEvaluation | TransferDestinationEvaluation
 
-TransferPlanAt<S: WitnessUseStage> = {
+TransferPlanAt<S: WitnessTableState> = {
     operation: InitializationPath,
     source: InitializationEndpointAt<S>,
     destination: InitializationEndpointAt<S>,
@@ -847,15 +853,15 @@ AllocationHandle = {
     ownershipRule: StandardEnvironmentRuleId
 }
 
-AllocationProviderAt<S: WitnessUseStage> =
-    CallableAllocator(call: InitializationCallPlanId<S>)
+AllocationProviderAt<S: WitnessTableState> =
+    CallableAllocator(call: ConstructorCallPlanId<S>)
   | RegisteredAllocator(execution: RegisteredInitializationExecutionId<S>)
 
-AllocationCleanupAt<S: WitnessUseStage> =
-    CallableDeallocator(call: InitializationCallPlanId<S>)
+AllocationCleanupAt<S: WitnessTableState> =
+    CallableDeallocator(call: ConstructorCallPlanId<S>)
   | RegisteredDeallocator(execution: RegisteredInitializationExecutionId<S>)
 
-AllocationProviderResultBindingAt<S: WitnessUseStage> = {
+AllocationProviderResultBindingAt<S: WitnessTableState> = {
     providerResult: InitializationEndpointAt<S>,
     handle: AllocationHandle,
     storage: AllocationObjectStorage,
@@ -866,7 +872,7 @@ AllocationEvaluationRole =
     AllocationProviderEvaluation
   | AllocationPayloadEvaluation
 
-AllocationPlanKeyAt<S: WitnessUseStage> = {
+AllocationPlanKeyAt<S: WitnessTableState> = {
     object: AllocationObject,
     provider: AllocationProviderAt<S>,
     result: AllocationProviderResultBindingAt<S>,
@@ -874,19 +880,19 @@ AllocationPlanKeyAt<S: WitnessUseStage> = {
     failureEffects: EffectSet
 }
 
-AllocationPlanId<S: WitnessUseStage> = ContentId<AllocationPlanKeyAt<S>>
+AllocationPlanId<S: WitnessTableState> = ContentId<AllocationPlanKeyAt<S>>
 
-AllocationPlanAt<S: WitnessUseStage> = {
+AllocationPlanAt<S: WitnessTableState> = {
     id: AllocationPlanId<S>,
     key: AllocationPlanKeyAt<S>,
     origin: Origin
 }
 
-InitializerCallCompletionAt<S: WitnessUseStage> =
+ConstructorCallCompletionAt<S: WitnessTableState> =
     InitializedTargetCompletion
   | TransferReturnedValueToTarget(transfer: TransferPlanAt<S>)
 
-InitializationPlanOutputAt<S: WitnessUseStage> =
+InitializationPlanOutputAt<S: WitnessTableState> =
     InitializedRequestedStorage
   | ProducedDirectValue
   | ProducedFromPlanStorage(storage: PlanInitializationStorageId,
@@ -894,25 +900,25 @@ InitializationPlanOutputAt<S: WitnessUseStage> =
   | ProducedAllocationHandle(allocation: AllocationPlanId<S>)
   | RecoveredInitializationOutput(error: ErrorId)
 
-AggregateBindingAt<S: WitnessUseStage> =
+AggregateBindingAt<S: WitnessTableState> =
     WrittenAggregateBinding(input: InitializationInputId,
                             destination: InitializationEndpointAt<S>,
-                            plan: InitializationPlanId<S>)
+                            plan: InitializationPlanIdAt<S>)
   | DefaultMemberAggregateBinding(recipe: DefaultMemberRecipeId,
                                   destination: InitializationEndpointAt<S>,
-                                  plan: InitializationPlanId<S>)
+                                  plan: InitializationPlanIdAt<S>)
   | TypeDefaultAggregateBinding(rule: RuleId,
                                 destination: InitializationEndpointAt<S>,
-                                plan: InitializationPlanId<S>)
+                                plan: InitializationPlanIdAt<S>)
 
-InitializationOperationAt<S: WitnessUseStage> =
+InitializationOperationAt<S: WitnessTableState> =
     ExpressionInitialization(operation: InitializationPath,
                              source: InitializationInputId,
                              conversion: ConversionPlan<S>,
                              transfer: TransferPlanAt<S>)
-  | InitializerCallInitialization(call: InitializationCallPlanId<S>,
+  | ConstructorCallInitialization(call: ConstructorCallPlanId<S>,
                                    target: InitializationTargetBinding,
-                                   completion: InitializerCallCompletionAt<S>)
+                                   completion: ConstructorCallCompletionAt<S>)
   | AggregateInitialization(
         operation: InitializationPath,
         shape: AggregateInitializationShapeId,
@@ -924,7 +930,7 @@ InitializationOperationAt<S: WitnessUseStage> =
             OperationQualifiedInitializationOrder<AggregateSlotKey>)
   | StandardInitialization(execution: RegisteredInitializationExecutionId<S>)
   | AllocationInitialization(allocation: AllocationPlanId<S>,
-                             payload: InitializationPlanId<S>,
+                             payload: InitializationPlanIdAt<S>,
                              evaluationOrder:
                                  OperationQualifiedEvaluationOrder<AllocationEvaluationRole>)
   | InitializationRecovery(error: ErrorId)
@@ -981,13 +987,13 @@ InitializationExitKey =
   | ExceptionalInitializationExit(path: InitializationPath,
                                   cause: InitializationExceptionalExitCause)
 
-SubobjectInitializationTransitionCauseAt<S: WitnessUseStage> =
+SubobjectInitializationTransitionCauseAt<S: WitnessTableState> =
     BeginSubobjectInitialization(path: InitializationPath)
   | CompleteSubobjectInitialization(path: InitializationPath)
   | MoveFromSubobject(path: InitializationPath,
                       transfer: TransferPlanAt<S>)
   | DelegateObjectInitialization(path: InitializationPath,
-                                 call: InitializationCallPlanId<S>)
+                                 call: ConstructorCallPlanId<S>)
   | RecoverSubobjectInitialization(path: InitializationPath,
                                    error: ErrorId)
   | DestroySubobject(path: InitializationPath,
@@ -1002,8 +1008,8 @@ PlanStorageLifetimeTransitionCause =
     CreatePlanStorage(storage: PlanInitializationStorageId)
   | EndPlanStorageLifetime(storage: PlanInitializationStorageId)
 
-DestructionPlanAt<S: WitnessUseStage> =
-    CallableDestructor(call: InitializationCallPlanId<S>)
+DestructionPlanAt<S: WitnessTableState> =
+    CallableDestructor(call: ConstructorCallPlanId<S>)
   | RegisteredDestructor(execution: RegisteredInitializationExecutionId<S>)
   | TrivialDestructor(rule: StandardEnvironmentRuleId)
 
@@ -1011,14 +1017,14 @@ NonThrowingDestructionProof = {
     effects: EffectSet
 }
 
-DestructionExecutionAt<S: WitnessUseStage> = {
+DestructionExecutionAt<S: WitnessTableState> = {
     plan: DestructionPlanAt<S>,
     selectionEffects: EffectSet,
     nonThrowing: NonThrowingDestructionProof,
     semanticUses: PlanSemanticUses<S>
 }
 
-InitializationStateTransitionAt<S: WitnessUseStage> =
+InitializationStateTransitionAt<S: WitnessTableState> =
     SubobjectStateTransition {
         subobject: InitializationSubobjectKey,
         before: SubobjectInitializationState,
@@ -1038,13 +1044,13 @@ InitializationStateTransitionAt<S: WitnessUseStage> =
         cause: PlanStorageLifetimeTransitionCause
     }
 
-InitializationExecutionTargetAt<S: WitnessUseStage> =
+InitializationExecutionTargetAt<S: WitnessTableState> =
     RequestedStorageExecutionTarget(destination: InitializationDestination)
   | PlanStorageExecutionTarget(storage: PlanInitializationStorageId)
   | AllocatedObjectExecutionTarget(allocation: AllocationPlanId<S>)
   | DirectValueExecutionTarget(type: TypeId)
 
-InitializationEntryStateEvidenceAt<S: WitnessUseStage> =
+InitializationEntryStateEvidenceAt<S: WitnessTableState> =
     RequestedStorageEntry(
         request: InitializationRequestId,
         destination: InitializationDestination,
@@ -1056,15 +1062,15 @@ InitializationEntryStateEvidenceAt<S: WitnessUseStage> =
                               allocation: AllocationPlanId<S>)
   | DirectValueEntry(request: InitializationRequestId, type: TypeId)
 
-RequiredSubobjectDerivationAt<S: WitnessUseStage> =
+RequiredSubobjectDerivationAt<S: WitnessTableState> =
     RootValueRequirement(type: TypeId)
-  | InitializerTargetRequirement(target: InitializationTargetSlot)
+  | ConstructorTargetRequirement(target: InitializationTargetSlot)
   | AggregateShapeRequirement(shape: AggregateInitializationShapeId)
   | StandardRuleRequirement(execution: RegisteredInitializationExecutionId<S>)
   | AllocationPayloadRequirement(allocation: AllocationPlanId<S>,
-                                 payload: InitializationPlanId<S>)
+                                 payload: InitializationPlanIdAt<S>)
 
-RequiredInitializationSubobjectsAt<S: WitnessUseStage> = {
+RequiredInitializationSubobjectsAt<S: WitnessTableState> = {
     target: InitializationExecutionTargetAt<S>,
     subobjects: CanonicallyOrderedSet<InitializationSubobjectKey>,
     derivation: RequiredSubobjectDerivationAt<S>
@@ -1081,9 +1087,9 @@ InitializationStateProjection = {
                               PlanInitializationStorageId>
 }
 
-NestedInitializationCompositionAt<S: WitnessUseStage> = {
+NestedInitializationCompositionAt<S: WitnessTableState> = {
     operation: InitializationPath,
-    plan: InitializationPlanId<S>,
+    plan: InitializationPlanIdAt<S>,
     stateProjection: InitializationStateProjection,
     exitProjection:
         CanonicallyOrderedMap<InitializationExitKey, InitializationExitKey>
@@ -1094,14 +1100,14 @@ InitializationExitCompletion =
                           state: InitializationState)
   | DidNotCompleteInitialization
 
-InitializationExitStateProofAt<S: WitnessUseStage> = {
+InitializationExitStateProofAt<S: WitnessTableState> = {
     exit: InitializationExitKey,
     transitions: NodeList<InitializationStateTransitionAt<S>>,
     completion: InitializationExitCompletion,
     state: InitializationState
 }
 
-InitializationCleanupStepAt<S: WitnessUseStage> =
+InitializationCleanupStepAt<S: WitnessTableState> =
     DestroyInitializationSubobject(
         subobject: InitializationSubobjectKey,
         expected: Initialized | MovedFrom,
@@ -1117,14 +1123,14 @@ InitializationCleanupStepAt<S: WitnessUseStage> =
         expected: PlanStorageLive,
         transition: InitializationStateTransitionAt<S>)
 
-InitializationExitCleanupAt<S: WitnessUseStage> = {
+InitializationExitCleanupAt<S: WitnessTableState> = {
     exit: InitializationExitKey,
     entryState: InitializationState,
     steps: NodeList<InitializationCleanupStepAt<S>>,
     finalState: InitializationState
 }
 
-InitializationExecutionContractAt<S: WitnessUseStage> = {
+InitializationExecutionContractAt<S: WitnessTableState> = {
     request: InitializationRequestId,
     target: InitializationExecutionTargetAt<S>,
     entryState: InitializationState,
@@ -1140,7 +1146,7 @@ InitializationExecutionContractAt<S: WitnessUseStage> = {
                               InitializationExitCleanupAt<S>>
 }
 
-InitializationPlanKeyAt<S: WitnessUseStage> = {
+InitializationPlanKeyAt<S: WitnessTableState> = {
     request: InitializationRequestId,
     planStorage:
         CanonicallyOrderedMap<PlanInitializationStorageId,
@@ -1152,15 +1158,15 @@ InitializationPlanKeyAt<S: WitnessUseStage> = {
     execution: InitializationExecutionContractAt<S>
 }
 
-InitializationPlanId<S: WitnessUseStage> = ContentId<InitializationPlanKeyAt<S>>
+InitializationPlanIdAt<S: WitnessTableState> = ContentId<InitializationPlanKeyAt<S>>
 
-InitializationPlanAt<S: WitnessUseStage> = {
-    id: InitializationPlanId<S>,
+InitializationPlanAt<S: WitnessTableState> = {
+    id: InitializationPlanIdAt<S>,
     key: InitializationPlanKeyAt<S>
 }
 
-TemporaryInitializationPlanApplicationAt<S: WitnessUseStage> = {
-    plan: InitializationPlanId<S>,
+TemporaryInitializationPlanApplicationAt<S: WitnessTableState> = {
+    plan: InitializationPlanIdAt<S>,
     sourceInput: InitializationInputId,
     destination: PlanInitializationStorageId,
     site: SemanticOperationSiteAssignment,
@@ -1169,7 +1175,7 @@ TemporaryInitializationPlanApplicationAt<S: WitnessUseStage> = {
 }
 
 InitializationPlan = InitializationPlanAt<Published>
-InitializationPlanId = InitializationPlanId<Published>
+InitializationPlanId = InitializationPlanIdAt<Published>
 TransferPlan = TransferPlanAt<Published>
 TemporaryInitializationPlanApplication =
     TemporaryInitializationPlanApplicationAt<Published>
@@ -1190,14 +1196,14 @@ cannot consume its own result ID, and recursive construction is returned as
 path, executable transfer, and source/destination evaluation order. The destination is either a
 physical-storage endpoint whose effective access permits the write or the unique
 `InitializationPlanResultEndpoint(plan.key.request)` for a produce-value result. A callable
-copy/move resolves an `InitializationCallPlanAt<S>` whose operand mapping connects those endpoints to
+copy/move resolves a `ConstructorCallPlanAt<S>` whose operand mapping connects those endpoints to
 the call's exact slots. A registered transfer resolves a schema-validated registered execution with
 the same endpoints. A trivial transfer names the standard rule defining its value, overlap,
 lifetime, and bit-preservation semantics. The endpoint types equal the transfer operation's declared
-types. Copy initialization is not merely loading a place, and move initialization is never inferred
+types. Copy initialization is not merely loading a storage, and move initialization is never inferred
 later from absence of uses.
 
-`INI-PLN-003`: `InitializerCallInitialization.call` resolves the complete selected typed call,
+`INI-PLN-003`: `ConstructorCallInitialization.call` resolves the complete selected typed call,
 including defaults, packs, access plans, witness values, contract uses, endpoint mapping, and
 evaluation order. Its callable purpose and mapped initialization-target operand equal the stored
 `InitializationTargetBinding`. `InitializedTarget` requires `InitializedTargetCompletion`;
@@ -1244,7 +1250,7 @@ operation and output. The storage's effective access provides the bound target's
 requirement, its address-space proof satisfies the requirement's symbolic predicate, and its lifetime proof has the
 stored endpoints. A `PlanOwnedInitializationStorage` destination refers to exactly one such entry and
 cannot use the supplied-storage alternative to carry a `PhysicalStorageProof` for storage it does not
-denote. Core creates this storage explicitly before the initializer call and derives its alias provenance
+denote. IRReady creates this storage explicitly before the constructor call and derives its alias provenance
 from the storage ID.
 
 `INI-PLN-009`: `output` agrees with the request goal. `InitializeStorage` uses
@@ -1265,7 +1271,7 @@ the `RecoveredInitialization` result governed by `INI-IR-006`.
 
 `INI-PLN-010`: The operation algebra contains no `DefaultInitialization(strategy, optionalPlan)` or
 equivalent flag-like wrapper. A default/value/omitted-site policy must select one mandatory executable
-alternative: a zero-input initializer call, aggregate bindings whose default source is explicit, a
+alternative: a zero-input constructor call, aggregate bindings whose default source is explicit, a
 registered standard execution, or another model-declared closed operation. If no such alternative
 exists, resolution rejects the candidate. Strategy identity is retained by the candidate/rank and is
 never consulted by lowering to reinterpret an operation.
@@ -1304,9 +1310,9 @@ an `InitializeStorage(PlanOwnedInitializationStorage(destination), targetType)` 
 `planStorage` map contains that exact destination, whose `sourceInput` is the single externally
 captured source input, and whose operation contains the exact `ExpressionInitialization` conversion
 at `rankedConversion`. Its output is `InitializedRequestedStorage`. The enclosing access plan binds
-that input to one already captured value, physical place, or abstract place. The
+that input to one already captured value, physical storage, or abstract storage. The
 initialization plan does not reevaluate the source expression or recapture a receiver/index; its
-stored conversion performs the bound place's ordinary read, if any, exactly once and then performs
+stored conversion performs the bound storage's ordinary read, if any, exactly once and then performs
 the selected value conversion. Thus a getter/read-through-ref operation belongs to this one nested
 execution rather than to a second outer preparation recipe.
 `site` is the authenticated semantic child assigned by the enclosing access plan and
@@ -1359,7 +1365,7 @@ than treating a whole-object storage endpoint as an unnamed field address.
 domain equals `call.callSlots`; it additionally contains `InitializationTargetCallOperand` exactly
 when the callable purpose is an initializer. Each mapped endpoint satisfies that slot's stored access
 plan and the target endpoint equals the separately validated target binding. Its qualified evaluation
-order has exactly this operand domain. `InitializationCallResultEndpoint(call.id)` has the call's
+order has exactly this operand domain. `ConstructorCallResultEndpoint(call.id)` has the call's
 stored result type and is available only on its normal completion. This one schema applies to
 initializers, copy/move calls, allocators, deallocators, and destructors.
 
@@ -1462,11 +1468,11 @@ The surface syntax alone contributes no candidate and chooses no preference.
 standard strategies admitted by the target model. Argument mapping occurs before conversions;
 strategy comparison is proof-carrying and independent of enumeration order.
 
-`INI-FRM-004`: `BracedElements` is target-directed. `{}` is an explicit request for value/default
+`INI-FRM-004`: `InitializerListElements` is target-directed. `{}` is an explicit request for value/default
 initialization under the target model. It is not equivalent to no initializer unless a named
 site/version rule says so.
 
-`INI-FRM-005`: `OmittedDeclaration` is decided by `InitializationSite`. Local `let`, local `var`,
+`INI-FRM-005`: `OmittedDecl` is decided by `InitializationSite`. Local `let`, local `var`,
 field, global/static, parameter, and synthesized storage have separate registered policies. The
 policy returns a plan or an explicit `OmittedInitializationNotPermitted`; target backend defaults
 and command-line zeroing options do not silently define source semantics.
@@ -1480,7 +1486,7 @@ conversion search.
 initialization strategies with zero source inputs. The compatibility profile that equates `T()`
 with an empty initializer list gives those two source forms the same candidate set and comparison
 relation, while preserving their distinct origins. Neither is equivalent to
-`OmittedDeclaration`.
+`OmittedDecl`.
 
 `INI-FRM-008`: `AllocatingArguments` first selects the allocation strategy and then nests the
 zero-, one-, or many-input initialization form appropriate to the written arguments. Allocation
@@ -1493,7 +1499,7 @@ edges; `new T(e)` is not modeled as an ordinary `T(e)` followed by hidden alloca
 InitializationPathStep =
     SourceInputStep(input: InitializationInputId)
   | AggregateSlotStep(slot: AggregateSlotKey)
-  | InitializerParameterStep(parameter: ParameterKey)
+  | ConstructorParameterStep(parameter: ParameterKey)
   | DefaultMemberStep(recipe: DefaultMemberRecipeId)
   | AllocationPayloadStep
   | ResultTransferStep
@@ -1509,7 +1515,7 @@ InitializationFailure =
                      target: TypeId,
                      site: InitializationSite)
   | NoInitializationStrategy(target: TypeId, form: InitializationForm)
-  | InitializerOverloadFailure(result: OverloadResult)
+  | ConstructorOverloadFailure(result: OverloadResult)
   | ExplicitConversionFailure(failure: ConversionFailure)
   | AggregateNotEligible(reason: AggregateEligibilityFailure)
   | TooManyElements(inputs: NodeList<InitializationInputId>)
@@ -1519,8 +1525,8 @@ InitializationFailure =
   | ElementFailure(path: InitializationPath, nested: InitializationFailure)
   | DefaultInitializationUnavailable(path: InitializationPath, type: TypeId)
   | InaccessibleInitializationMember(declaration: DeclId,
-                                     decision: AccessDecision)
-  | InvalidInitializationDestination(actual: PlaceRef)
+                                     decision: VisibilityDecision)
+  | InvalidInitializationDestination(actual: StorageRef)
   | CopyOrMoveUnavailable(source: TypeId, target: TypeId)
   | RecursiveInitialization(cycle: NonEmpty<QueryKey>)
   | DefiniteInitializationFailure(path: InitializationPath,
@@ -1563,7 +1569,7 @@ through initialization, result extraction, and cleanup; allocated payloads use
 Storage offsets, declaration order, rendered names, and deprecated concrete struct bases cannot act
 as subobject identity.
 
-## Core and IR lowering
+## IRReady and IR lowering
 
 Lowering consumes a validated plan directly:
 
@@ -1575,14 +1581,16 @@ Lowering consumes a validated plan directly:
 5. select the exact `InitializationExitKey` and execute that exit's cleanup, including normal-exit
    destruction/lifetime obligations.
 
-The Core and frontend-IR forms are closed sums, not an opcode plus a strategy flag:
+The IRReady form is a closed plan-step sum. Frontend IR emits actual codebase instructions and
+attaches a stage-free initialization plan to each emitted instruction; it does not invent
+initialization opcodes:
 
 ```text
 InitializationRuntimeOperandRole =
     TransferSourceOperand(operation: InitializationPath)
   | TransferDestinationOperand(operation: InitializationPath)
-  | InitializationCallOperand(call: InitializationCallPlanId,
-                              role: InitializationCallOperandRole)
+  | ConstructorCallOperand(call: ConstructorCallPlanId,
+                              role: ConstructorCallOperandRole)
   | RegisteredInitializationOperand(
         execution: RegisteredInitializationExecutionId<Published>,
         operand: RegisteredInitializationOperandKey)
@@ -1593,55 +1601,60 @@ InitializationRuntimeOperandRole =
   | InitializationCleanupOperand(exit: InitializationExitKey,
                                  ordinal: UInt32)
 
-CoreInitializationOperation =
-    CreatePlanInitializationStorage(storage: PlanInitializationStorageId)
-  | TransferCoreInitialization(operation: InitializationPath)
-  | InitializerCallCoreInitialization(call: InitializationCallPlanId<Published>,
-                                      callRegion: NodeId<Core>)
-  | AggregateCoreInitialization(operation: InitializationPath,
+IRReadyInitializationPlanStep =
+    CreatePlanInitializationStorageStep(storage: PlanInitializationStorageId)
+  | TransferInitializationStep(operation: InitializationPath)
+  | ConstructorCallInitializationStep(call: ConstructorCallPlanId<Published>,
+                                      callRegion: NodeId<IRReady>)
+  | AggregateInitializationStep(operation: InitializationPath,
                                 shape: AggregateInitializationShapeId)
-  | RegisteredCoreInitialization(
+  | RegisteredInitializationStep(
         execution: RegisteredInitializationExecutionId<Published>)
-  | AllocationCoreInitialization(allocation: AllocationPlanId<Published>)
-  | CleanupCoreInitialization(exit: InitializationExitKey, ordinal: UInt32)
-  | RecoveryCoreInitialization(error: ErrorId)
+  | AllocationInitializationStep(allocation: AllocationPlanId<Published>)
+  | CleanupInitializationStep(exit: InitializationExitKey, ordinal: UInt32)
+  | RecoveryInitializationStep(error: ErrorId)
 
-CoreInitialization = {
+IRReadyInitialization = {
     plan: InitializationPlanId,
-    operation: CoreInitializationOperation,
+    step: IRReadyInitializationPlanStep,
     operands:
-        CanonicallyOrderedMap<InitializationRuntimeOperandRole, CoreValueId>,
-    results: NodeList<CoreValueShape>
+        CanonicallyOrderedMap<InitializationRuntimeOperandRole, IRReadyValueId>,
+    results: NodeList<IRReadyValueShape>
 }
 
-IRInitializationOperandLayout =
-    CanonicallyOrderedMap<InitializationRuntimeOperandRole, UInt32>
+InitializationInstOperandLayout =
+    CanonicallyOrderedMap<InitializationRuntimeOperandRole,
+                          NonEmpty<NodeList<UInt32>>>
 
-IRInitializationOperation =
-    CreatePlanInitializationStorageOperation(
+InitializationEmissionPlanStep =
+    CreatePlanInitializationStorageEmission(
         storage: PlanInitializationStorageId)
-  | TransferInitializationOperation(operation: InitializationPath)
-  | InitializerCallInitializationOperation(call: InitializationCallPlanId<Published>)
-  | AggregateInitializationOperation(operation: InitializationPath,
-                                     shape: AggregateInitializationShapeId)
-  | RegisteredInitializationOperation(
+  | TransferInitializationEmission(operation: InitializationPath)
+  | ConstructorCallInitializationEmission(call: ConstructorCallPlanId<Published>)
+  | AggregateInitializationEmission(operation: InitializationPath,
+                                    shape: AggregateInitializationShapeId)
+  | RegisteredInitializationEmission(
         execution: RegisteredInitializationExecutionId<Published>)
-  | AllocationInitializationOperation(allocation: AllocationPlanId<Published>)
-  | CleanupInitializationOperation(exit: InitializationExitKey, ordinal: UInt32)
+  | AllocationInitializationEmission(allocation: AllocationPlanId<Published>)
+  | CleanupInitializationEmission(exit: InitializationExitKey, ordinal: UInt32)
 
-IRInitializationInstruction = {
+InitializationInstSemanticPlan = {
     plan: InitializationPlanId,
-    operation: IRInitializationOperation,
-    layout: IRInitializationOperandLayout
+    step: InitializationEmissionPlanStep,
+    emissionOrdinal: UInt32,
+    emissionCount: UInt32,
+    operandLayout: InitializationInstOperandLayout
 }
 ```
 
-`INI-IR-001`: Core has distinct closed operations for plan-storage creation, transfer, initializer
-call, aggregate construction, registered execution, allocation, and cleanup. These are operational
-alternatives, not source strategies. `CoreExpr.Initialize` contains `CoreInitialization`;
-`IROperation.InitializationOperation` contains a successful `IRInitializationInstruction`. A generic
-`Construct` node, default/strategy flag, or optional nested plan that lowering reinterprets is
-forbidden. Recovery is the explicitly tooling-only Core alternative governed by `INI-IR-006`.
+`INI-IR-001`: The `IRReadyAST` has distinct closed plan steps for plan-storage creation, transfer,
+constructor call, aggregate construction, registered execution, allocation, and cleanup. These are
+operational plans, not source strategies. `IRReadyExpr.Initialize` contains
+`IRReadyInitialization`. Each emitted `IRInst` carries `InitializationInstSemanticPlan` in the
+`IRInstSemanticMetadata` sidecar, and `selectedIROp(plan)` equals that instruction's actual generated
+`IROp`. A generic `Construct` node, default/strategy flag, optional nested plan that lowering
+reinterprets, or invented initialization opcode is forbidden. Recovery is the explicitly
+tooling-only IRReady plan step governed by `INI-IR-006`.
 
 `INI-IR-002`: Direct-to-destination initialization preserves the physical destination identity.
 Lowering cannot construct a value, assign it later, and thereby change copy/move, aliasing,
@@ -1653,12 +1666,12 @@ Layout lowering may map slot keys to offsets only after semantic initialization 
 declaration/storage position never substitutes for `AggregateSlotKey` in the frontend. Call,
 registered, transfer, and allocation lowering likewise follow their own qualified operand orders.
 
-`INI-IR-004`: Lowering emits one `CreatePlanInitializationStorage` for each plan-storage entry before
-its first use. It returns a Core physical place whose value type, access, physical address space,
+`INI-IR-004`: Lowering executes one `CreatePlanInitializationStorageStep` for each plan-storage entry before
+its first use. It returns an IR-ready physical storage whose value type, access, physical address space,
 lifetime, alias provenance, and empty physical-source provenance are derived from the entry; it is
 `ExactAliasRoot(StableAliasRegionIdentity(ContentIdentity(storage.id)))` for an independently
 created plan-owned entry. The
-corresponding IR storage operation returns
+corresponding actual-instruction emission returns
 `PhysicalStorageValueShape(IRPhysicalStorageShape{...})` with exactly the same value type, access,
 mutability, address space, lifetime, alias provenance, and source provenance. Allocation storage uses the same lossless
 shape with
@@ -1666,38 +1679,52 @@ shape with
 creation operation and retains its incoming physical-storage value and shape; an internal request
 destination reuses the storage/projection operation emitted once by its owning plan.
 For a `TemporaryInitializationPlanApplicationAt<Published>`, chapter 11's
-`MaterializeTemporaryOperation` is the one lowering of its destination's `CreatePlanStorage`
+`MaterializeTemporaryInstPlan` is the one lowering of its destination's `CreatePlanStorage`
 transition; no second create operation is emitted. Every internal endpoint rooted at that
 destination uses `ExactAliasRoot(temporaryStorageAliasRoot(application.identity))`, exactly matching
 the materialized temporary, rather than the independent plan-storage alias above. The plan's
 initialization instructions retain the complete internal physical endpoint while the enclosing
 access plan exposes only the opaque temporary-storage value, so this projection cannot make the
-temporary available to source-level physical-place or address-space rules.
+temporary available to source-level physical-storage or address-space rules.
 
-`INI-IR-005`: Every successful Core initialization node resolves exactly one component of its plan:
+`INI-IR-005`: Every successful IRReady initialization node resolves exactly one component of its plan:
 a transfer operation path, call-plan ID, aggregate operation/shape, registered-execution ID,
 allocation-plan ID, storage ID, or exit/cleanup ordinal. Its operand-map domain is exactly that
 component's mapped runtime roles. An initializer-call target equals the call region's
-`CoreCallInputs.initializationTarget`; returned-value completion is a separate transfer whose source
+`IRReadyCallInputs.initializationTarget`; returned-value completion is a separate transfer whose source
 equals the call region's normal result. A physical transfer destination is an operand; an
 `InitializationPlanResultEndpoint` is represented by the transfer instruction's result and cannot
 also appear as `TransferDestinationOperand`. Cleanup nodes follow the selected exit's stored steps. The
 result list is empty for cleanup and for an operation that only initializes an existing physical
-destination. `CreatePlanInitializationStorage` has exactly one lossless physical-storage result. A
+destination. `CreatePlanInitializationStorageStep` has exactly one lossless physical-storage result. A
 transfer to `InitializationPlanResultEndpoint` has exactly one value result. Allocation projection
 produces one `RuntimeValueShape(handle.handleType)` endpoint and one lossless physical-storage
 endpoint for its object; the eventual allocation-expression result is the handle. Every other
 component has exactly its declared endpoint shapes, and non-allocation value results have
-`targetType`. Initial IR preserves the
-alternative, maps every role to one in-range operand ordinal, and preserves physical-storage shapes.
-Neither Core nor IR consults `InitializationStrategy`. Every emitted successful initialization
-instruction contributes the exact `InitializationPlanDependency(plan)` required by chapter 11.
+`targetType`.
 
-`INI-IR-006`: `InitializationRecovery(error)` and `RecoveryCoreInitialization(error)` exist only so
+The lowering rule for that component declares a nonempty sequence of actual `IROp` values. The
+sidecar entries for the sequence have the same `plan` and `step`, have
+`emissionCount > 0`, and their `emissionOrdinal` values are a bijection onto
+`0 .. emissionCount-1`. Each entry's `selectedIROp(plan)` equals its instruction opcode. A
+constructor-call emission is an `IRCall` and also has complete `call` metadata; a registered
+emission uses the opcode resolved from its `RegisteredInitializationExecutionAt<Published>`.
+Aggregate, allocation, transfer, and cleanup recipes may use multiple existing instructions but
+cannot collapse the recipe into an invented aggregate or initialization opcode. Across the recipe,
+the operand-layout domain covers every mapped runtime role and no other role. Each role's IRReady
+producer is evaluated exactly once in its operation-qualified evaluation order; subsequent layout
+occurrences reuse that SSA value, and their multiplicity must equal the declared emission recipe.
+Every occurrence preserves its physical-storage shape. Neither IRReady nor IR consults
+`InitializationStrategy`. Every emitted successful initialization instruction contributes the
+exact `InitializationPlanDependency(plan)` required by chapter 11; canonical dependency-map merging
+prevents a multi-instruction recipe from creating distinct authorities.
+
+`INI-IR-006`: `InitializationRecovery(error)` and `RecoveryInitializationStep(error)` exist only so
 diagnostic/tooling elaboration remains structurally total. They do not lower to
-`IRInitializationInstruction`, do not contribute `InitializationPlanDependency`, and cannot appear
-in a publishable frontend-IR fragment. Under chapter 11's `IR-005`, tooling lowering emits the typed
-`IRErrorOperation(error)` placeholder instead. Thus an initialization-plan dependency always
+`InitializationInstSemanticPlan`, do not contribute `InitializationPlanDependency`, and cannot
+appear in a publishable frontend-IR fragment. Under chapter 11's `IR-005`, tooling lowering emits
+the existing `IRPoison` opcode with `recoveryError = Some(error)` instead. Thus an
+initialization-plan dependency always
 resolves an applicable `Selected` winner, never a recovered plan whose operation would need to be
 reinterpreted as successful code.
 

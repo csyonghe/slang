@@ -25,9 +25,9 @@ ExpectedType = {
 }
 
 ReceiverContext = {
-    declaration: CanonicalDeclRef,
+    declaration: DeclRef,
     selfType: TypeId,
-    mode: PassingMode,
+    mode: ParamPassingMode,
     category: ValueCategory,
     origin: Origin
 }
@@ -37,8 +37,8 @@ ExpressionCheckContext = {
     expected: Option<ExpectedType>,
     receiver: Option<ReceiverContext>,
     genericEnvironment: GenericEnvironmentId,
-    semanticUseOwner: CanonicalDeclRef,
-    accessContext: AccessContext,
+    semanticUseOwner: DeclRef,
+    visibilityContext: VisibilityContext,
     availableEffects: EffectAllowance,
     evaluationLifetime: LifetimeId,
     contractSelection: ContractSelectionContext,
@@ -98,19 +98,47 @@ unchanged bound node with a mutated error type.
 Literal checking is split into decoding and contextual typing:
 
 ```text
-DecodeLiteral(token) -> LiteralValue | LiteralFailure
+LiteralValue =
+    IntegerLiteralValue(value: BigInt, radix: LiteralRadix)
+  | FloatingPointLiteralValue(value: ExactFloatingPointLiteral)
+  | BoolLiteralValue(value: Bool)
+  | StringLiteralValue(value: Utf8String)
+  | CharLiteralValue(value: UnicodeScalar)
+  | NullPtrLiteralValue
+  | NoneLiteralValue
+
+LiteralRadix = Binary | Octal | Decimal | Hexadecimal
+
+ExactFloatingPointLiteral = {
+    significand: BigInt,
+    exponent: BigInt,
+    radix: Decimal | Hexadecimal
+}
+
+LiteralFailure = {
+    kind: InvalidSpelling | InvalidEscape | InvalidSuffix | InvalidUnicodeScalar,
+    range: SourceRange,
+    offendingText: Utf8String
+}
+
+LiteralDecodeResult = DecodedLiteral(LiteralValue) | InvalidLiteral(LiteralFailure)
+
+DecodeLiteral(token) -> LiteralDecodeResult
 ChooseLiteralType(value, suffix, expected, Σ) -> TypeId
 ```
 
 An explicit suffix selects a standard-environment literal type or reports an unsupported suffix.
 Without a suffix, an expected compatible scalar type may be selected under its literal-conversion
 rule; otherwise language-version defaults apply. Range checking uses arbitrary-precision decoded
-values before conversion to the selected type.
+values before conversion to the selected type. `IntegerLiteralValue` and
+`FloatingPointLiteralValue` deliberately reuse the current lexer/AST vocabulary while replacing
+the current host-sized payloads with exact immutable values; contextual conversion, not decoding,
+performs target-width rounding and range checks.
 
 ```text
 decode(tok) = v    chooseType(v, suffix(tok), expected, Σ) = τ
 ---------------------------------------------------------------- EXP-LIT-001
-Γ ⊢ tok ⇝ Literal(v, τ, origin(tok)) : τ @ RValue
+Γ ⊢ tok ⇝ LiteralExpr(v, τ, origin(tok)) : τ @ RValue
 ```
 
 Adjacent string tokens form `ConcatenatedString` with one child per token. Character literals remain
@@ -123,7 +151,7 @@ Binding has already produced a `BoundName`:
 ```text
 BoundName = Resolved(use)    typeOf(use.target) = (τ,q)
 ------------------------------------------------------ EXP-NAME-001
-Γ ⊢ BoundName ⇝ DeclUseExpr(use) : τ @ q
+Γ ⊢ BoundName ⇝ DeclRefExpr(use) : τ @ q
 ```
 
 An overload set checks to `OverloadClassifier` only in a context that will resolve it, such as a call,
@@ -141,7 +169,7 @@ The surrounding checked callable supplies an explicit receiver:
 ```text
 currentFunction(Γ).receiver = Receiver(selfType=τ, mode=m, ...)
 ---------------------------------------------------------------- EXP-THIS-001
-Γ ⊢ this ⇝ ReceiverExpr(function, m) : τ @ receiverCategory(m)
+Γ ⊢ this ⇝ ThisExpr(function, m) : τ @ receiverCategory(m)
 ```
 
 Static/free functions have `NoReceiver`; `this` is rejected. A nested lambda captures the receiver
@@ -155,31 +183,32 @@ the substituted formal value type; its access is `ReadAccess`; its mutability is
 `UnknownMutability`; its lifetime is `CallableActivationLifetime(signature)`; and its alias is
 `UnknownAliasRoot`. Its symbolic address space and typed source-provenance facts come from the exact
 `PhysicalFormalEntryProof` for that signature/role. The name expression is classified as
-`Place(PhysicalPlace(storage))`. Read-only access is a view restriction, not a claim that the
+`Storage(PhysicalStorage(storage))`. Read-only access is a view restriction, not a claim that the
 caller's underlying location is immutable.
 
-`EXP-PAR-002`: A `RefMode(r)` formal analogously constructs `PhysicalPlace` rooted at
+`EXP-PAR-002`: A `RefMode(r)` formal analogously constructs `PhysicalStorage` rooted at
 `RefFormalRoot(signature, role)`, with `ReadWriteAccess`, `Mutable`, activation lifetime, unknown
 alias, and the checked formal entry's address/source evidence. A `ConstRefMode` formal supports
 loads and ordinary proof-carrying physical projections but cannot be written, passed to
 `OutMode`/`InOutMode`/`RefMode`, or escape its activation. A `RefMode` formal permits operations
 proved by its read/write view. A property reached through either physical receiver still produces
-its ordinary `AbstractPlace`; it does not expose the receiver location as the property's storage.
+its ordinary `AbstractStorage`; it does not expose the receiver location as the property's storage.
 
 `EXP-PAR-003`: Stored-field, builtin-element, vector-element, dereference, and registered projection
 rules applied to a physical formal use the same ordinary physical-projection applications as any
-other `PhysicalPlace`. They preserve the formal lifetime/access/source ceilings unless a registered
-rule proves an exact refinement. There is no borrowed-place classifier, borrowed projection
+other `PhysicalStorage`. They preserve the formal lifetime/access/source ceilings unless a registered
+rule proves an exact refinement. There is no borrowed-storage classifier, borrowed projection
 application, or target-dependent borrowed-storage category.
 
 `This` in type position resolves to the current aggregate nominal type, extension target type, or
-interface-bound `SelfType`, as established when building the surrounding declaration header. The
+interface-bound `ThisType`, as established when building the surrounding declaration header. The
 type checker does not walk declaration parents to calculate it ad hoc.
 
 ## Type expressions
 
 ```text
-Γ; Δ ⊢ te ⇝ TypeExpr(τ) :: TypeKind
+Γ; Δ ⊢ te ⇝ (expr: NodeRef<Typed, Expr>, semanticType: τ: TypeId)
+              :: KindClassifier(TypeKind)
 ```
 
 Identifier/member/generic applications at type level use the same bound declaration identities and
@@ -191,19 +220,19 @@ chapter 4.
 type-classified term in ordinary value position produces `expected-value`. No `TypeType` coercion
 hides the category error.
 
-## Places, loads, and assignment
+## Storage, loads, and assignment
 
 Name, stored-field, builtin-element, dereference, and registered physical-projection rules may
-produce `PhysicalPlace`. Properties, declared subscripts, multi-element swizzles, and other
-getter/setter projections produce `AbstractPlace`. Reading either in value context inserts an
-explicit load/accessor plan during elaboration. Preserving a place for assignment, `out`, or
+produce `PhysicalStorage`. Properties, declared subscripts, multi-element swizzles, and other
+getter/setter projections produce `AbstractStorage`. Reading either in value context inserts an
+explicit load/accessor plan during elaboration. Preserving a storage for assignment, `out`, or
 `inout` does not by itself make abstract storage physical. `__constref` and `__ref` require a
 physical endpoint and never turn an ordinary value/getter result into storage through a temporary.
 
 ```text
-Γ ⊢ lhs ⇝ l : τ @ Place(place)
+Γ ⊢ lhs ⇝ l : τ @ Storage(storage)
 Γ ⊢ rhs ⇑ Required(τ, Assignment) ⇝ r : τ @ q
-writable(effectiveAccess(place))
+writable(effectiveAccess(storage))
 PlanCoercion(ConversionRequest(r, τ, q, τ, Assignment, Implicit,
                                conversionEnvironment(context(Γ)))) = Applicable(c, rank)
 w = WriteValueAccessAt<S>(source = r, conversion = c,
@@ -213,7 +242,7 @@ PlanStorageAccessAt<S>(StorageAccessRequestAt<S>(
     physical projection site of assignment with role StorageWrite,
     l, WriteValueAccess(w), context(Γ))) = PlannedStorageAccess(p)
 ------------------------------------------------ EXP-ASN-001
-Γ ⊢ lhs = rhs ⇝ Assign(l, r, p) : τ @ RValue
+Γ ⊢ lhs = rhs ⇝ AssignExpr(l, r, p) : τ @ RValue
 ```
 
 The required RHS check makes `r` the already coerced value, so the displayed `PlanCoercion` is the
@@ -225,12 +254,12 @@ Assignment to immutable storage, a temporary, a non-writable swizzle, or an inac
 has distinct structured failures. Compound assignment binds and resolves its operator exactly once,
 then elaborates read/operation/write-back with a single evaluation of the left side.
 
-`EXP-PLC-001`: Place paths preserve single-evaluation semantics. An elaboration may materialize a
+`EXP-STO-006`: Storage paths preserve single-evaluation semantics. An elaboration may materialize a
 temporary but cannot clone a side-effecting base/index expression.
 
-`EXP-PLC-002`: `isPhysicalStorage` is derived from the `PlaceRef` alternative. Assignment and
-write-back may target an `AbstractPlace` through a setter plan, but physical-operand argument passing and fresh
-initialization storage require `PhysicalPlace` and the proof defined in chapter 4. A setter does not
+`EXP-STO-007`: `isPhysicalStorage` is derived from the `StorageRef` alternative. Assignment and
+write-back may target an `AbstractStorage` through a setter plan, but physical-operand argument passing and fresh
+initialization storage require `PhysicalStorage` and the proof defined in chapter 4. A setter does not
 manufacture that proof. A mode-specific reference accessor may instead be invoked and explicitly
 dereferenced to construct a distinct physical endpoint under `EXP-REF-004`.
 
@@ -239,25 +268,25 @@ dereferenced to construct a distinct physical endpoint under `EXP-REF-004`.
 Member checking requests `LookupMember` on the checked base classifier. A single non-callable
 candidate can be selected immediately; overloadable candidates remain an overload set with a
 receiver path. Subscript syntax first considers declared subscript members and standard-environment
-indexing primitives. A declared property/subscript yields `AbstractPlace` from its accessor
-contract; a builtin/registered indexing primitive yields `PhysicalPlace` only when its rule proves
+indexing primitives. A declared property/subscript yields `AbstractStorage` from its accessor
+contract; a builtin/registered indexing primitive yields `PhysicalStorage` only when its rule proves
 a stable endpoint.
 
 `EXP-MEM-001`: A selected member expression contains the normalized decl-ref, chosen lookup path,
-checked base, substituted member type, and resulting place/value category.
+checked base, substituted member type, and resulting storage/value category.
 
 `EXP-MEM-002`: Explicit syntax may produce a first-class reference value from a
 property/subscript reference accessor. Separately, physical-parameter planning may select the exact
-access-indexed accessor and immediately dereference its result to a new `PhysicalPlace`. This
+access-indexed accessor and immediately dereference its result to a new `PhysicalStorage`. This
 implicit operation exists only inside `ParameterReferenceAccessorPlanAt<S>` and never exposes the
-handle or reclassifies the original abstract place. Ordinary read/write fallbacks remain separately
+handle or reclassifies the original abstract storage. Ordinary read/write fallbacks remain separately
 authorized storage-access plans.
 
 `EXP-MEM-003`: Checking a property or declared subscript constructs one `AbstractStorageRef` whose
 `capturedSources` contains the already checked receiver and source-index arguments. Its projection
-stores only the selected property/subscript identity. The capture map/order follows `TYP-PLC-005`
-and `TYP-PLC-006`, and getter/setter/reference-accessor plans must all consume that same value. Merely
-forming the abstract place invokes no accessor and evaluates no captured runtime expression a
+stores only the selected property/subscript identity. The capture map/order follows `TYP-STO-005`
+and `TYP-STO-006`, and getter/setter/reference-accessor plans must all consume that same value. Merely
+forming the abstract storage invokes no accessor and evaluates no captured runtime expression a
 second time.
 
 `EXP-MEM-004`: `PlanStorageAccessAt<S>` is total over `StorageAccessIntentAt<S>`. `ReadValueAccess`
@@ -271,7 +300,7 @@ formation is likewise not a storage-access intent: it uses `CheckReferenceFormat
 written `ReferenceFormationRequest`.
 No boolean “aggressive address” flag or fallback order shared across these operations is permitted.
 
-`EXP-MEM-005`: A registered member/subscript can produce `PhysicalPlace` only through
+`EXP-MEM-005`: A registered member/subscript can produce `PhysicalStorage` only through
 `ValidateRegisteredPhysicalProjectionAt<S>`. The request contains the exact checked base and index
 expressions; a success stores one `RegisteredPhysicalProjectionApplicationAt<S>` on the typed
 projection expression. It first requires
@@ -280,9 +309,9 @@ projection expression. It first requires
 most one `PhysicalProjectionBaseOperand` and dense
 `PhysicalProjectionIndexOperand(0..n-1)` roles. `evaluationOrder` is a duplicate-free bijection
 onto that domain and preserves written base-then-index source order. Each entry retains the
-executable `TypedExpr` and complete `AccessPlan<S>` that produces its registered runtime endpoint,
+executable `TypedExpr` and complete `StorageAccessPlan<S>` that produces its registered runtime endpoint,
 whose terminal is `PassArgument`; neither checking nor lowering may reconstruct an operand from
-`PhysicalPlacePath` or substitute a standalone storage terminal.
+`PhysicalStoragePath` or substitute a standalone storage terminal.
 
 The application stores `site = request.site`, and its identity is
 `registeredPhysicalProjectionIdentity(site.site)`; `request.id` remains only typed-node provenance.
@@ -296,14 +325,14 @@ address-space, mutability, alias, and source-provenance derivations are exact; i
 registered schema value, one named runtime operand, or a named nonempty operand meet and replays the
 exact registered component rule; no output component is copied from the checking context. The
 typed expression is
-classified as `Place(PhysicalPlace(output.storage))`; a bare registration, a same-typed result, or
+classified as `Storage(PhysicalStorage(output.storage))`; a bare registration, a same-typed result, or
 an old `(rule, basePath, staticInputs)` tuple cannot manufacture that category. Control is one
 physical result, no successor, and nonthrowing; a throwing registered surface is a call instead.
 
 `EXP-MEM-006`: An expected physical mode does not change intrinsic member/subscript checking. A
 stored field, registered physical projection, builtin physical subscript, or explicit dereference
-may remain `PhysicalPlace` and qualify directly. A property or declared subscript remains
-`AbstractPlace`; chapter 7 may select only its exact `referenceAccessors[mode.access]` entry and the
+may remain `PhysicalStorage` and qualify directly. A property or declared subscript remains
+`AbstractStorage`; chapter 7 may select only its exact `referenceAccessors[mode.access]` entry and the
 dedicated invocation/dereference plan. Getter/setter availability, ordinary read fallback, value
 conversion, and temporary materialization are irrelevant to this selection. The original property
 remains abstract in the selected typed call.
@@ -333,7 +362,7 @@ ExplicitReferenceSyntax =
                               staticInputs: CanonicalArguments)
 
 ReferenceSyntaxDirectStrategy =
-    CoreAddressOfStrategy
+    IRReadyAddressOfStrategy
   | RegisteredDirectReferenceStrategy(rule: StandardEnvironmentRuleId,
                                       staticInputs: CanonicalArguments)
 
@@ -344,10 +373,10 @@ ReferenceSyntaxAccessorStrategy =
         rule: StandardEnvironmentRuleId,
         staticInputs: CanonicalArguments)
 
-ReferenceSyntaxPolicyAt<S: WitnessUseStage> = {
+ReferenceSyntaxPolicyAt<S: WitnessTableState> = {
     languageRule: RuleId,
     syntax: ExplicitReferenceSyntax,
-    resultKind: ReferenceHandleKind,
+    resultKind: PointerLikeKind,
     requirement: PhysicalStorageRequirement,
     expectedLifetimeCoverage: Option<OutlivesProof>,
     direct: ReferenceSyntaxDirectStrategy,
@@ -357,20 +386,20 @@ ReferenceSyntaxPolicyAt<S: WitnessUseStage> = {
 
 ReferenceSyntaxPolicy = ReferenceSyntaxPolicyAt<Published>
 
-WriteValueAccessAt<S: WitnessUseStage> = {
+WriteValueAccessAt<S: WitnessTableState> = {
     source: TypedExpr,
     conversion: ConversionPlan<S>,
     completion: CompletionCondition
 }
 
-StorageAccessIntentAt<S: WitnessUseStage> =
+StorageAccessIntentAt<S: WitnessTableState> =
     ReadValueAccess
   | WriteValueAccess(WriteValueAccessAt<S>)
 
 WriteValueAccess = WriteValueAccessAt<Published>
 StorageAccessIntent = StorageAccessIntentAt<Published>
 
-RegisteredDataOperationSelectionAt<S: WitnessUseStage> = {
+RegisteredDataOperationSelectionAt<S: WitnessTableState> = {
     selectionEffects: EffectSet,
     effectAllowance: EffectAllowanceValidation,
     capabilities: CapabilitySelectionAt<S>
@@ -383,7 +412,7 @@ BuiltinPhysicalProjectionOperandRole =
 BuiltinPhysicalProjectionOperation =
     ProjectBuiltinPhysicalElement(rule: RuleId)
 
-BuiltinPhysicalProjectionRuntimeOperandAt<S: WitnessUseStage> = {
+BuiltinPhysicalProjectionRuntimeOperandAt<S: WitnessTableState> = {
     source: TypedExpr,
     endpointType: TypeId,
     endpointCategory: ValueCategory
@@ -405,7 +434,7 @@ BuiltinPhysicalProjectionResultProof = {
     storage: PhysicalStorageRef
 }
 
-BuiltinPhysicalProjectionApplicationAt<S: WitnessUseStage> = {
+BuiltinPhysicalProjectionApplicationAt<S: WitnessTableState> = {
     identity: BuiltinPhysicalProjectionIdentity,
     site: PhysicalProjectionSiteAssignment,
     operation: BuiltinPhysicalProjectionOperation,
@@ -443,7 +472,7 @@ BuiltinPhysicalProjectionValidationFailure =
         expected: BuiltinPhysicalProjectionControlShape,
         actual: BuiltinPhysicalProjectionControlShape)
 
-BuiltinPhysicalProjectionValidationResultAt<S: WitnessUseStage> =
+BuiltinPhysicalProjectionValidationResultAt<S: WitnessTableState> =
     ValidBuiltinPhysicalProjection(
         application: BuiltinPhysicalProjectionApplicationAt<S>)
   | InvalidBuiltinPhysicalProjection(
@@ -456,7 +485,7 @@ ValidateBuiltinPhysicalProjection = ValidateBuiltinPhysicalProjectionAt<Publishe
 
 `EXP-MEM-007`: A valid builtin physical-element application has exactly the
 `BuiltinPhysicalBaseOperand` and `BuiltinPhysicalIndexOperand` entries, in that written order. The
-base source is classified as `Place(PhysicalPlace(output.inputStorage))`; the index has already
+base source is classified as `Storage(PhysicalStorage(output.inputStorage))`; the index has already
 been checked and converted to the operation rule's index type as an `RValue`. Validation first
 requires `ValidatePhysicalProjectionSite(request.id, request.site) = Success(Unit)`. The application
 stores `site = request.site`, and its identity is
@@ -465,25 +494,25 @@ Its output type and every access, mutability, lifetime, address-space, and alias
 component replay the named builtin rule from the exact two endpoint values. In particular, a
 dynamic index cannot acquire a fresh disjoint alias merely from its syntax identity. The output
 path is exactly `BuiltinElement(output.inputStorage.path, identity)`, and the typed expression is
-classified as `Place(PhysicalPlace(output.storage))`. The control proof is one nonthrowing physical
+classified as `Storage(PhysicalStorage(output.storage))`. The control proof is one nonthrowing physical
 result with no successors. The complete application, not the path, is retained by the typed
 projection expression.
 
 `EXP-MEM-008`: `runtimeOperands` is the sole executable source authority for builtin physical
 indexing. Each source is evaluated once in `evaluationOrder`, and all effects, conversions, and
 direct capability uses enter `semanticUses` exactly once. Checking, elaboration, and lowering may
-not recover the base or index from `PhysicalPlacePath`, the request node, an origin, or an
+not recover the base or index from `PhysicalStoragePath`, the request node, an origin, or an
 equal-typed sibling expression. Registered resource/target projections remain exclusively in
 `RegisteredPhysicalProjectionApplicationAt<S>`; neither application kind can be retagged as the
-other merely because both produce `PhysicalPlace`.
+other merely because both produce `PhysicalStorage`.
 
 RegisteredPhysicalProjectionOperandRole =
     PhysicalProjectionBaseOperand
   | PhysicalProjectionIndexOperand(ordinal: UInt32)
 
-RegisteredPhysicalProjectionRuntimeOperandAt<S: WitnessUseStage> = {
+RegisteredPhysicalProjectionRuntimeOperandAt<S: WitnessTableState> = {
     source: TypedExpr,
-    access: AccessPlan<S>,
+    access: StorageAccessPlan<S>,
     endpointType: TypeId,
     endpointCategory: ValueCategory
 }
@@ -504,7 +533,7 @@ RegisteredPhysicalProjectionComponentSource =
 
 RegisteredPhysicalProjectionAccessDerivation = {
     source: RegisteredPhysicalProjectionComponentSource,
-    result: AccessMode
+    result: StorageAccessMode
 }
 
 RegisteredPhysicalProjectionMutabilityDerivation = {
@@ -546,7 +575,7 @@ RegisteredPhysicalProjectionResultProof = {
     sourceProvenance: RegisteredPhysicalProjectionSourceDerivation
 }
 
-RegisteredPhysicalProjectionApplicationAt<S: WitnessUseStage> = {
+RegisteredPhysicalProjectionApplicationAt<S: WitnessTableState> = {
     identity: RegisteredPhysicalProjectionIdentity,
     site: PhysicalProjectionSiteAssignment,
     registration: RegisteredDataOperationRegistration,
@@ -598,7 +627,7 @@ RegisteredPhysicalProjectionValidationFailure =
   | RegisteredPhysicalProjectionConcreteRegionUnavailable(
         failure: CapabilityFailure)
 
-RegisteredPhysicalProjectionValidationResultAt<S: WitnessUseStage> =
+RegisteredPhysicalProjectionValidationResultAt<S: WitnessTableState> =
     ValidRegisteredPhysicalProjection(
         application: RegisteredPhysicalProjectionApplicationAt<S>)
   | InvalidRegisteredPhysicalProjection(
@@ -611,25 +640,25 @@ ReferenceFormationRequest = {
     context: ExpressionCheckContextId
 }
 
-ReferenceHandleTypeProjection =
-    ReferenceTypeProjection(type: TypeId)
-  | PointerTypeProjection(type: TypeId)
+PointerLikeTypeProjection =
+    ExplicitRefTypeProjection(type: TypeId)
+  | PtrTypeProjection(type: TypeId)
 
-ReferenceHandleProof = {
+PointerLikeProof = {
     resultType: TypeId,
-    shape: ReferenceHandleShape,
+    shape: PointerLikeShape,
     expectedReferent: TypeId,
     referentEquality: TypeEqualityProofId,
     requirement: PhysicalStorageRequirement,
-    typeProjection: ReferenceHandleTypeProjection,
+    typeProjection: PointerLikeTypeProjection,
     accessProof: AccessProvisionProof,
     lifetimeProof: OutlivesProof,
     addressSpaceProof: AddressSpaceAdmissionProof,
     sourceProof: PhysicalSourceProvenanceAdmissionProof
 }
 
-referenceHandleValue(p: ReferenceHandleProof) =
-    ReferenceHandleValueShape(p.resultType, p.shape)
+pointerLikeValue(p: PointerLikeProof) =
+    PointerLikeValueShape(p.resultType, p.shape)
 
 AddressSpaceEqualityProof = {
     left: AddressSpace,
@@ -652,7 +681,7 @@ MutabilityEqualityProof = {
 }
 
 DirectStorageHandleProof = {
-    handle: ReferenceHandleProof,
+    handle: PointerLikeProof,
     storage: PhysicalStorageRef,
     sourceAccessProof: AccessProvisionProof,
     sourceMutabilityProof: MutabilityEqualityProof,
@@ -667,7 +696,7 @@ AccessorReferenceResultInstantiationProof = {
     invocationIdentity: AccessorInvocationIdentity,
     sources: CapturedStorageSources,
     provenanceSources: AccessorProvenanceSourceMapId,
-    result: ReferenceHandleValueShape,
+    result: PointerLikeValueShape,
     addressSpaceRule: AccessorReferenceAddressSpaceRule,
     mutabilityRule: AccessorReferenceMutabilityRule,
     lifetimeRule: AccessorReferenceLifetimeRule,
@@ -683,12 +712,12 @@ AccessorReferenceResultCertificate = {
     signature: CallableSignatureId,
     expectedReferent: TypeId,
     referentEquality: TypeEqualityProofId,
-    result: ReferenceHandleValueShape,
+    result: PointerLikeValueShape,
     instantiation: AccessorReferenceResultInstantiationProof
 }
 
 AccessorHandleResultProof = {
-    result: ReferenceHandleValueShape,
+    result: PointerLikeValueShape,
     callResultType: TypeId,
     resultEquality: TypeEqualityProofId,
     certificate: AccessorReferenceResultCertificate
@@ -697,12 +726,12 @@ AccessorHandleResultProof = {
 AccessorHandleAdmissionProof = {
     raw: AccessorHandleResultProof,
     requirement: PhysicalStorageRequirement,
-    admitted: ReferenceHandleProof
+    admitted: PointerLikeProof
 }
 
 ReferenceOperationRegistration = RegisteredDataOperationRegistration
 
-ReferenceOperationSelectionAt<S: WitnessUseStage> =
+ReferenceOperationSelectionAt<S: WitnessTableState> =
     RegisteredDataOperationSelectionAt<S>
 
 ReferenceOperationSelection = ReferenceOperationSelectionAt<Published>
@@ -722,7 +751,7 @@ PhysicalReferenceInput = {
 
 HandleReferenceInput = {
     operand: NodeId<Typed>,
-    handle: ReferenceHandleProof
+    handle: PointerLikeProof
 }
 
 PhysicalReferenceOutput = {
@@ -732,7 +761,7 @@ PhysicalReferenceOutput = {
 
 DereferencedStorageProof = {
     identity: DereferenceApplicationIdentity,
-    handle: ReferenceHandleProof,
+    handle: PointerLikeProof,
     output: PhysicalReferenceOutput,
     referentEquality: TypeEqualityProofId,
     sourceAccessProof: AccessProvisionProof,
@@ -743,25 +772,25 @@ DereferencedStorageProof = {
     sourceProvenanceProof: SourceProvenanceEqualityProof
 }
 
-RegisteredDirectReferenceApplicationAt<S: WitnessUseStage> = {
+RegisteredDirectReferenceApplicationAt<S: WitnessTableState> = {
     registration: ReferenceOperationRegistration,
     input: PhysicalReferenceInput,
-    output: ReferenceHandleProof,
+    output: PointerLikeProof,
     selection: ReferenceOperationSelectionAt<S>,
     control: ReferenceDataOperationControlProof,
     semanticUses: PlanSemanticUses<S>
 }
 
-RegisteredHandleTransformApplicationAt<S: WitnessUseStage> = {
+RegisteredHandleTransformApplicationAt<S: WitnessTableState> = {
     registration: ReferenceOperationRegistration,
     input: HandleReferenceInput,
-    output: ReferenceHandleProof,
+    output: PointerLikeProof,
     selection: ReferenceOperationSelectionAt<S>,
     control: ReferenceDataOperationControlProof,
     semanticUses: PlanSemanticUses<S>
 }
 
-RegisteredDereferenceApplicationAt<S: WitnessUseStage> = {
+RegisteredDereferenceApplicationAt<S: WitnessTableState> = {
     identity: DereferenceApplicationIdentity,
     registration: ReferenceOperationRegistration,
     input: HandleReferenceInput,
@@ -771,17 +800,17 @@ RegisteredDereferenceApplicationAt<S: WitnessUseStage> = {
     semanticUses: PlanSemanticUses<S>
 }
 
-DirectReferenceOperationAt<S: WitnessUseStage> =
-    CoreAddressOf(result: DirectStorageHandleProof)
+DirectReferenceOperationAt<S: WitnessTableState> =
+    IRReadyAddressOf(result: DirectStorageHandleProof)
   | RegisteredDirectReference(application: RegisteredDirectReferenceApplicationAt<S>)
 
-AccessorReferenceOperationAt<S: WitnessUseStage> =
+AccessorReferenceOperationAt<S: WitnessTableState> =
     InvokeReferenceAccessor(result: AccessorHandleAdmissionProof)
   | InvokeReferenceAccessorThenRegistered(
         accessorResult: AccessorHandleResultProof,
         application: RegisteredHandleTransformApplicationAt<S>)
 
-DereferenceOperationAt<S: WitnessUseStage> =
+DereferenceOperationAt<S: WitnessTableState> =
     BuiltinReferenceDereference(result: DereferencedStorageProof)
   | BuiltinPointerDereference(result: DereferencedStorageProof)
   | RegisteredDereference(application: RegisteredDereferenceApplicationAt<S>)
@@ -797,7 +826,7 @@ RegisteredDereferenceApplication =
     RegisteredDereferenceApplicationAt<Published>
 
 ReferenceAccessorAvailabilityEvidence =
-    DeclaredReferenceAccessorAccess(AccessEvidence)
+    DeclaredReferenceAccessorAccess(VisibilityEvidence)
   | RegisteredReferenceAccessorAccess
 
 ReferenceAccessorDispatchDerivation =
@@ -806,8 +835,8 @@ ReferenceAccessorDispatchDerivation =
   | DynamicAccessorDispatchProof
   | BuiltinAccessorDispatchProof
 
-ReferenceAccessorTargetAt<S: WitnessUseStage> = {
-    selector: AbstractAccessorSelector,
+ReferenceAccessorTargetAt<S: WitnessTableState> = {
+    selector: AbstractStorageAccessorSelector,
     dispatch: CallableDispatch<S>,
     derivation: ReferenceAccessorDispatchDerivation
 }
@@ -815,24 +844,24 @@ ReferenceAccessorTargetAt<S: WitnessUseStage> = {
 ReferenceSourceSlotBinding = {
     projection: CapturedStorageProjection,
     slot: BoundCallSlot,
-    operand: AccessOperandId,
-    evaluateOnce: AccessStepId
+    operand: StorageAccessOperandId,
+    evaluateOnce: StorageAccessStepId
 }
 
 ReferenceAccessorInvocationRequest = {
     id: NodeId<Typed>,
     site: SemanticOperationSiteAssignment,
     storage: AbstractStorageRef,
-    accessor: AbstractRefAccessor,
+    accessor: AbstractStorageRefAccessor,
     expectedReferent: TypeId,
     context: ExpressionCheckContextId
 }
 
-ReferenceAccessorInvocationAt<S: WitnessUseStage> = {
+ReferenceAccessorInvocationAt<S: WitnessTableState> = {
     identity: AccessorInvocationIdentity,
     site: SemanticOperationSiteAssignment,
     storage: AbstractStorageRef,
-    declared: AbstractRefAccessor,
+    declared: AbstractStorageRefAccessor,
     requestContext: ExpressionCheckContextId,
     availability: ReferenceAccessorAvailabilityEvidence,
     target: ReferenceAccessorTargetAt<S>,
@@ -843,7 +872,7 @@ ReferenceAccessorInvocationAt<S: WitnessUseStage> = {
     rawResult: AccessorHandleResultProof
 }
 
-ReferenceAccessorPlanAt<S: WitnessUseStage> = {
+ReferenceAccessorPlanAt<S: WitnessTableState> = {
     invocation: ReferenceAccessorInvocationAt<S>,
     operation: AccessorReferenceOperationAt<S>
 }
@@ -852,13 +881,13 @@ ParameterReferenceAccessorRequest = {
     id: NodeId<Typed>,
     site: SemanticOperationSiteAssignment,
     storage: AbstractStorageRef,
-    mode: PassingMode,
+    mode: ParamPassingMode,
     accessEnvironment: AccessEnvironmentId,
     context: ExpressionCheckContextId
 }
 
-ParameterReferenceAccessorPlanAt<S: WitnessUseStage> = {
-    mode: PassingMode,
+ParameterReferenceAccessorPlanAt<S: WitnessTableState> = {
+    mode: ParamPassingMode,
     accessEnvironment: AccessEnvironmentId,
     instantiatedRequirement: PhysicalStorageRequirement,
     invocation: ReferenceAccessorInvocationAt<S>,
@@ -869,23 +898,23 @@ ParameterReferenceAccessorPlanAt<S: WitnessUseStage> = {
     semanticUses: PlanSemanticUses<S>
 }
 
-ParameterReferenceAccessorFailureAt<S: WitnessUseStage> =
+ParameterReferenceAccessorFailureAt<S: WitnessTableState> =
     ParameterReferenceAccessorOperationSiteRejected(
         failure: SemanticOperationSiteFailure)
-  | ParameterReferenceAccessorModeNotPhysical(mode: PassingMode)
+  | ParameterReferenceAccessorModeNotPhysical(mode: ParamPassingMode)
   | ParameterReferenceAccessorMissing(
-        required: AccessMode,
-        available: CanonicallyOrderedSet<AccessMode>)
+        required: StorageAccessMode,
+        available: CanonicallyOrderedSet<StorageAccessMode>)
   | ParameterReferenceAccessorInvocationFailed(
         failure: ReferenceAccessorInvocationFailureAt<S>)
   | ParameterReferenceAccessorHandleRejected(
-        failure: ReferenceHandleValidationFailure)
+        failure: PointerLikeValidationFailure)
   | ParameterReferenceAccessorDereferenceSiteRejected(
         failure: SemanticOperationSiteFailure)
   | ParameterReferenceAccessorDereferenceFailed(
         failure: DereferenceFailure)
 
-ParameterReferenceAccessorResultAt<S: WitnessUseStage> =
+ParameterReferenceAccessorResultAt<S: WitnessTableState> =
     PlannedParameterReferenceAccessor(
         plan: ParameterReferenceAccessorPlanAt<S>)
   | ParameterReferenceAccessorNotPlanned(
@@ -903,7 +932,7 @@ StorageRefFallbackAuthorization = {
     requirement: PhysicalStorageRequirement
 }
 
-InternalRefStoragePlanAt<S: WitnessUseStage> = {
+InternalRefStoragePlanAt<S: WitnessTableState> = {
     site: PhysicalProjectionSiteAssignment,
     authorization: StorageRefFallbackAuthorization,
     invocation: ReferenceAccessorInvocationAt<S>,
@@ -913,7 +942,7 @@ InternalRefStoragePlanAt<S: WitnessUseStage> = {
     storageProof: PhysicalStorageProof
 }
 
-StorageAccessRequestAt<S: WitnessUseStage> = {
+StorageAccessRequestAt<S: WitnessTableState> = {
     id: NodeId<Typed>,
     operationSite: PhysicalProjectionSiteAssignment,
     input: TypedExpr,
@@ -925,10 +954,10 @@ StorageAccessRequest = StorageAccessRequestAt<Published>
 
 StoragePrimaryAccessorRole = GetterStorageRole | SetterStorageRole
 
-StorageAccessFailureAt<S: WitnessUseStage> =
-    StorageInputIsNotPlace(actual: ValueCategory)
-  | StorageAccessNotReadable(actual: AccessMode)
-  | StorageAccessNotWritable(actual: AccessMode)
+StorageAccessFailureAt<S: WitnessTableState> =
+    StorageInputIsNotStorage(actual: ValueCategory)
+  | StorageAccessNotReadable(actual: StorageAccessMode)
+  | StorageAccessNotWritable(actual: StorageAccessMode)
   | StorageAccessNotMutable(actual: Mutability)
   | StoragePrimaryAccessorMissing(role: StoragePrimaryAccessorRole)
   | StoragePrimaryAccessorFailed(role: StoragePrimaryAccessorRole,
@@ -936,24 +965,24 @@ StorageAccessFailureAt<S: WitnessUseStage> =
   | StorageRefFallbackNotAuthorized(kind: StorageRefFallbackKind,
                                     languageRule: RuleId)
   | StorageRefFallbackAccessorMissing(storage: AbstractStorageRef,
-                                      required: AccessMode,
-                                      available: CanonicallyOrderedSet<AccessMode>)
+                                      required: StorageAccessMode,
+                                      available: CanonicallyOrderedSet<StorageAccessMode>)
   | StorageRefFallbackAccessorFailed(failure: ReferenceAccessorInvocationFailureAt<S>)
-  | StorageRefFallbackHandleRejected(failure: ReferenceHandleValidationFailure)
+  | StorageRefFallbackHandleRejected(failure: PointerLikeValidationFailure)
   | StorageRefFallbackDereferenceFailed(failure: DereferenceFailure)
   | StorageRefFallbackPhysicalProofFailed(requirement: PhysicalStorageRequirement,
                                           actual: PhysicalStorageRef)
   | StorageIntentPolicyRejected(intent: StorageAccessIntentAt<S>, rule: RuleId)
 
-StorageAccessResultAt<S: WitnessUseStage> =
-    PlannedStorageAccess(plan: AccessPlan<S>)
+StorageAccessResultAt<S: WitnessTableState> =
+    PlannedStorageAccess(plan: StorageAccessPlan<S>)
   | StorageAccessNotPlanned(failure: StorageAccessFailureAt<S>)
 
 StorageAccessFailure = StorageAccessFailureAt<Published>
 StorageAccessResult = StorageAccessResultAt<Published>
 InternalRefStoragePlan = InternalRefStoragePlanAt<Published>
 
-CheckedReferenceFormationAt<S: WitnessUseStage> =
+CheckedReferenceFormationAt<S: WitnessTableState> =
     DirectPhysicalReference(operand: NodeId<Typed>,
                             policy: ReferenceSyntaxPolicyAt<S>,
                             storage: PhysicalStorageRef,
@@ -965,7 +994,7 @@ CheckedReferenceFormationAt<S: WitnessUseStage> =
                               storage: AbstractStorageRef,
                               accessor: ReferenceAccessorPlanAt<S>)
 
-directReferenceResult(CoreAddressOf(p)) = p.handle
+directReferenceResult(IRReadyAddressOf(p)) = p.handle
 directReferenceResult(RegisteredDirectReference(a)) = a.output
 
 accessorReferenceResult(InvokeReferenceAccessor(p)) = p.admitted
@@ -983,10 +1012,10 @@ CheckedReferenceFormation = CheckedReferenceFormationAt<Published>
 ReferenceAccessorInvocation = ReferenceAccessorInvocationAt<Published>
 ReferenceAccessorPlan = ReferenceAccessorPlanAt<Published>
 
-ReferenceHandleValidationFailure =
+PointerLikeValidationFailure =
     ResultIsNotReferenceOrPointer(actual: TypeId)
   | ReferenceReferentMismatch(expected: TypeId, actual: TypeId)
-  | InsufficientReferenceAccess(actual: AccessMode, required: AccessMode)
+  | InsufficientReferenceAccess(actual: StorageAccessMode, required: StorageAccessMode)
   | ReferenceLifetimeFailure(required: LifetimeId, actual: LifetimeId)
   | ReferenceAddressSpaceNotPermitted(
         actual: AddressSpace,
@@ -994,9 +1023,9 @@ ReferenceHandleValidationFailure =
   | ReferenceSourceNotPermitted(
         actual: PhysicalStorageSourceProvenance,
         required: PhysicalStorageSourceRequirement)
-  | InvalidReferenceTypeProjection(type: TypeId, shape: ReferenceHandleShape)
-  | ReferenceSourceAccessAmplification(source: AccessMode,
-                                       result: AccessMode)
+  | InvalidExplicitRefTypeProjection(type: TypeId, shape: PointerLikeShape)
+  | ReferenceSourceAccessAmplification(source: StorageAccessMode,
+                                       result: StorageAccessMode)
   | ReferenceSourceMutabilityMismatch(source: Mutability,
                                       result: Mutability)
   | ReferenceSourceLifetimeEscape(source: LifetimeId,
@@ -1010,8 +1039,8 @@ ReferenceHandleValidationFailure =
   | ReferenceSourceProvenanceMismatch(
         source: PhysicalStorageSourceProvenance,
         result: PhysicalStorageSourceProvenance)
-  | RefAccessorAccessAmplification(advertised: AccessMode,
-                                   result: AccessMode)
+  | RefAccessorAccessAmplification(advertised: StorageAccessMode,
+                                   result: StorageAccessMode)
 
 ReferenceStaticInputValidationFailure =
     ReferenceStaticInputArityMismatch(expected: UInt32, actual: UInt32)
@@ -1073,7 +1102,7 @@ ReferenceOperationValidationFailure =
         actual: ReferenceRegisteredControlShape)
   | ReferenceOperationInvalidHandle(
         rule: StandardEnvironmentRuleId,
-        failure: ReferenceHandleValidationFailure)
+        failure: PointerLikeValidationFailure)
   | ReferenceOperationEffectNotAllowed(
         rule: StandardEnvironmentRuleId,
         required: EffectSet,
@@ -1083,9 +1112,9 @@ ReferenceOperationValidationFailure =
         rule: StandardEnvironmentRuleId,
         failure: CapabilityFailure)
 
-RefAccessorInputBindingFailureAt<S: WitnessUseStage> =
+RefAccessorInputBindingFailureAt<S: WitnessTableState> =
     RefAccessorArgumentMappingFailure(ArgumentMapFailure)
-  | RefAccessorArgumentPassingFailure(PassingModeFailureAt<S>)
+  | RefAccessorArgumentPassingFailure(ParamPassingModeFailureAt<S>)
   | RefAccessorArgumentConversionFailure(
         slot: BoundCallSlot,
         failure: ConversionFailure<S>)
@@ -1097,12 +1126,12 @@ RefAccessorInputBindingFailureAt<S: WitnessUseStage> =
   | RefAccessorSourceOperandMismatch(
         role: SourceCallRole,
         expected: TypedExpr,
-        actual: AccessOperand)
+        actual: StorageAccessOperand)
 
 AccessorReferenceResultContractFailure =
     AccessorReferenceContractUnavailable(AccessorReferenceResultContractId)
-  | AccessorReferenceContractSelectorMismatch(expected: AbstractAccessorSelector,
-                                               actual: AbstractAccessorSelector)
+  | AccessorReferenceContractSelectorMismatch(expected: AbstractStorageAccessorSelector,
+                                               actual: AbstractStorageAccessorSelector)
   | AccessorReferenceContractSignatureMismatch(expected: CallableSignatureId,
                                                 actual: CallableSignatureId)
   | AccessorReferenceContractResultTypeMismatch(expected: TypeId, actual: TypeId)
@@ -1130,16 +1159,16 @@ AccessorProvenanceSourceMapFailure =
   | AccessorProvenanceProjectionNotCaptured(role: AccessorProvenanceSourceRole,
                                             projection: CapturedStorageProjection)
 
-ReferenceAccessorInvocationFailureAt<S: WitnessUseStage> =
+ReferenceAccessorInvocationFailureAt<S: WitnessTableState> =
     RefAccessorOperationSiteRejected(failure: SemanticOperationSiteFailure)
   | RefAccessorSelectorDispatchMismatch(
-        selector: AbstractAccessorSelector,
+        selector: AbstractStorageAccessorSelector,
         dispatch: CallableDispatch<S>)
-  | RefAccessorVisibilityFailure(decision: AccessDecision)
+  | RefAccessorVisibilityFailure(decision: VisibilityDecision)
   | RefAccessorRegisteredRuleUnavailable(
         registration: RegisteredCallableRule)
   | RefAccessorSignatureMismatch(
-        accessor: AbstractRefAccessor,
+        accessor: AbstractStorageRefAccessor,
         signature: CallableSignature)
   | RefAccessorSelectionEffectNotAllowed(
         required: EffectSet,
@@ -1154,21 +1183,21 @@ ReferenceAccessorInvocationFailureAt<S: WitnessUseStage> =
         expected: TypedCallResultProvenanceAt<S>,
         actual: TypedCallResultProvenanceAt<S>)
   | RefAccessorResultContractFailure(AccessorReferenceResultContractFailure)
-  | RefAccessorInvalidResult(ReferenceHandleValidationFailure)
+  | RefAccessorInvalidResult(PointerLikeValidationFailure)
 
 RefAccessorPolicyFailure =
-    RefAccessorPolicyHandleRejected(ReferenceHandleValidationFailure)
+    RefAccessorPolicyHandleRejected(PointerLikeValidationFailure)
   | RefAccessorRegisteredOperationFailure(ReferenceOperationValidationFailure)
 
-RefAccessorValidationFailureAt<S: WitnessUseStage> =
+RefAccessorValidationFailureAt<S: WitnessTableState> =
     RefAccessorInvocationFailed(ReferenceAccessorInvocationFailureAt<S>)
   | RefAccessorPolicyValidationFailed(RefAccessorPolicyFailure)
 
-ReferenceAccessorInvocationResultAt<S: WitnessUseStage> =
+ReferenceAccessorInvocationResultAt<S: WitnessTableState> =
     ValidReferenceAccessorInvocation(ReferenceAccessorInvocationAt<S>)
   | InvalidReferenceAccessorInvocation(failure: ReferenceAccessorInvocationFailureAt<S>)
 
-RefAccessorValidationResultAt<S: WitnessUseStage> =
+RefAccessorValidationResultAt<S: WitnessTableState> =
     ValidReferenceAccessor(plan: ReferenceAccessorPlanAt<S>)
   | InvalidReferenceAccessor(failure: RefAccessorPolicyFailure)
 
@@ -1177,11 +1206,11 @@ ReferenceAccessorInvocationResult = ReferenceAccessorInvocationResultAt<Publishe
 RefAccessorValidationFailure = RefAccessorValidationFailureAt<Published>
 RefAccessorValidationResult = RefAccessorValidationResultAt<Published>
 
-DirectReferenceValidationAt<S: WitnessUseStage> = {
+DirectReferenceValidationAt<S: WitnessTableState> = {
     operation: DirectReferenceOperationAt<S>
 }
 
-DirectReferenceValidationResultAt<S: WitnessUseStage> =
+DirectReferenceValidationResultAt<S: WitnessTableState> =
     ValidDirectReference(DirectReferenceValidationAt<S>)
   | InvalidDirectReference(ReferenceOperationValidationFailure)
 
@@ -1191,7 +1220,7 @@ ReferenceSyntaxPolicyFailure =
   | ReferenceSyntaxOperandRejected(syntax: ExplicitReferenceSyntax,
                                    classifier: Classifier)
   | ReferenceSyntaxExpectedTypeConflict(expected: TypeId,
-                                        policyKind: ReferenceHandleKind)
+                                        policyKind: PointerLikeKind)
   | ReferenceSyntaxAddressSpacePolicyInvalid(requirement: AddressSpaceRequirement)
   | ReferenceSyntaxRegisteredRuleFailure(rule: StandardEnvironmentRuleId)
   | ReferenceSyntaxConcreteAvailabilityFailure(
@@ -1200,25 +1229,25 @@ ReferenceSyntaxPolicyFailure =
         assumption: BooleanCapabilityPredicate,
         failure: CapabilityFailure)
 
-ReferenceFormationFailureAt<S: WitnessUseStage> =
+ReferenceFormationFailureAt<S: WitnessTableState> =
     ReferenceSyntaxPolicyRejected(ReferenceSyntaxPolicyFailure)
-  | OperandIsNotPlace(actual: ValueCategory)
+  | OperandIsNotStorage(actual: ValueCategory)
   | AbstractStorageHasNoReferenceAccessor(
         storage: AbstractStorageRef,
-        required: AccessMode,
-        available: CanonicallyOrderedSet<AccessMode>)
+        required: StorageAccessMode,
+        available: CanonicallyOrderedSet<StorageAccessMode>)
   | DirectPhysicalStorageFailure(requirement: PhysicalStorageRequirement,
                                  actual: PhysicalStorageRef)
   | ReferenceSyntaxNotPermitted(syntax: ExplicitReferenceSyntax,
                                 operand: TypeId)
-  | ReferenceHandleInvalid(failure: ReferenceHandleValidationFailure)
+  | PointerLikeInvalid(failure: PointerLikeValidationFailure)
   | RefAccessorValidationFailed(failure: RefAccessorValidationFailureAt<S>)
   | ReferenceOperationValidationFailed(
         failure: ReferenceOperationValidationFailure)
 
 ReferenceFormationFailure = ReferenceFormationFailureAt<Published>
 
-ReferenceFormationResultAt<S: WitnessUseStage> =
+ReferenceFormationResultAt<S: WitnessTableState> =
     FormedReference(CheckedReferenceFormationAt<S>)
   | ReferenceNotFormed(ReferenceFormationFailureAt<S>)
 
@@ -1236,7 +1265,7 @@ DereferenceRequest = {
     context: ExpressionCheckContextId
 }
 
-CheckedDereferenceAt<S: WitnessUseStage> = {
+CheckedDereferenceAt<S: WitnessTableState> = {
     identity: DereferenceApplicationIdentity,
     site: PhysicalProjectionSiteAssignment,
     operand: NodeId<Typed>,
@@ -1255,14 +1284,14 @@ DereferenceFailure =
     OperandIsNotReferenceOrPointer(actual: TypeId)
   | DereferenceSyntaxAuthorityMismatch(syntax: SelectedDereferenceSyntax,
                                        actual: TypeId)
-  | InvalidDereferenceHandle(failure: ReferenceHandleValidationFailure)
-  | DereferenceAccessUnavailable(actual: AccessMode)
+  | InvalidDereferenceHandle(failure: PointerLikeValidationFailure)
+  | DereferenceAccessUnavailable(actual: StorageAccessMode)
   | DereferenceLifetimeExpired(actual: LifetimeId, required: LifetimeId)
   | DereferenceRuleUnavailable(type: TypeId)
   | DereferenceOperationValidationFailed(
         failure: ReferenceOperationValidationFailure)
 
-DereferenceResultAt<S: WitnessUseStage> =
+DereferenceResultAt<S: WitnessTableState> =
     Dereferenced(CheckedDereferenceAt<S>)
   | NotDereferenced(DereferenceFailure)
 
@@ -1297,8 +1326,8 @@ PlanParameterReferenceAccessor = PlanParameterReferenceAccessorAt<Published>
 
 AdmitAccessorHandle(raw: AccessorHandleResultProof,
                     requirement: PhysicalStorageRequirement,
-                    expectedKind: Option<ReferenceHandleKind>)
-    -> Result<AccessorHandleAdmissionProof, ReferenceHandleValidationFailure>
+                    expectedKind: Option<PointerLikeKind>)
+    -> Result<AccessorHandleAdmissionProof, PointerLikeValidationFailure>
 
 ValidateRefAccessorAt<S>(request: ReferenceFormationRequest,
                          policy: ReferenceSyntaxPolicyAt<S>,
@@ -1366,11 +1395,11 @@ CheckDereferenceAt<S>(DereferenceRequest)
 CheckDereference = CheckDereferenceAt<Published>
 ```
 
-The `ReferenceHandleProof` is the executable contract of the value produced by reference formation.
-For a language reference, `ReferenceTypeProjection` resolves `resultType` to
-`ReferenceType(shape.referent, shape.addressSpace, shape.access, shape.lifetime)`. For a pointer,
-`PointerTypeProjection` resolves it to
-`PointerType(shape.referent, shape.addressSpace, shape.access)`; `shape.lifetime` is the checked
+The `PointerLikeProof` is the executable contract of the value produced by reference formation.
+For a language reference, `ExplicitRefTypeProjection` resolves `resultType` to
+`ExplicitRefType(shape.referent, shape.addressSpace, shape.qualifier, shape.lifetime)`. For a pointer,
+`PtrTypeProjection` resolves it to
+`PtrType(shape.referent, shape.addressSpace, shape.qualifier)`; `shape.lifetime` is the checked
 provenance lifetime supplied by the physical input, accessor contract, or registered operation and
 is retained even though raw pointer type identity does not contain a lifetime. `shape.mutability`,
 `shape.alias`, and `shape.sourceProvenance` are value provenance rather than type identity and are
@@ -1382,7 +1411,7 @@ failure becomes the corresponding typed error expression under `EXP-ERR-002`; it
 blocking.
 
 ```text
-Γ ⊢ e ⇝ e' : T @ Place(PhysicalPlace(p))
+Γ ⊢ e ⇝ e' : T @ Storage(PhysicalStorage(p))
 p.valueType = T
 q = ReferenceFormationRequest(n, syntax, e', context(Γ))
 ResolveReferenceSyntaxPolicyAt<S>(q) = Success(policy)
@@ -1394,7 +1423,7 @@ x = DirectPhysicalReference(e'.node, policy, p, π, context(Γ), v.operation)
 Γ ⊢ explicit-reference(n, syntax, e) ⇝ x
     : referenceResult(x).resultType @ RValue
 
-Γ ⊢ e ⇝ e' : T @ Place(AbstractPlace(a))
+Γ ⊢ e ⇝ e' : T @ Storage(AbstractStorage(a))
 a.valueType = T
 q = ReferenceFormationRequest(n, syntax, e', context(Γ))
 ResolveReferenceSyntaxPolicyAt<S>(q) = Success(policy)
@@ -1441,8 +1470,8 @@ direct accessor-result strategy, or validates the registered transform's input a
 requirements for the transform strategy. It thereby proves the final policy requirement/kind and
 records any registered handle transform. The plan's raw result and every
 `InvokeReferenceAccessor`/`InvokeReferenceAccessorThenRegistered` accessor result have the exact
-`ReferenceHandleValueShape` stored by `plan.invocation.rawResult`; their use-specific
-`ReferenceHandleProof` values are deliberately not byte-identical because they record the explicit
+`PointerLikeValueShape` stored by `plan.invocation.rawResult`; their use-specific
+`PointerLikeProof` values are deliberately not byte-identical because they record the explicit
 syntax policy or registered operation requirement. Accordingly, the policy-neutral query can return only
 `ReferenceAccessorInvocationFailureAt<S>`, while the wrapper can return only
 `RefAccessorPolicyFailure`; `RefAccessorValidationFailureAt<S>` is the closed sum used by
@@ -1452,9 +1481,9 @@ Every successful invocation additionally satisfies the exact constructor equatio
 
 ```text
 invocation.call.resultProvenance =
-    ReferenceHandleCallResult(TypedCallReferenceHandleResultAt {
+    PointerLikeCallResult(TypedCallPointerLikeResultAt {
         result = invocation.rawResult.result,
-        authority = AccessorReferenceHandleCallResult(
+        authority = AccessorPointerLikeCallResult(
             invocation.rawResult.certificate)
     })
 ```
@@ -1504,8 +1533,8 @@ builtin data dereference and is the registered application's stored uses otherwi
 `exactSemanticUseMerge` rejects inconsistent equal effect-use keys and merges complete capability
 selections only under `CAP-SEL-004`. The result therefore represents one execution of the accessor call
 followed by one dereference. The intermediate handle is plan-internal; the original property stays
-`AbstractPlace`, while `plan.endpoint.output.storage` is the new physical endpoint passed to the
-callee. A direct `PhysicalPlace` bypasses this query and uses the same chapter 7
+`AbstractStorage`, while `plan.endpoint.output.storage` is the new physical endpoint passed to the
+callee. A direct `PhysicalStorage` bypasses this query and uses the same chapter 7
 `PhysicalParameterBindingProofAt<S>` over its original endpoint. Neither route may use a getter,
 setter, sibling reference-accessor key, value conversion, synthesized address syntax, temporary, or
 write-back. Every failure is retained as the corresponding closed
@@ -1519,7 +1548,7 @@ a getter temporary, setter write-back, guessed backing field, same-named member 
 lookup, or lowering-time reconstruction.
 
 `EXP-STO-001`: `PlanStorageAccessAt<S>` is the sole consumer of `StorageAccessIntentAt<S>`. A
-successful result contains the complete chapter 11 `AccessPlan<S>`; a failure selects one closed
+successful result contains the complete chapter 11 `StorageAccessPlan<S>`; a failure selects one closed
 `StorageAccessFailureAt<S>` alternative. The query plans only an ordinary value read or a fully
 specified ordinary value write. Parameter passing and explicit reference formation are not intents,
 and every success first requires
@@ -1530,7 +1559,7 @@ and this query never constructs, accepts, or calls `ReferenceFormationRequest`,
 `YieldStorageRead` terminal and a successful write plan has a `CompleteStorageWrite` terminal;
 neither may carry `PassArgument` or manufacture a dummy `RuntimeArgument`.
 
-`EXP-STO-002`: For `ReadValueAccess` on `AbstractPlace(a)`, a present getter is the primary
+`EXP-STO-002`: For `ReadValueAccess` on `AbstractStorage(a)`, a present getter is the primary
 authority. The query either validates and stores that getter invocation or returns
 `StoragePrimaryAccessorFailed`; it never retries through the ref accessor after a present getter
 fails. Only when the getter is absent may a versioned language rule authorize
@@ -1574,16 +1603,16 @@ mode instead stores a complete `PhysicalParameterBindingProofAt<S>` and may call
 `PlanStorageAccessAt<S>` cannot construct or partially populate that binding proof and is never
 called to make a physical parameter applicable. In particular, an ordinary
 `ReadThroughRefAccessor` fallback is not a hidden `__constref` argument plan, and its
-`YieldStorageRead` terminal cannot become the call slot's physical-place `PassArgument` terminal.
+`YieldStorageRead` terminal cannot become the call slot's physical-storage `PassArgument` terminal.
 
 `EXP-STO-005`: For `WriteValueAccess(w)`, `w.source` is a value-classified typed expression and
-`w.conversion` has that expression's value type and the destination's `placeValueType` as its exact
-source and target. The resulting `AccessPlan<S>` contains one `TypedInput` for `w.source`, evaluates
+`w.conversion` has that expression's value type and the destination's `storageValueType` as its exact
+source and target. The resulting `StorageAccessPlan<S>` contains one `TypedInput` for `w.source`, evaluates
 it exactly once, and retains that exact conversion and `w.completion`. Its
 `CompleteStorageWrite(operation, result)` terminal names that evaluated source as both
 `ComputedValue(result)` and the value yielded after a successful write. A physical destination uses
 `WritePhysicalStorage`; a present setter uses `WriteAbstractStorage`; and an authorized ref fallback
-uses `ResolveAbstractPlaceThroughReference` followed by `WritePhysicalStorage`. In all three cases the
+uses `ResolveAbstractStorageThroughReference` followed by `WritePhysicalStorage`. In all three cases the
 stored write source, conversion, and completion condition are byte-identical to `w`; a planner may
 not recover the right-hand side from syntax, replace the conversion, or import a parameter-mode
 write-back policy. The plan's semantic uses include the conversion and selected accessor/reference
@@ -1593,7 +1622,7 @@ operations exactly once.
 Γ ⊢ h ⇝ h' : H @ RValue
 ResolvePrefixOperator(*, h', context(Γ)) =
     SelectedDereferenceSyntax(syntax)
-classifyReferenceHandle(h', context(Γ)) = η
+classifyPointerLike(h', context(Γ)) = η
 s = physical projection site assignment carried by n for ExplicitDereferenceRule
 q = DereferenceRequest(n, s, syntax, h', context(Γ))
 ValidatePhysicalProjectionSite(q.id, q.site) = Success(Unit)
@@ -1604,17 +1633,17 @@ CheckDereferenceAt<S>(q) =
 Γ ⊢ selected-prefix-dereference(n, syntax, h) ⇝
     CheckedDereferenceAt<S>(i, s, h'.node, syntax, context(Γ), op)
     : dereferenceResult(op).output.valueType
-      @ Place(PhysicalPlace(dereferenceResult(op).output.storage))
+      @ Storage(PhysicalStorage(dereferenceResult(op).output.storage))
 ```
 
 The selected syntax authority is produced only by the registered standard dereference-syntax
 candidate. A user-defined prefix `operator*` remains an ordinary `TypedCallAt<S>` and never enters
 `CheckDereferenceAt<S>` merely because its token spelling is `*`. The common handle-derivation
 primitive constructs
-`PhysicalPlacePath.DereferencedReference(i)`. The stable identity is retained separately from the
+`PhysicalStoragePath.DereferencedReference(i)`. The stable identity is retained separately from the
 exact executable handle operand `h'`; it is never the operand's node ID. A builtin
 reference/pointer dereference derives
-the place's access, mutability, address space, and alias provenance from `η` and its registered
+the storage's access, mutability, address space, and alias provenance from `η` and its registered
 representation rule. Its result lifetime is exactly
 `resolve(q.context).evaluationLifetime`, and the stored source-lifetime proof proves that the
 handle's lifetime outlives that required lifetime. A registered dereference has the same lifetime
@@ -1654,10 +1683,10 @@ expansions may bind multiple call roles to distinct projections of one evaluated
 zero-length expansion binds none. The named access operand and `EvaluateOnce` step consume the
 projected captured value, never the original typed expression. Remaining preparation, passing,
 cleanup, and write-back steps stay in the keyed access recipe and execute exactly once around the
-call. `ExplicitAccessorReference.operand` is provenance for the abstract-place node, not an
+call. `ExplicitAccessorReference.operand` is provenance for the abstract-storage node, not an
 additional runtime evaluation; the captured-source plan is the sole executable source authority.
 
-`resolve(plan.invocation.provenanceSources)` satisfies `TYP-PLC-009` for
+`resolve(plan.invocation.provenanceSources)` satisfies `TYP-STO-009` for
 `plan.invocation.call.signature`, its `argumentMap`, `sourceBindings`, and those exact `sources`.
 `AccessorReceiverProvenance` maps to the receiver binding's projection, while
 `AccessorParameterProvenance(k)` maps to the unique projection whose bound call slot is
@@ -1717,7 +1746,7 @@ its input operand is the accessor call's normal result;
 explicit syntax policy and is the plan's final result.
 Changing either endpoint cannot be hidden as a schema-version mismatch.
 
-`EXP-REF-011`: A `ReferenceHandleProof` is valid exactly when its type projection matches
+`EXP-REF-011`: A `PointerLikeProof` is valid exactly when its type projection matches
 `resultType` and `shape`, its type-equality proof has endpoints
 `(expectedReferent, shape.referent)`, its access proof proves
 `provides(effectiveHandleAccess(shape), requirement.access)`, its outlives proof has endpoints
@@ -1777,7 +1806,7 @@ raw shape, or pairing the certificate with another call ID/identity is invalid e
 signatures and `TypeId` values compare equal.
 
 `AdmitAccessorHandle(raw, requirement, expectedKind)` is the sole bridge from that intrinsic raw
-value shape to a use-specific `ReferenceHandleProof`. It preserves `raw.result` byte-for-byte,
+value shape to a use-specific `PointerLikeProof`. It preserves `raw.result` byte-for-byte,
 sets `admitted.requirement = requirement`, uses `raw.certificate.expectedReferent`, and proves the
 access, lifetime, address-space, and source-provenance obligations without changing the shape.
 `Some(k)` additionally requires `raw.result.handle.kind = k`; `None` imposes no syntax-level kind.
@@ -1787,7 +1816,7 @@ invocation policy-dependent.
 
 A `DereferencedStorageProof` has equality endpoints
 `(handle.shape.referent, output.valueType)`; its source-access and mutability proofs show that the
-handle supplies the resulting place without amplification. Its `sourceLifetimeProof` has endpoints
+handle supplies the resulting storage without amplification. Its `sourceLifetimeProof` has endpoints
 `(handle.shape.lifetime, output.storage.lifetime)`. There is exactly one `a` such that
 `output.storage.addressSpace = ConcretePhysicalAddressSpace(a)`, and its address-space equality has
 endpoints `(handle.shape.addressSpace, a)`. Its alias proof has endpoints
@@ -1805,12 +1834,12 @@ that identical value type. Its output path is exactly
 internal fallback derived with `context`, `output.storage.lifetime` is byte-identical to
 `resolve(context).evaluationLifetime`. If the source-lifetime proof cannot establish that endpoint,
 the query returns `DereferenceLifetimeExpired(handle.shape.lifetime,
-resolve(context).evaluationLifetime)` instead of publishing a place with a guessed or longer
+resolve(context).evaluationLifetime)` instead of publishing a storage with a guessed or longer
 lifetime.
 
 `EXP-REF-012`: A successful `FormedReference(x)` has
-`valueProvenance = ReferenceHandleProvenance(referenceResult(x))`.
-`classifyReferenceHandle` consumes that exact fact (or the output proof of a registered handle
+`valueProvenance = PointerLikeProvenance(referenceResult(x))`.
+`classifyPointerLike` consumes that exact fact (or the output proof of a registered handle
 conversion) and never synthesizes mutability, lifetime, address space, alias, or physical-source
 provenance from the operand's `TypeId`. Binding, store/load, argument/return, and control-flow merge
 preserve or combine the fact only under `REP-TYP-002`; if the fact is absent or incompatible,
@@ -1874,7 +1903,7 @@ a bare referent value and rely on lowering to retrofit a pointer, nor can body i
 published signature; an omitted or inconsistent provenance derivation is a declaration error.
 
 `EXP-REF-016`: A successful checked operation is in one-to-one correspondence with
-`referencePolicy(result)`. `CoreAddressOfStrategy` selects only `CoreAddressOf`; a registered direct strategy
+`referencePolicy(result)`. `IRReadyAddressOfStrategy` selects only `IRReadyAddressOf`; a registered direct strategy
 selects only `RegisteredDirectReference` with the identical rule/static inputs.
 `InvokeAccessorResult` selects only `InvokeReferenceAccessor`; an accessor-then-registered strategy
 selects only `InvokeReferenceAccessorThenRegistered` with the identical rule/static inputs; and
@@ -1909,23 +1938,23 @@ from the winning immutable candidate result; checking is not rerun “for real.�
 CheckDifferentiate(mode, callable, order, environment)
     -> QueryStep<DerivativeProviderResult>
 
-CheckStopGradient(expression, differentiabilityContext)
+CheckDetachExpr(expression, differentiabilityContext)
     -> CheckResult<DifferentiationExpr>
 ```
 
-`EXP-DIF-001`: Differentiating a callable preserves its direct/witness/dynamic/closure/builtin
+`EXP-DIF-001`: Differentiating a callable preserves its direct/witness/dynamic/lambda/builtin
 dispatch identity and canonical specialization, transforms the signature once, and stores the
 selected derivative provider. Calling the resulting derivative callable is a later ordinary call.
 
 `EXP-DIF-002`: `no_diff(e)` evaluates `e` once and preserves its ordinary type, effects,
-capabilities, exception behavior, and place/storage operations. It creates an explicit
-stop-gradient boundary; it is not an implicit conversion or a modifier hidden inside `TypeId`.
+capabilities, exception behavior, and storage/storage operations. It creates an explicit
+derivative-detachment boundary; it is not an implicit conversion or a modifier hidden inside `TypeId`.
 
 ## Conditional and short-circuit expressions
 
 `&&` and `||` either select declared overloads or use the core short-circuit rule. The core rule
 coerces its operands to the standard environment's condition type and preserves conditional
-evaluation in typed/Core AST.
+evaluation in the typed and IR-ready ASTs.
 
 For `c ? a : b`, checking obtains candidate branch types under any expected type, computes a
 principal common type through `JoinExpressionTypes`, and records conversions for both branches.
@@ -1935,7 +1964,7 @@ principal common type through `JoinExpressionTypes`, and records conversions for
 Γ ⊢ a ⇝ a' : τa       Γ ⊢ b ⇝ b' : τb
 joinExprTypes(τa, τb, expected) = (τ, πa, πb)
 --------------------------------------------------- EXP-COND-001
-Γ ⊢ c ? a : b ⇝ Conditional(c', πa(a'), πb(b')) : τ @ RValue
+Γ ⊢ c ? a : b ⇝ SelectExpr(c', πa(a'), πb(b')) : τ @ RValue
 ```
 
 The join operation is a named primitive with symmetric tests; it is not “try converting left to
@@ -1944,7 +1973,7 @@ right, then right to left” unless that policy is explicitly specified for a co
 ## Tuples and initialization syntax
 
 Tuple expressions have one typed child per element and an ordinary `TupleType`. Empty tuple syntax
-in Slang 2026 yields `Unit`; legacy comma-expression behavior is selected by language version before
+in Slang 2026 yields `void`; legacy comma-expression behavior is selected by language version before
 typing.
 
 A braced initializer is expectation-directed syntax and is checked only by chapter 15's published
@@ -1966,17 +1995,18 @@ executable plan. Elaboration consumes the winner and does not rerun the choice o
 from its strategy.
 
 `EXP-INIT-003`: `RecoveredInitialization` produces an error-carrying typed node only for continued
-diagnostics and tooling. Its recovery plan may elaborate to chapter 15's recovery Core node, but it
+diagnostics and tooling. Its recovery plan may elaborate to chapter 15's recovery IR-ready node, but it
 cannot be installed as a selected successful plan or contribute a publishable frontend-IR
 initialization dependency.
 
 ## Lambdas
 
-Lambda checking creates a typed lambda description, not a closure declaration:
+Checking preserves the existing `LambdaExpr` node family. A `LambdaExpr<Typed>` carries a
+`TypedLambdaInfo`; it does not synthesize the codebase's `LambdaDecl` environment until chapter 11:
 
 ```text
 FreeVariableKey =
-    DeclarationFreeVariable(CanonicalDeclRef)
+    DeclFreeVariable(DeclRef)
   | ReceiverFreeVariable(owner: DeclId)
 
 FreeVariableFact = {
@@ -1993,7 +2023,7 @@ FreeVariableSet = {
 TypedParam = {
     declaration: DeclId,
     key: ParameterKey,
-    type: ParameterType,
+    type: FuncTypeParamInfo,
     origin: Origin
 }
 
@@ -2005,14 +2035,14 @@ TypedCaptureUse = {
     type: TypeId,
     category: ValueCategory,
     use: CaptureUseKind,
-    requiredAccess: AccessMode,
+    requiredAccess: StorageAccessMode,
     sourceLifetime: LifetimeId,
     origin: Origin
 }
 
-TypedLambda = {
+TypedLambdaInfo = {
     parameters: NodeList<TypedParam>,
-    body: TypedStmt | TypedExpr,
+    body: NodeRef<Typed, Stmt> | TypedExpr,
     signature: CallableSignature,
     freeVariables: FreeVariableSet,
     captureUseFacts: NodeList<TypedCaptureUse>,
@@ -2047,10 +2077,10 @@ no insertion-order or pointer-identity input.
 
 An expected function type supplies missing parameter/result information when compatible. Otherwise
 parameters require sufficient annotations and the result is inferred from the expected type, all
-reachable returns, and fall-through. A `Never` path contributes no result constraint; a recovery
+reachable returns, and fall-through. A `BottomType` path contributes no result constraint; a recovery
 expression preserves its `ErrorId` but cannot force an otherwise valid join to `ErrorType`.
 
-`EXP-LAM-001`: Result inference gathers constraints from every reachable return. `Unit` is included
+`EXP-LAM-001`: Result inference gathers constraints from every reachable return. `void` is included
 for a reachable statement-body fall-through. An expression body contributes one implicit return
 with its origin and conversion slot. Conflicting constraints produce one result-inference diagnostic
 with related contributor origins.
@@ -2063,8 +2093,9 @@ contributor's `type` to `result`. Consequently a return, expression body, or fal
 cannot be detached from or reordered relative to the fact that required it.
 
 `EXP-LAM-002`: Conversion to a raw function signature is applicable only when `freeVariables` is
-empty and produces the static-thunk plan in chapter 7. Otherwise the lambda has closure identity;
-callable-interface conversion uses an explicit closure conformance.
+empty and produces the static-thunk plan in chapter 7. Otherwise the lambda has a synthesized
+environment identity; callable-interface conversion uses an explicit conformance for that
+environment type.
 
 Binding records the lexically free declarations and receiver uses. Typing adds value category,
 mutation, ownership, and lifetime facts for each use. Capture fields and modes are then produced by
@@ -2118,7 +2149,7 @@ ControlTargetRole = LoopBreakTarget | LoopContinueTarget | SwitchBreakTarget |
                     LabeledBreakTarget | LabeledContinueTarget
 
 ControlTargetKey = {
-    function: CanonicalDeclRef,
+    function: DeclRef,
     anchor: AnyNodeId,
     role: ControlTargetRole,
     label: Option<NameKey>
@@ -2127,7 +2158,7 @@ ControlTargetKey = {
 TargetId = ContentId<ControlTargetKey>
 
 FunctionContext = {
-    callable: CanonicalDeclRef,
+    callable: DeclRef,
     resultType: TypeId,
     errorType: TypeId,
     receiver: Option<ReceiverContext>,
@@ -2202,7 +2233,7 @@ stack state.
 Blocks thread scope/flow facts in source order while retaining immutable statement nodes. Branch
 joins use an explicit flow lattice.
 
-## Core statement rules
+## IR-ready statement rules
 
 ### Conditions
 
@@ -2220,7 +2251,7 @@ not a continue target. Labels produce stable target IDs.
 ```text
 resolveBreak(C, label) = target
 -------------------------------- STM-BRK-001
-C ⊢ break label? ⇝ Break(target)
+C ⊢ break label? ⇝ BreakStmt(target)
 ```
 
 No target yields a structured diagnostic and `ErrorStmt`. A `case`/`default` outside its owning
@@ -2232,16 +2263,16 @@ duplicates, and permitted overlap.
 ```text
 C.function.result = τ    Γ ⊢ e ⇑ Required(τ, Return) ⇝ e'
 ---------------------------------------------------------------- STM-RET-001
-Γ; C ⊢ return e ⇝ Return(e')
+Γ; C ⊢ return e ⇝ ReturnStmt(e')
 ```
 
-Returning no value requires `Unit`; returning a value from `Unit` or omitting one for a non-`Unit`
+Returning no value requires `void`; returning a value from `void` or omitting one for a non-`void`
 result is diagnosed. Returning across a `defer` body is rejected by the explicit context rule.
 
 ### Defer and exceptional control
 
 `defer s` checks `s` under a context that forbids control transfers escaping the defer. Typed AST
-retains the structured defer; Core elaboration creates cleanup regions on every exiting edge.
+retains the structured defer; elaboration into the IR-ready AST creates cleanup regions on every exiting edge.
 
 `throw` checks against the function's declared error/effect type. `do ... catch` establishes a catch
 context and typed error binding. The precise `try` expression propagation rule is an effect rule in
@@ -2266,14 +2297,14 @@ The frontend distinguishes typing from control/dataflow validation:
 
 ```text
 FlowConditionId = ContentId<{
-    function: CanonicalDeclRef,
-    producer: NodeId<Core>,
+    function: DeclRef,
+    producer: NodeId<IRReady>,
     role: QualifiedName
 }>
 
 FlowOperationId = ContentId<{
-    function: CanonicalDeclRef,
-    producer: NodeId<Core>,
+    function: DeclRef,
+    producer: NodeId<IRReady>,
     ordinal: UInt32
 }>
 
@@ -2285,18 +2316,18 @@ FlowOperation =
   | WriteStorage(id: FlowOperationId, storage: PhysicalStorageRef, origin: Origin)
   | MoveFromStorage(id: FlowOperationId, storage: PhysicalStorageRef, origin: Origin)
   | BeginFlowBorrow(id: FlowOperationId, storage: PhysicalStorageRef,
-                    access: AccessMode, origin: Origin)
+                    access: StorageAccessMode, origin: Origin)
   | EndFlowBorrow(begin: FlowOperationId, origin: Origin)
   | BeginFlowWriteback(id: FlowOperationId, source: PhysicalStorageRef,
                        destination: PhysicalStorageRef, origin: Origin)
   | EndFlowWriteback(begin: FlowOperationId, completion: FlowCompletion,
                      origin: Origin)
-  | EvaluateForEffect(id: FlowOperationId, producer: NodeId<Core>, origin: Origin)
+  | EvaluateForEffect(id: FlowOperationId, producer: NodeId<IRReady>, origin: Origin)
 
 FlowTransfer =
     FallThrough(origin: Origin)
-  | ReturnTransfer(value: Option<NodeId<Core>>, origin: Origin)
-  | ThrowTransfer(value: NodeId<Core>, origin: Origin)
+  | ReturnTransfer(value: Option<NodeId<IRReady>>, origin: Origin)
+  | ThrowTransfer(value: NodeId<IRReady>, origin: Origin)
   | BreakTransfer(target: TargetId, origin: Origin)
   | ContinueTransfer(target: TargetId, origin: Origin)
   | UnreachableTransfer(origin: Origin)
@@ -2321,7 +2352,7 @@ StructuredFlowRegion =
   | TransferRegion(transfer: FlowTransfer)
 
 ControlFlowInput = {
-    function: CanonicalDeclRef,
+    function: DeclRef,
     resultType: TypeId,
     errorType: TypeId,
     body: StructuredFlowRegion,
@@ -2329,7 +2360,7 @@ ControlFlowInput = {
 }
 
 FlowBlockKey = {
-    function: CanonicalDeclRef,
+    function: DeclRef,
     source: Origin,
     role: QualifiedName,
     ordinal: UInt32
@@ -2350,8 +2381,8 @@ FlowTerminator =
     Goto(successor: FlowSuccessor)
   | Branch(condition: FlowConditionId, whenTrue: FlowSuccessor, whenFalse: FlowSuccessor)
   | Switch(condition: FlowConditionId, successors: NonEmpty<FlowSuccessor>)
-  | ReturnExit(value: Option<NodeId<Core>>, origin: Origin)
-  | ThrowExit(value: NodeId<Core>, origin: Origin)
+  | ReturnExit(value: Option<NodeId<IRReady>>, origin: Origin)
+  | ThrowExit(value: NodeId<IRReady>, origin: Origin)
   | UnreachableExit(origin: Origin)
 
 FlowBlock = {
@@ -2362,7 +2393,7 @@ FlowBlock = {
 }
 
 ControlFlowGraph = {
-    function: CanonicalDeclRef,
+    function: DeclRef,
     resultType: TypeId,
     errorType: TypeId,
     entry: FlowBlockId,
@@ -2377,8 +2408,8 @@ ValidateReachability(ControlFlowGraph) -> DiagnosticSet
 ValidateBorrowAndWriteback(ControlFlowGraph) -> DiagnosticSet
 ```
 
-`ControlFlowInput` is the immutable, structured projection of one Core callable body. It is derived
-by schema traversal and is not a separately editable authority. Every effectful Core operation has
+`ControlFlowInput` is the immutable, structured projection of one IR-ready callable body. It is derived
+by schema traversal and is not a separately editable authority. Every effectful IR-ready operation has
 one `FlowOperationId`; every structured branch, transfer, cleanup, and target is represented once.
 In particular, cleanup routing is input structure rather than a builder callback hidden in mutable
 state. `BuildControlFlow` alone allocates block boundaries and successor edges. A graph stores
@@ -2388,7 +2419,7 @@ resolves in the same map, and the entry resolves. These properties are validated
 analysis runs.
 
 These are mandatory frontend queries even if implemented on initial IR. Their diagnostics cite
-source/Core origins and are independently unit-testable. Expression/statement rules do not grow
+source/IR-ready origins and are independently unit-testable. Expression/statement rules do not grow
 ad hoc flow state to duplicate them.
 
 ## Constant evaluation
@@ -2503,7 +2534,7 @@ and `TypeFormation` accept only values representable in the generic/type domain;
 ```text
 constBody(d) = e    request EvalConst(e, phase, constEnvironment(d)) = v
 -------------------------------------------------------------------- CON-DECL-001
-EvalConstDecl(CanonicalDeclRef(d), phase, environment) = v
+EvalConstDecl(DeclRef(d), phase, environment) = v
 ```
 
 `EvalConstDecl` and `EvalConst` are query kinds with the scheduler's `Reject` cycle policy. Query
@@ -2535,7 +2566,7 @@ Typed expression/statement validation checks:
 
 - child stages and origins are correct;
 - each classifier alternative is legal and type/category projections exist only for values;
-- place paths and access modes match the selected declaration/accessor;
+- storage paths and access modes match the selected declaration/accessor;
 - physical receiver/parameter uses have the exact `ConstRefFormalRoot` or `RefFormalRoot`, formal
   entry proof, activation lifetime, address-space requirement, and source provenance;
 - every `ParameterReferenceAccessorPlanAt<S>` selects

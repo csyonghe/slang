@@ -11,19 +11,19 @@ Scope construction first publishes one stub per written declaration fragment, th
 declaration identities after redeclaration grouping:
 
 ```text
-IndexDeclarationFragment(surfaceDecl, parentScope)
-    -> (DeclarationFragmentId, ScopedDeclStub, ScopeGraphFragment)
+IndexDeclFragment(surfaceDecl, parentScope)
+    -> (DeclFragmentId, ScopedDeclStub, ScopeGraphFragment)
 
 AssembleFragmentScopes(NodeList<ScopeGraphFragment>) -> FragmentScopeGraph
 
-GroupLogicalDeclarations(FragmentScopeGraph, DeclarationFreezeEnvironment)
-    -> FrozenDeclarationIndex
+GroupLogicalDecls(FragmentScopeGraph, DeclFreezeEnvironment)
+    -> FrozenDeclIndex
 
-DeclarationFreezeEnvironment = {
+DeclFreezeEnvironment = {
     module: ModuleId,
     importedInterfaces:
-        CanonicallyOrderedMap<ModuleId, ContentId<SemanticValue>>,
-    implementingDocuments: CanonicallyOrderedSet<SourceDocumentId>,
+        CanonicallyOrderedMap<ModuleId, ContentId<SchemaValue>>,
+    implementingDocuments: CanonicallyOrderedSet<SourceFileId>,
     languageRules: LanguageRuleSetId
 }
 
@@ -36,7 +36,7 @@ GenericArityShape = {
 }
 
 ScopedDeclStub = {
-    fragment: DeclarationFragmentId,
+    fragment: DeclFragmentId,
     kind: DeclKind,
     name: Option<Name>,
     parentScope: ScopeId,
@@ -47,22 +47,22 @@ ScopedDeclStub = {
 ScopeGraphFragment = {
     root: ScopeId,
     scopes: NodeMap<ScopeId, FragmentScope>,
-    declarations: NodeMap<DeclarationFragmentId, ScopedDeclStub>,
-    declarationOrder: NodeList<DeclarationFragmentId>
+    declarations: NodeMap<DeclFragmentId, ScopedDeclStub>,
+    declarationOrder: NodeList<DeclFragmentId>
 }
 
 FragmentScopeGraph = {
     roots: NodeList<ScopeId>,
     scopes: NodeMap<ScopeId, FragmentScope>,
-    declarations: NodeMap<DeclarationFragmentId, ScopedDeclStub>,
-    declarationOrder: NodeList<DeclarationFragmentId>
+    declarations: NodeMap<DeclFragmentId, ScopedDeclStub>,
+    declarationOrder: NodeList<DeclFragmentId>
 }
 
 RedeclarationGroup = {
     declaration: DeclId,
     key: RedeclarationKey,
-    fragments: NonEmpty<DeclarationFragmentId>,
-    presentationOrder: NodeList<DeclarationFragmentId>
+    fragments: NonEmpty<DeclFragmentId>,
+    presentationOrder: NodeList<DeclFragmentId>
 }
 
 FrozenScopeGraph = {
@@ -70,18 +70,18 @@ FrozenScopeGraph = {
     scopes: NodeMap<ScopeId, FrozenScope>
 }
 
-FrozenDeclarationIndex = {
+FrozenDeclIndex = {
     entities: NodeMap<DeclId, RedeclarationGroup>,
-    fragmentToEntity: NodeMap<DeclarationFragmentId, DeclId>,
+    fragmentToEntity: NodeMap<DeclFragmentId, DeclId>,
     scopes: FrozenScopeGraph
 }
 
-BindHeader(DeclId, NodeList<DeclarationFragmentId>)
+BindDeclHeader(DeclId, NodeList<DeclFragmentId>)
     -> CheckResult<DeclHeader>
 ```
 
-`DEC-ID-001`: Chapter 4's `DeclarationFragmentId` is the collision-safe content ID of
-`DeclarationFragmentKey(surfaceDecl.id, kind)` and identifies exactly one source occurrence. A
+`DEC-ID-001`: Chapter 4's `DeclFragmentId` is the collision-safe content ID of
+`DeclFragmentKey(surfaceDecl.id, kind)` and identifies exactly one source occurrence. A
 `DeclId` identifies the logical entity formed from one or more compatible fragments. The two IDs
 are never interchangeable, and a fragment map key must equal its stub's `fragment` field.
 
@@ -90,9 +90,9 @@ summaries. Freezing canonicalizes redeclaration keys, assigns stable `DeclId` va
 handles before publication as specified in chapter 3. Neither ID depends on task execution order,
 and no consumer observes a fragment-local ID as nominal semantic identity.
 
-`DEC-ID-003`: `AssembleFragmentScopes` is the `ScopedAST` output. `GroupLogicalDeclarations` is the
-single `FreezeDeclarationIndex` boundary into `BoundAST`; it rewrites every member list from
-`DeclarationFragmentId` to logical `DeclId` and preserves the contributing fragment list as
+`DEC-ID-003`: `AssembleFragmentScopes` is the `ScopedAST` output. `GroupLogicalDecls` is the
+single `FreezeDeclIndex` boundary into `BoundAST`; it rewrites every member list from
+`DeclFragmentId` to logical `DeclId` and preserves the contributing fragment list as
 provenance. It copies each scope's `kind`, `policy`, `parent`, `parentEntry`, `nodePositions`, and
 `endPosition` unchanged. Within each scope it rewrites every fragment binding-point key to its
 `DeclId`; if several fragments in that scope group into the same entity, the frozen point is their
@@ -107,13 +107,13 @@ visibility, or modifiers must request the fact's query.
 arity; it deliberately lacks kind/type payloads and is not a semantic parameter sort. Header
 binding replaces it with chapter 4's `GenericParameterSort`.
 
-`DEC-HDR-002`: `BindHeader` constructs at most one direct `GenericBinder` for the logical
+`DEC-HDR-002`: `BindDeclHeader` constructs at most one direct `GenericBinder` for the logical
 declaration, inserts it into chapter 4's authoritative `GenericBinderTable`, and stores only its
 `GenericBinderId` in `DeclHeader`. The table entry's `owner` equals the header declaration, and
 redeclaration compatibility uses the alpha-normalized `GenericBinderShape`, never an embedded
 binder copy or snapshot ID.
 
-`DEC-HDR-003`: `BindHeader` obtains `DeclHeader.concreteAvailability` only from chapter 9's
+`DEC-HDR-003`: `BindDeclHeader` obtains `DeclHeader.concreteAvailability` only from chapter 9's
 `ComputeConcreteAvailability(declaration, modifiers, environment)` product. A successful `Some`
 stores that product's exact `ConcreteAvailabilityId`; `None` remains semantically distinct from an
 explicit true availability. Header binding never copies `declaredCapabilities`, requests a body or
@@ -121,18 +121,18 @@ inferred contract, or guesses availability from a target/stage modifier not admi
 versioned availability producer.
 
 `DEC-HDR-004`: The declaration-kind registry classifies extensions as capability-bearing containers.
-`BindHeader` therefore produces their ordinary `DeclaredCapabilityContractId` even though an
+`BindDeclHeader` therefore produces their ordinary `DeclaredCapabilityRequirementsId` even though an
 extension has no independent callable body. Specializing an extension projects that declared
 requirement directly into `ExtensionCapabilityUseInputsAt<S>.extension`; it never runs callable
 body inference and never substitutes the extension's `concreteAvailability` for the ordinary use.
 
-`DEC-HDR-005`: `BindHeader` constructs `callableSignature` and
+`DEC-HDR-005`: `BindDeclHeader` constructs `callableSignature` and
 `callableResultAuthority` atomically. Every callable header has exactly one authority anchored to
 that declaration and canonical signature; every non-callable header has neither field. Ordinary,
 fixed-reference, ref-accessor, and registered-reference surfaces select their closed authority
 alternative from the checked declaration or registered standard-environment definition, never
 from a body return or use-site expectation. For a ref accessor, the authority kind is exactly
-`AccessorReferenceHandleCallableResult(AbstractRefAccessor.resultContract)`. Redeclarations must
+`AccessorPointerLikeCallableResult(AbstractStorageRefAccessor.resultContract)`. Redeclarations must
 agree on the entire authority after alpha-normalization. Resolving a specialized header performs
 the signature-and-authority substitution in `TYP-FUN-011`; it cannot reuse an equal-signature
 authority anchored to another declaration.
@@ -217,7 +217,7 @@ namespace body remains a distinct scoped AST node and provenance source.
 ModuleGraph = {
     modules: NodeMap<ModuleId, ModuleInterface>,
     imports: NodeList<ImportEdge>,
-    sourceFiles: NodeMap<ModuleId, NodeList<FileId>>,
+    sourceFiles: NodeMap<ModuleId, NodeList<SourceFileId>>,
     augmentations: NodeList<ImplementingEdge>
 }
 
@@ -284,12 +284,12 @@ is the stable concatenation of the local overload set and permitted outer overlo
 order is scope distance, declaration source order, then stable `DeclId`; order is diagnostic and
 tie-break metadata, not a substitute for semantic ranking.
 
-`NAM-LKP-002`: Candidate deduplication uses normalized `(CanonicalDeclRef, LookupPathRole)`.
+`NAM-LKP-002`: Candidate deduplication uses normalized `(DeclRef, LookupPathRole)`.
 Discovering the same declaration through semantically distinct base/witness paths retains distinct
 paths until the ambiguity/identity rule proves them equivalent.
 
 `NAM-LKP-003`: A completion query may request inaccessible or recovery candidates, but an ordinary
-binding query returns their `AccessDecision` and cannot silently treat them as accessible.
+binding query returns their `VisibilityDecision` and cannot silently treat them as accessible.
 
 ## Qualified and member lookup
 
@@ -303,7 +303,7 @@ LookupMember(baseClassifier, name, environment) -> LookupResult
 - a nominal/type-parameter/self base queries its ordered facet set;
 - an existential base opens the existential and queries interface facets with the opening evidence;
 - a value base queries the facets of its value type and prefixes each path with the appropriate
-  receiver/place edge; and
+  receiver/storage edge; and
 - pointer/reference bases may add an explicit dereference path only under a declared lookup rule.
 
 Every member candidate's `LookupPath` records operations required to elaborate access:
@@ -314,13 +314,13 @@ LookupPathEdge =
   | ImportedModule(ImportPathStep)
   | QualifiedScope(ScopeId)
   | MemberBase(AnyNodeId)
-  | ImplicitReceiver(PassingMode)
+  | ImplicitReceiver(ParamPassingMode)
   | Dereference(TypeId)
   | FacetRoute(facet: FacetId,
                route: FacetRouteKey,
-               evidence: MemberAccessEvidence)
+               evidence: MemberVisibilityEvidence)
   | TransparentMember(DeclId)
-  | OpenExistential(OpenedTypeId, InterfaceSubtypeWitnessId)
+  | OpenExistential(OpenedTypeId, SubtypeWitnessId)
 
 LookupPath = {
     edges: NodeList<LookupPathEdge>
@@ -331,11 +331,11 @@ LookupPathRoleEdge =
   | ImportedModuleRole(ImportPathStep)
   | QualifiedScopeRole(ScopeId)
   | MemberBaseRole
-  | ImplicitReceiverRole(PassingMode)
+  | ImplicitReceiverRole(ParamPassingMode)
   | DereferenceRole(TypeId)
   | FacetRouteRole(FacetKey)
   | TransparentMemberRole(DeclId)
-  | OpenExistentialRole(OpenedTypeId, InterfaceSubtypeWitnessId)
+  | OpenExistentialRole(OpenedTypeId, SubtypeWitnessId)
 
 LookupPathRole = {
     edges: NodeList<LookupPathRoleEdge>
@@ -344,7 +344,7 @@ LookupPathRole = {
 
 `roleOf(path)` preserves lexical/import/qualification steps, drops only the particular
 `MemberBase` node identity, resolves each `FacetId` to its collision-safe `FacetKey`, and projects
-each witness to its stable `InterfaceSubtypeWitnessId`. Thus two paths deduplicate only when they
+each witness to its stable `SubtypeWitnessId`. Thus two paths deduplicate only when they
 perform the same semantic lookup/elaboration roles; provenance and definition revisions remain
 available in the retained `BoundDeclUseAt<S>.witnessResolutions` sidecar, while caller-owned
 extension ordinary uses remain in `extensionUses`; neither sidecar manufactures an overload. A
@@ -402,11 +402,11 @@ GenericBinderShape =
 
 ReceiverOverloadShape =
     NoOverloadReceiver
-  | OverloadReceiver(selfType: TypeId, mode: PassingMode)
+  | OverloadReceiver(selfType: TypeId, mode: ParamPassingMode)
 
 OverloadParameterShape = {
     valueType: TypeId,
-    mode: PassingMode,
+    mode: ParamPassingMode,
     labelIdentity: ParameterLabelIdentity
 }
 
@@ -426,8 +426,8 @@ RedeclarationKey = {
 
 OverloadGroup = {
     name: NameKey,
-    members: CanonicallyOrderedSet<CanonicalDeclRef>,
-    presentationOrder: NodeList<CanonicalDeclRef>
+    members: CanonicallyOrderedSet<DeclRef>,
+    presentationOrder: NodeList<DeclRef>
 }
 ```
 
@@ -458,7 +458,7 @@ coexistence rule is part of the standard environment.
 `DEC-RED-003`: Building a redeclaration key is a named projection, not full-header equality. A
 difference in result/error type, default argument, non-overload attribute, trait, or calling
 convention cannot turn conflicting declarations into overloads. Such fragments first receive the
-same identity key and then `BindHeader` reports the field-specific compatibility error. Only a
+same identity key and then `BindDeclHeader` reports the field-specific compatibility error. Only a
 field admitted by `CallableShape` or a registered discriminator may separate overload identities.
 
 ## Aggregate relations, facets, and extensions
@@ -477,8 +477,8 @@ The direct inputs are separate, typed relations:
 - applicable extensions reachable in `lookupEnvironment`.
 
 The source colon clause is classified before facet computation as
-`ClassRepresentationBase`, `InterfaceConformance`, `InterfaceRefinement`, or
-`EnumUnderlyingType`. A modern struct has no concrete representation-base alternative. Rejected
+`ClassBase`, `InterfaceConformance`, `InterfaceInheritance`, or
+`EnumTagType`. A modern struct has no concrete representation-base alternative. Rejected
 struct inheritance contributes no facet, base subobject, representation adjustment, or conformance
 evidence. Chapter 14 is normative for the checked clause and route algebras.
 
@@ -530,17 +530,17 @@ path into the `BoundDeclUseAt<S>.extensionUses` domain and calls chapter 14's
 `CommitExtensionFacetUseAt<S>` with caller-owned ordinary-use keys. Facet discovery never allocates
 those keys, and candidate commitment never reruns the route's concrete-availability check.
 
-## Interface names and `Self`
+## Interface names and `This`
 
-An interface declaration introduces an `InterfaceContract`. Its uses are classified explicitly:
+An interface declaration introduces a checked `InterfaceDecl`. Its uses are classified explicitly:
 
-- in a conformance/refinement constraint, the name denotes the contract;
+- in a conformance or interface-inheritance constraint, the name denotes the interface;
 - in an ordinary value type position, the name denotes an existential type containing a value and
   conformance evidence; and
-- inside the interface's requirements, `This` denotes bound `SelfType(interface, binder)`.
+- inside the interface's requirements, `This` denotes bound `ThisType(interface, binder)`.
 
-`NAM-SELF-001`: Member facets of `Self` are rooted at `SelfType`, with evidence from `Self` to the
-contract. Member facets of an existential value are reached only after an explicit existential
+`NAM-THIS-001`: Member facets of `This` are rooted at `ThisType`, with subtype evidence from `This`
+to the interface. Member facets of an existential value are reached only after an explicit existential
 opening. The two are not interchangeable `DeclRefType` interpretations.
 
 This resolves the current dual-use limitation while keeping existing source spelling. Chapter 8
@@ -572,7 +572,7 @@ There is no universal “checked declaration” state. Representative products a
 ```text
 DeclaredIdentity(d)
 CheckedModifiers(d)
-BoundHeader(d)
+DeclHeader(d)
 DeclaredConcreteAvailability(d)
 CanonicalSignature(d)
 MemberIndex(d)

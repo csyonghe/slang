@@ -20,7 +20,7 @@ NameClass =
     IdentifierName
   | OperatorName
   | ConstructorName
-  | AccessorName(role: GetterName | SetterName | RefAccessorName(AccessMode))
+  | AccessorName(role: GetterName | SetterName | RefAccessorName(StorageAccessMode))
   | ContextualName(feature: SyntaxFeatureId)
 
 NameKey = {
@@ -35,13 +35,13 @@ DeclKind = {
     schema: SchemaVersion
 }
 
-DeclarationPathSegment =
-    NamedDeclarationSegment(name: NameKey, kind: DeclKind)
-  | AnonymousDeclarationSegment(role: QualifiedName,
-                                anchor: ContentId<SemanticValue>,
+DeclPathSegment =
+    NamedDeclSegment(name: NameKey, kind: DeclKind)
+  | AnonymousDeclSegment(role: QualifiedName,
+                                anchor: ContentId<SchemaValue>,
                                 ordinal: UInt32)
 
-CanonicalDeclarationPath = NodeList<DeclarationPathSegment>
+CanonicalDeclPath = NodeList<DeclPathSegment>
 
 CanonicalSignatureEncoding = {
     schema: SchemaVersion,
@@ -51,25 +51,25 @@ CanonicalSignatureEncoding = {
 ModuleStableId = stable nominal module identity allocated by module-graph freezing
 ModuleId = ModuleStableId
 
-DeclarationDisambiguator =
-    NonOverloadableDeclaration(kind: DeclKind)
-  | OverloadableDeclaration(kind: DeclKind,
+DeclDisambiguator =
+    NonOverloadableDecl(kind: DeclKind)
+  | OverloadableDecl(kind: DeclKind,
                             signature: CanonicalSignatureEncoding)
-  | AnonymousDeclaration(anchor: ContentId<SemanticValue>, ordinal: UInt32)
-  | SynthesizedDeclaration(SynthesizedSemanticId)
+  | AnonymousDecl(anchor: ContentId<SchemaValue>, ordinal: UInt32)
+  | SynthesizedDecl(SynthesizedSemanticId)
 
 DeclId = {
     module: ModuleStableId,
-    path: CanonicalDeclarationPath,
-    disambiguator: DeclarationDisambiguator
+    path: CanonicalDeclPath,
+    disambiguator: DeclDisambiguator
 }
 
-DeclarationFragmentKey = {
+DeclFragmentKey = {
     syntax: NodeId<Surface>,
     kind: DeclKind
 }
 
-DeclarationFragmentId = ContentId<DeclarationFragmentKey>
+DeclFragmentId = ContentId<DeclFragmentKey>
 
 InterfaceInstanceKey = {
     interface: DeclId,
@@ -78,7 +78,7 @@ InterfaceInstanceKey = {
 
 RefinementStepKey = {
     derived: InterfaceInstanceKey,
-    clause: RefinementClauseId,
+    clause: InterfaceInheritanceClauseId,
     base: InterfaceInstanceKey
 }
 
@@ -120,7 +120,7 @@ use the versioned alpha-normalized redeclaration identity shape, anonymous decla
 syntax anchor/role ordinal, and synthesized declarations use their synthesis identity. No hash,
 source byte offset, provisional handle, or definition revision defines nominal equality.
 
-`TYP-DID-002`: `DeclarationFragmentId` is the exact content ID of one Surface-AST declaration node
+`TYP-DID-002`: `DeclFragmentId` is the exact content ID of one Surface-AST declaration node
 and its declared kind. Its discriminator includes the full snapshot-local `NodeId<Surface>` tuple,
 so two written occurrences never alias even when their text is equal. Redeclaration freezing may map
 many fragments to one `DeclId`, but neither conversion direction is implicit.
@@ -141,7 +141,7 @@ CheckedModifier = {
 CheckedModifierSet =
     CanonicallyOrderedMap<CheckedModifierKey, CheckedModifier>
 
-Declaration = {
+Decl = {
     id: DeclId,
     kind: DeclKind,
     name: Option<Name>,
@@ -157,9 +157,9 @@ DeclHeader = {
     callableSignature: Option<CallableSignature>,
     callableResultAuthority: Option<CallableResultAuthorityId>,
     modifiers: CheckedModifierSet,
-    visibility: Visibility,
+    visibility: DeclVisibility,
     declaredEffects: Option<DeclaredEffectContractId>,
-    declaredCapabilities: Option<DeclaredCapabilityContractId>,
+    declaredCapabilities: Option<DeclaredCapabilityRequirementsId>,
     concreteAvailability: Option<ConcreteAvailabilityId>
 }
 ```
@@ -170,7 +170,7 @@ equality ignores source order, while `origins` retains every written or synthesi
 duplicate validation and diagnostics. The declaration-kind registry also states which kinds are
 overloadable and supplies their canonical signature-identity schema.
 
-The base `Declaration` may be published before its header so mutually recursive nominal
+The base `Decl` may be published before its header so mutually recursive nominal
 declarations can refer to identity without observing an incomplete header.
 
 Callable headers have a declared effect contract; another declaration kind has one only when its
@@ -209,9 +209,9 @@ FragmentScope = {
     policy: ScopePolicy,
     parent: Option<ScopeId>,
     parentEntry: Option<ScopePosition>,
-    lexicalMembers: NodeMap<NameKey, NodeList<DeclarationFragmentId>>,
+    lexicalMembers: NodeMap<NameKey, NodeList<DeclFragmentId>>,
     nodePositions: NodeMap<NodeId<Scoped>, ScopePosition>,
-    bindingPoints: NodeMap<DeclarationFragmentId, ScopePosition>,
+    bindingPoints: NodeMap<DeclFragmentId, ScopePosition>,
     endPosition: ScopePosition,
     origin: Origin
 }
@@ -235,7 +235,7 @@ Scope = FrozenScope
 
 SemanticVersion = (major: UInt32, minor: UInt32, patch: UInt32)
 DialectId = QualifiedName
-StandardEnvironmentId = ContentId<SemanticValue>
+StandardEnvironmentId = ContentId<SchemaValue>
 
 StandardEnvironmentRuleKey = {
     registry: QualifiedName,
@@ -269,7 +269,7 @@ LanguageRuleSetId = ContentId<LanguageRuleSet>
 
 GenericEnvironmentFrame = {
     binder: GenericBinderId,
-    arguments: Substitution,
+    arguments: SubstitutionSet,
     evidence: NodeMap<ConstraintKey, ConstraintEvidence>,
     optionalEvidence: NodeMap<ConstraintKey, OptionalEvidence>
 }
@@ -297,7 +297,7 @@ ContractSelectionContext = {
 }
 
 StableOrderKey =
-    SourceOrder(document: SourceDocumentId, start: UInt64, end: UInt64,
+    SourceOrder(document: SourceFileId, start: UInt64, end: UInt64,
                 semanticTieBreaker: ByteString)
   | ImportedOrder(module: ModuleStableId, exported: ExportedId)
   | SynthesizedOrder(id: SynthesizedSemanticId)
@@ -421,7 +421,7 @@ CanonicalSubstitution = NodeList<GenericArg>
 
 GenericParameterKey = (binder: GenericBinderId, parameter: DeclId)
 ConstraintKey = (binder: GenericBinderId, constraint: ConstraintId)
-Substitution = NodeMap<GenericParameterKey, GenericArg>
+SubstitutionSet = NodeMap<GenericParameterKey, GenericArg>
 
 CanonicalBoundVariable = {
     binderDepth: UInt32,
@@ -529,7 +529,7 @@ parameter identities by depth/ordinal variables and is the relation used by cano
 signature, frame, and redeclaration shapes. It does not make structurally equal source binders share
 a `GenericBinderId`.
 
-Substitution is keyed by parameter identity, never binder position. Positional source arguments are
+`SubstitutionSet` is keyed by parameter identity, never binder position. Positional source arguments are
 mapped to identities once during generic argument mapping. The empty substitution is `id`.
 `GenericParameterKey` is a snapshot-local lookup key, not part of structural type equality. Before
 hashing or comparing a type, bound parameters are alpha-normalized to `CanonicalBoundVariable`
@@ -541,10 +541,10 @@ constraints record `Absent` explicitly; absence is not an error witness. Pack ex
 distinct `ParameterKey` for each expanded callable parameter. The empty expansion path identifies
 an unexpanded parameter, while nested paths such as `[2, 0]` remain stable across scheduling order.
 
-`Substitution`, `GenericParameterKey`, and `ConstraintKey` are working/snapshot views used by
+`SubstitutionSet`, `GenericParameterKey`, and `ConstraintKey` are working/snapshot views used by
 mapping and solving. Freezing alpha-normalizes the binder, orders arguments by canonical parameter
 ordinal, rewrites evidence to `CanonicalConstraintSlot`, and assigns a named frame role.
-`SpecializationFrame` is the only applied-binder form stored in `CanonicalDeclRef`; an unapplied
+`SpecializationFrame` is the only applied-binder form stored in `DeclRef`; an unapplied
 constraint assumption uses `CanonicalBinderRef`. No snapshot-local binder/parameter ID leaks into
 semantic hashes, query keys, or the wire format.
 
@@ -619,7 +619,7 @@ tests. Unless a versioned language rule explicitly enables one, a source pack pa
 canonical binder and `binder = ContentId(resolve(frame))`. It contains no arguments or constraint
 evidence. Bound witness parameters, declared pack facts, lifetime assumptions, and generic equality
 assumptions use this ref plus a `CanonicalConstraintSlot`, so naming an assumption never requires a
-`CanonicalDeclRef` whose complete specialization frame would recursively require evidence for that
+`DeclRef` whose complete specialization frame would recursively require evidence for that
 same slot.
 
 Application and composition obey:
@@ -656,7 +656,7 @@ Classifier =
     KindClassifier(Kind)
   | ValueClassifier(TypeId, ValueCategory)
   | OverloadClassifier(OverloadSetId)
-  | GenericValueClassifier(PartialGenericId)
+  | GenericValueClassifier(PartiallyAppliedGenericValueId)
   | NamespaceClassifier(DeclId)
   | ErrorClassifier(ErrorId, ErrorClassifierRecovery)
 
@@ -728,27 +728,28 @@ OpenedTypeId = ContentId<OpenedTypeKey>
 
 Type =
     ErrorType(ErrorId)
-  | NeverType
-  | UnitType
-  | NominalType(decl: DeclId, arguments: CanonicalSubstitution)
+  | BottomType
+  | VoidType
+  | DeclRefType(declRef: DeclRef)
   | BoundTypeVariable(variable: CanonicalBoundVariable)
-  | SelfType(interface: DeclId, binder: SelfBinderId)
+  | ThisType(interface: DeclId, binder: ThisTypeBinderId)
   | AssociatedTypeProjection(
         base: TypeId,
         requirement: RequirementKey<AssociatedTypeKind>,
-        witness: InterfaceSubtypeWitnessId)
-  | FunctionTypeValue(FunctionType)
+        witness: SubtypeWitnessId)
+  | FuncTypeValue(FuncType)
   | TupleType(NodeList<TypeId>)
-  | PointerType(value: TypeId, addressSpace: AddressSpace, access: AccessMode)
-  | ReferenceType(value: TypeId, addressSpace: AddressSpace,
-                  access: AccessMode, lifetime: LifetimeId)
-  | ArrayType(element: TypeId, count: ConstValue)
+  | PtrType(value: TypeId, addressSpace: AddressSpace, access: AccessQualifier)
+  | ExplicitRefType(value: TypeId, addressSpace: AddressSpace,
+                    access: AccessQualifier, lifetime: LifetimeId)
+  | ArrayExpressionType(element: TypeId, count: ConstValue)
   | ExistentialType(interfaces: CanonicalInterfaceSet)
-  | OpenedExistentialType(identity: OpenedTypeId, source: NodeId<Typed>)
-  | PackType(NodeList<TypeId>)
-  | EachType(pattern: TypeId, captures: NodeList<PackId>)
+  | ExtractExistentialType(identity: OpenedTypeId, source: NodeId<Typed>)
+  | ConcreteTypePack(NodeList<TypeId>)
+  | EachType(elementType: TypeId)
+  | ExpandType(patternType: TypeId, capturedPacks: NodeList<PackId>)
   | ModifiedType(base: TypeId, modifiers: SemanticModifierSet)
-  | IntersectionType(CanonicalTypeSet)
+  | AndType(CanonicalTypeSet)
 
 TypeId = ContentId<Type>
 
@@ -756,7 +757,7 @@ CanonicalTypeRecord = {
     id: TypeId,
     value: Type,
     directWitnessDependencies:
-        CanonicallyOrderedMap<InterfaceSubtypeWitnessId,
+        CanonicallyOrderedMap<SubtypeWitnessId,
                               WitnessResolutionStamp>
 }
 
@@ -767,8 +768,12 @@ Vector, matrix, resource, optional, differentiable-function, and target-specific
 nominal applications unless a later rule proves that a dedicated primitive is required for their
 algebra. This prevents the type checker from duplicating the standard module's declarations.
 
-Nominal types are equal when their declaration IDs and canonically keyed arguments are equal.
-`IntersectionType` is canonicalized by flattening, removing duplicates, and sorting by semantic ID;
+`DeclRefType` values are equal exactly when their canonical `DeclRef` values are equal. Equality
+therefore includes the declaration ID and the complete canonical specialization spine, including
+ordinary arguments and proof-relevant constraint evidence. Proof-irrelevant evidence may be erased
+only by the explicit constraint-kind erasure rule required by `TYP-DRF-002`. Comparing only the
+declaration and ordinary arguments is not a substitute for canonical `DeclRef` equality.
+`AndType` is canonicalized by flattening, removing duplicates, and sorting by semantic ID;
 further subtyping-based reduction requires an explicit proof and cannot occur during structural
 hashing.
 
@@ -778,14 +783,14 @@ ranking over a non-error candidate.
 
 An `AssociatedTypeProjection` is a first-class type, not an eagerly substituted spelling. Its
 `RequirementKey` identifies the associated-type declaration under the exact inherited interface
-specialization and its `InterfaceSubtypeWitnessId` identifies the exact operational proof term.
+specialization and its `SubtypeWitnessId` identifies the exact operational proof term.
 That term may be a concrete witness table, a bound generic witness, a specialization of a generic
 table, a nested `LookupSubtypeWitness`, or an existential extraction. A projection through a bound
 generic witness therefore remains representable and lowers to a lookup on the runtime witness
 parameter; the checker does not invent a static conformance definition.
 
 A published `CanonicalTypeRecord` contains one resolution stamp for every direct witness ID in its
-payload. The stamp contains the exact frozen conformance-definition revisions reachable from that
+payload. The stamp contains the exact frozen witness-table-definition revisions reachable from that
 witness term and no unrelated definition. Bound-witness-only terms may have an empty definition
 map. Exact query/dependency equality includes those revisions, while structural `TypeId`, exported
 signature, mangling, and wire-stable identity hash the witness's stable semantic key. Dependencies
@@ -799,24 +804,24 @@ invalidate/rebuild the record and its dependent queries but cannot change `TypeI
 witness operation or lookup key does change `TypeId`. Two unequal `Type` payloads never share an ID
 even when their digest accelerators collide.
 
-`TYP-OPEN-001`: An `OpenedExistentialType(identity, source)` satisfies
+`TYP-OPEN-001`: An `ExtractExistentialType(identity, source)` satisfies
 `resolve(identity).opening = source`. Its key's interface is one of the source existential's
 canonical interfaces after specialization. The typed opening node is generative identity: two
 different opening nodes produce distinct opened types even for equal existential values, while all
 uses dominated by one opening reuse its exact `OpenedTypeId`. A scheduler task, process address, or
-conformance-definition revision cannot enter that identity.
+witness-table-definition revision cannot enter that identity.
 
 ## Checked function types
 
-`FunctionType` is the pure callable signature. It explicitly represents everything needed for type
+`FuncType` is the pure callable signature. It explicitly represents everything needed for type
 identity, argument mapping, receiver checking, conformance matching, and ABI selection, while facts
 inferred from the function body live in a separate contract:
 
 ```text
-FunctionType = {
+FuncType = {
     binder: Option<CanonicalGenericBinder>,
     receiver: ReceiverSlot,
-    parameters: NodeList<ParameterType>,
+    parameters: NodeList<FuncTypeParamInfo>,
     result: TypeId,
     resultDifferentialParticipation: DifferentialParticipation,
     error: TypeId,
@@ -829,14 +834,14 @@ ReceiverSlot =
     NoReceiver
   | Receiver {
         selfType: TypeId,
-        mode: PassingMode,
+        mode: ParamPassingMode,
         differentialParticipation: DifferentialParticipation,
         isolation: ReceiverIsolation
     }
 
-ParameterType = {
+FuncTypeParamInfo = {
     valueType: TypeId,
-    mode: PassingMode,
+    mode: ParamPassingMode,
     differentialParticipation: DifferentialParticipation,
     labelIdentity: ParameterLabelIdentity,
     attributes: ParameterAttributeSet
@@ -845,11 +850,11 @@ ParameterType = {
 ParameterLabelIdentity = LabelExcluded | IdentityLabel(NameKey)
 
 CallableSignature = {
-    functionType: FunctionTypeId,
+    functionType: FuncTypeId,
     parameterSlots: NodeList<ParameterSlot>
 }
 
-FunctionTypeId = ContentId<FunctionType>
+FuncTypeId = ContentId<FuncType>
 CallableSignatureId = ContentId<CallableSignature>
 
 CallableSignatureRecord = {
@@ -866,7 +871,7 @@ DynamicDispatchKey = {
 }
 
 DynamicDispatchRole = MethodDispatch | GetterDispatch | SetterDispatch |
-                      RefAccessorDispatch(access: AccessMode) | InitializerDispatch
+                      RefAccessorDispatch(access: StorageAccessMode) | InitializerDispatch
 
 ParameterSlot = {
     key: ParameterKey,
@@ -915,8 +920,8 @@ EffectiveCallableContract = {
     semanticEnvironment: SemanticEnvironmentId,
     declaredEffects: EffectSet,
     inferredEffects: EffectSet,
-    declaredCapabilities: CapabilityFormula,
-    inferredCapabilities: CapabilityFormula
+    declaredCapabilities: CapabilitySet,
+    inferredCapabilities: CapabilitySet
 }
 
 EffectiveCallableContractId = ContentId<EffectiveCallableContract>
@@ -946,16 +951,16 @@ OperandDomain =
     AbstractOperand
   | PhysicalOperand(location: ParameterPhysicalLocationRequirement)
 
-PassingMode = {
+ParamPassingMode = {
     domain: OperandDomain,
-    access: AccessMode
+    access: StorageAccessMode
 }
 
-InMode = PassingMode(AbstractOperand, ReadAccess)
-OutMode = PassingMode(AbstractOperand, WriteAccess)
-InOutMode = PassingMode(AbstractOperand, ReadWriteAccess)
-ConstRefMode(location) = PassingMode(PhysicalOperand(location), ReadAccess)
-RefMode(location) = PassingMode(PhysicalOperand(location), ReadWriteAccess)
+InMode = ParamPassingMode(AbstractOperand, ReadAccess)
+OutMode = ParamPassingMode(AbstractOperand, WriteAccess)
+InOutMode = ParamPassingMode(AbstractOperand, ReadWriteAccess)
+ConstRefMode(location) = ParamPassingMode(PhysicalOperand(location), ReadAccess)
+RefMode(location) = ParamPassingMode(PhysicalOperand(location), ReadWriteAccess)
 
 instantiatePhysicalStorageRequirement(mode, invocationLifetime) = {
     access = mode.access,
@@ -991,9 +996,9 @@ The modes form two explicit axes rather than pointer-like type wrappers:
 | `__ref`      | physical storage        | read and write   |
 
 The domain is a property of the formal parameter contract, not a claim that every argument to an
-abstract-domain mode has an `AbstractPlace` classifier. A physical place may be read, written, or
+abstract-domain mode has an `AbstractStorage` classifier. A physical storage may be read, written, or
 used as the destination of an abstract-domain plan when its access permits the operation; that
-plan does not promise to preserve the place's physical identity. Conversely, a physical-domain
+plan does not promise to preserve the storage's physical identity. Conversely, a physical-domain
 mode must preserve one admitted physical endpoint and therefore has no value, temporary, or
 write-back implementation.
 
@@ -1017,13 +1022,13 @@ stand in for a lifetime assumption.
 
 `TYP-LIF-002`: `CallableActivationLifetime(s)` is the reusable formal dynamic extent of one
 invocation of callable signature `s`. It may appear in a declaration's logical ABI map and its body
-entry facts, but never in source-visible `Type`, `FunctionType`, generic substitution, or exported
+entry facts, but never in source-visible `Type`, `FuncType`, generic substitution, or exported
 contract identity; permitting it there would create a signature content-ID cycle. Each call owns a
 separate activation-binding proof that relates the caller's concrete invocation lifetime to this
 formal lifetime. Task order, call-node identity, and a caller lexical scope cannot enter the formal
 lifetime ID.
 
-`TYP-MODE-001`: A `PassingMode` is well formed exactly when it is one of the five canonical axis
+`TYP-MODE-001`: A `ParamPassingMode` is well formed exactly when it is one of the five canonical axis
 combinations above: `AbstractOperand` with `ReadAccess`, `WriteAccess`, or `ReadWriteAccess`, or
 `PhysicalOperand(_)` with `ReadAccess` or `ReadWriteAccess`. Atomic discipline, empty access, and
 write-only physical operands require separately named future language modes and are rejected today.
@@ -1039,10 +1044,10 @@ are preserved exactly. The resulting value is the sole physical-storage requirem
 `ConstRefMode` and `RefMode` applicability, access planning, ABI entry validation, and diagnostics.
 Reconstructing a weaker requirement or dropping its source predicate is invalid.
 
-`TYP-FUN-001`: A non-static member has exactly one receiver in its `FunctionType`. The receiver is
+`TYP-FUN-001`: A non-static member has exactly one receiver in its `FuncType`. The receiver is
 not prepended to the ordinary parameter list and is not recovered later from declaration nesting.
 
-`TYP-FUN-002`: An interface requirement's receiver has `SelfType(interface, binder)` and witness
+`TYP-FUN-002`: An interface requirement's receiver has `ThisType(interface, binder)` and witness
 selection is represented by the `CallableValue` at a use, not by the function type. A satisfying
 method is compared after substituting the concrete self type and applying any explicitly synthesized
 adapter. The same function type can consequently be reached by a direct call or a witness call.
@@ -1054,22 +1059,22 @@ target/result convention,
 callable differentiability promise, and calling convention participate in function-type equality.
 `ParameterKey` exists only on
 `CallableSignature`, while source spelling/origin remains on parameter AST metadata; neither is an
-operand of the interned `FunctionType`. Slots associate arguments and evidence with parameters
+operand of the interned `FuncType`. Slots associate arguments and evidence with parameters
 after pack expansion. A checked language rule constructs
 `IdentityLabel(NameKey)` when labels participate in callable identity and `LabelExcluded`
 otherwise; source spelling/origin remains on parameter AST nodes. That compatibility decision is
-tracked in chapter 12 and never leaves an undecided source `Name` inside `FunctionType`.
-Mode equality is fieldwise over `PassingMode.domain` and `PassingMode.access`; a
+tracked in chapter 12 and never leaves an undecided source `Name` inside `FuncType`.
+Mode equality is fieldwise over `ParamPassingMode.domain` and `ParamPassingMode.access`; a
 `PhysicalOperand(location)` includes all lifetime, address-space, and source fields of `location`.
 No source spelling or compatibility alias replaces those structural equality operands.
 
 `TYP-FUN-004`: Static methods and free functions use `NoReceiver`. Initializers use
-`InitializerCallable(target, resultConvention)` and a receiver only for a separately defined
+`ConstructorCallable(target, resultConvention)` and a receiver only for a separately defined
 delegating form; the
 fresh/partial storage target is not ordinary argument zero. A hidden `this` or construction result
 inferred from the parent is forbidden.
 
-Receiver direction has one authority in `PassingMode`:
+Receiver direction has one authority in `ParamPassingMode`:
 
 | written receiver behavior                     | canonical receiver mode                                                                          |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -1089,7 +1094,7 @@ participation, callable promise, and isolation are
 orthogonal fields.
 
 `TYP-FUN-005`: Dispatch mode, declaration visibility, declared or inferred effects, and declared or
-inferred capabilities do not participate in `FunctionType` equality. They are use-site or
+inferred capabilities do not participate in `FuncType` equality. They are use-site or
 `EffectiveCallableContract` facts. This separation prevents signature checking from depending on
 the body whose references are being type-checked.
 
@@ -1123,8 +1128,8 @@ local enum values. Exported signatures may use only static/generic/standard life
 snapshot-local `LexicalLifetime`; receiver isolation, parameter attributes, differentiability, and
 calling convention participate in function-type equality exactly as stated by `TYP-FUN-003`.
 
-`TYP-FUN-008`: `FunctionTypeId` is the typed content ID of the `FunctionType` payload.
-`TypeId(FunctionTypeValue(f))` is its unique embedding in the general type algebra; interning and
+`TYP-FUN-008`: `FuncTypeId` is the typed content ID of the `FuncType` payload.
+`TypeId(FuncTypeValue(f))` is its unique embedding in the general type algebra; interning and
 resolution validate both content IDs from the same canonical `f`. `CallableSignatureId` and
 `EffectiveCallableContractId` likewise use the exact payload schemas above, never allocation
 ordinals or digest-only equality.
@@ -1151,10 +1156,10 @@ different result contract.
 in one operation and constructs the correspondingly specialized `CallableResultAuthorityId` while
 preserving the anchor declaration. Fixed, accessor, and registered contracts validate their result
 type against the anchored signature. The accessor alternative additionally has
-`contract = AbstractRefAccessor.resultContract` for the accessor surface that owns the anchor;
+`contract = AbstractStorageRefAccessor.resultContract` for the accessor surface that owns the anchor;
 fixed and registered alternatives cannot stand in for it merely because their result type or
 runtime representation agrees. Witness and dynamic dispatch resolve the authority of the exact
-requirement/slot introducer, while a direct or closure dispatch resolves the selected declaration;
+requirement/slot introducer, while a direct or lambda dispatch resolves the selected declaration;
 none accepts an authority ID from the caller.
 
 The current compiler's `FuncType` in `source/slang/slang-ast-type.h` stores parameter modes as
@@ -1165,7 +1170,7 @@ domain deliberately makes both pieces structural.
 ## Effect algebra and contracts
 
 Effects describe callable behavior that must be admitted by an enclosing context. They are not
-function-type operands; the structural `FunctionType.error` still records the precise thrown value
+function-type operands; the structural `FuncType.error` still records the precise thrown value
 type and is checked independently.
 
 ```text
@@ -1225,30 +1230,30 @@ InferredEffectContract = {
 
 EffectCompatibilityObligation = {
     caller: DeclId,
-    callee: CanonicalDeclRef,
+    callee: DeclRef,
     allowed: EffectAllowance,
     selectionEffects: EffectSet,
     origin: Origin
 }
 
 EffectUseKey = {
-    owner: CanonicalDeclRef,
+    owner: DeclRef,
     origin: Origin,
     ordinal: UInt32
 }
 
 EffectUseId = ContentId<EffectUseKey>
 
-EffectUse<S: WitnessUseStage> = {
+EffectUse<S: WitnessTableState> = {
     key: EffectUseKey,
     requirement: DirectEffect(EffectSet)
                | LocalCallable(ResolvedDeclRefAt<S>)
                | ImportedCallable(EffectSet)
-               | WitnessEntry(WitnessCallRef<S>, WitnessRuntimeEntryKey)
+               | WitnessEntry(SubtypeWitnessRef<S>, RuntimeInterfaceRequirementKey)
 }
 
-EffectUseGraph<S: WitnessUseStage> = {
-    root: CanonicalDeclRef,
+EffectUseGraph<S: WitnessTableState> = {
+    root: DeclRef,
     rootWitnessResolutions: WitnessResolutionSetAt<S>,
     uses: CanonicallyOrderedMap<EffectUseId, EffectUse<S>>
 }
@@ -1258,7 +1263,7 @@ EffectUseGraphId = ContentId<EffectUseGraph<Published>>
 
 Unqualified `EffectUse` means `EffectUse<Published>`. Construction-stage synthesis graphs may use
 `EffectUse<Construction>` whose witness resolution set contains a scope-authorized
-`OperationalConformanceRef`; chapter 8's atomic freeze must rewrite only that resolution to its
+`OperationalWitnessTableRef`; chapter 8's atomic freeze must rewrite only that resolution to its
 frozen definition reference before the graph can enter any published
 typed/elaborated snapshot, exported metadata, or IR. Construction-stage elaborated nodes
 inside the synthesis transaction remain legal and cannot escape that transaction.
@@ -1301,12 +1306,12 @@ bit; that bit and origins remain on the declared-contract fact used during valid
 `TYP-EFF-001`: Overload/call selection reads `selectionEffects`, never an inferred local callee
 contract. It records a typed direct effect use; restricted callers are validated after inference.
 Imported callables may expose their already published effective set. A complete call specialization
-must close the declared effect scheme; a residual scheme produces a `PartialGeneric`, not an
+must close the declared effect scheme; a residual scheme produces a `PartiallyAppliedGenericValue`, not an
 applicable ordinary call.
 
 `TYP-EFF-002`: `InferEffects` collects direct effects and follows local call edges with current SCC
 approximations, monotonically unioning until stable. It does not request an effective-contract query.
-After stabilization, `ValidateDeclaredEffects` checks the declared contract, `FunctionType.error`,
+After stabilization, `ValidateDeclaredEffects` checks the declared contract, `FuncType.error`,
 interface obligations, and recorded call obligations.
 
 `TYP-EFF-003`: Effect-set equality, subset, union, effect-scheme substitution/closure, direct-use
@@ -1315,10 +1320,10 @@ pure/query surfaces with rule-linked tests. `EffectAtom` itself has no substitut
 the scheme's symbolic branch conditions depend on generic arguments. Task order cannot affect the
 canonical set.
 
-`TYP-EFF-004`: `FunctionType.error` is the typed error channel. Every `throw`, propagated error,
+`TYP-EFF-004`: `FuncType.error` is the typed error channel. Every `throw`, propagated error,
 and throwing-call edge contains a checked conversion of its payload to that type. If
-`FunctionType.error = NeverType`, `MayThrow` is forbidden in both declared and inferred effects; if
-an effective contract contains `MayThrow`, its function error type is not `NeverType`. A non-`Never`
+`FuncType.error = BottomType`, `MayThrow` is forbidden in both declared and inferred effects; if
+an effective contract contains `MayThrow`, its function error type is not `BottomType`. A non-`BottomType`
 error type permits an error channel but does not by itself assert that the body uses it: an
 unconstrained body with no reachable throwing path may infer a set without `MayThrow`, while an
 explicit declared contract may conservatively promise it. This separates signature capacity from
@@ -1342,20 +1347,36 @@ container order, and redundant conditions cannot produce distinct scheme identit
 
 ## Value categories, abstract storage, and physical storage
 
-```text
-AccessOperation = Read | Write
-AccessDiscipline = Ordinary | Atomic
+`StorageRef` is the closed semantic storage domain. `PhysicalStorage` and `AbstractStorage` are
+its two alternatives; their payload records are named `PhysicalStorageRef` and
+`AbstractStorageRef` so an alternative constructor and its payload type never share a name.
+Physical versus abstract describes whether an operation preserves a concrete memory location.
+Access and `Mutability` are independent axes: physical storage may be mutable or immutable, and
+abstract storage may expose read, write, or read-write accessor operations.
 
-AccessMode = {
-    operations: CanonicalFiniteSet<AccessOperation>,
-    discipline: AccessDiscipline
+`StorageAccessMode` deliberately refines the codebase's `AccessQualifier`: it records permitted
+storage operations and ordinary-versus-atomic discipline instead of conflating access with storage kind.
+
+```text
+StorageAccessOperation = Read | Write
+StorageAccessDiscipline = Ordinary | Atomic
+
+StorageAccessMode = {
+    operations: CanonicalFiniteSet<StorageAccessOperation>,
+    discipline: StorageAccessDiscipline
 }
 
 Mutability = Immutable | Mutable | UnknownMutability
 
-ReadAccess = AccessMode({Read}, Ordinary)
-WriteAccess = AccessMode({Write}, Ordinary)
-ReadWriteAccess = AccessMode({Read, Write}, Ordinary)
+AccessQualifier = ReadWrite | Read | Immutable
+
+ReadAccess = StorageAccessMode({Read}, Ordinary)
+WriteAccess = StorageAccessMode({Write}, Ordinary)
+ReadWriteAccess = StorageAccessMode({Read, Write}, Ordinary)
+
+pointerStorageView(ReadWrite) = (ReadWriteAccess, Mutable)
+pointerStorageView(Read) = (ReadAccess, UnknownMutability)
+pointerStorageView(Immutable) = (ReadAccess, Immutable)
 
 SourceArgumentId = NodeId<Typed>
 SourceArgumentForm = OrdinaryArgument | PackExpansionArgument
@@ -1516,7 +1537,7 @@ SemanticOperationSiteDerivation =
                                role: SemanticOperationSiteRole)
 
 SemanticOperationSiteAssignmentContext = {
-    sources: CanonicallyOrderedSet<SourceSnapshotId>,
+    sources: CanonicallyOrderedSet<SourceFileSnapshotId>,
     expandedViews: CanonicallyOrderedSet<ExpandedTokenViewId>,
     provenance: SemanticSnapshotId
 }
@@ -1618,27 +1639,28 @@ PublishPhysicalProjectionSemanticResults(
     -> PhysicalProjectionSemanticResultSnapshotId
 
 BuildPhysicalProjectionApplicationIndex(
-    snapshot: AstSnapshotId<Typed>,
+    snapshot: ASTSnapshotId<Typed>,
     semanticResults: PhysicalProjectionSemanticResultSnapshotId)
     -> Result<PhysicalProjectionApplicationIndex,
               PhysicalProjectionApplicationIndexFailure>
 
-ReferenceHandleKind = LanguageReferenceHandle | PointerHandle
+PointerLikeKind = ExplicitRef | Pointer
 
-ReferenceHandleShape = {
-    kind: ReferenceHandleKind,
+PointerLikeShape = {
+    kind: PointerLikeKind,
     referent: TypeId,
     addressSpace: AddressSpace,
-    access: AccessMode,
+    qualifier: AccessQualifier,
+    access: StorageAccessMode,
     mutability: Mutability,
     lifetime: LifetimeId,
     alias: AliasProvenance,
     sourceProvenance: PhysicalStorageSourceProvenance
 }
 
-ReferenceHandleValueShape = {
+PointerLikeValueShape = {
     type: TypeId,
-    handle: ReferenceHandleShape
+    handle: PointerLikeShape
 }
 
 effectiveHandleAccess(h) =
@@ -1646,17 +1668,17 @@ effectiveHandleAccess(h) =
     remove(Write, h.access)               when h.mutability = Immutable
     remove(Write, h.access)               when h.mutability = UnknownMutability
 
-PhysicalPlacePath =
-    StoredRoot(declaration: CanonicalDeclRef)
+PhysicalStoragePath =
+    StoredRoot(declaration: DeclRef)
   | ConstRefFormalRoot(signature: CallableSignatureId,
                        role: ConstRefFormalRole)
   | RefFormalRoot(signature: CallableSignatureId,
                   role: RefFormalRole)
-  | StoredField(base: PhysicalPlacePath, field: DeclId)
-  | BuiltinElement(base: PhysicalPlacePath,
+  | StoredField(base: PhysicalStoragePath, field: DeclId)
+  | BuiltinElement(base: PhysicalStoragePath,
                    application: BuiltinPhysicalProjectionIdentity)
   | DereferencedReference(application: DereferenceApplicationIdentity)
-  | VectorElement(base: PhysicalPlacePath, element: UInt8)
+  | VectorElement(base: PhysicalStoragePath, element: UInt8)
   | RegisteredPhysicalProjection(application: RegisteredPhysicalProjectionIdentity)
 
 ConstRefFormalRole =
@@ -1674,7 +1696,7 @@ PhysicalFormalEntryRole =
 PhysicalFormalEntryProof = {
     signature: CallableSignatureId,
     role: PhysicalFormalEntryRole,
-    mode: PassingMode,
+    mode: ParamPassingMode,
     semanticEnvironment: SemanticEnvironmentId
 }
 
@@ -1717,8 +1739,8 @@ formalSourceProvenance(entry) =
 
 PhysicalStorageRef = {
     valueType: TypeId,
-    path: PhysicalPlacePath,
-    access: AccessMode,
+    path: PhysicalStoragePath,
+    access: StorageAccessMode,
     mutability: Mutability,
     addressSpace: PhysicalStorageAddressSpace,
     lifetime: LifetimeId,
@@ -1726,15 +1748,15 @@ PhysicalStorageRef = {
     sourceProvenance: PhysicalStorageSourceProvenance
 }
 
-AbstractAccessor = {
-    selector: AbstractAccessorSelector,
-    access: AccessMode
+AbstractStorageAccessor = {
+    selector: AbstractStorageAccessorSelector,
+    access: StorageAccessMode
 }
 
-AbstractAccessorSelector =
-    DirectAccessor(declaration: CanonicalDeclRef)
-  | WitnessAccessor(witness: InterfaceSubtypeWitnessId,
-                    entry: WitnessRuntimeEntryKey)
+AbstractStorageAccessorSelector =
+    DirectAccessor(declaration: DeclRef)
+  | WitnessAccessor(witness: SubtypeWitnessId,
+                    entry: RuntimeInterfaceRequirementKey)
   | DynamicAccessor(owner: TypeId, slot: DynamicDispatchKey)
   | BuiltinAccessor(registration: RegisteredCallableRule)
 
@@ -1756,7 +1778,7 @@ AccessorReferenceMutabilityRule =
 
 accessDerivedAccessorMutability(ReadAccess) = UnknownMutability
 accessDerivedAccessorMutability(ReadWriteAccess) = Mutable
-accessDerivedAccessorMutability(other) = InvalidAccessorAccessMode(other)
+accessDerivedAccessorMutability(other) = InvalidAccessorStorageAccessMode(other)
 
 AccessorReferenceLifetimeRule =
     StaticAccessorLifetime
@@ -1783,12 +1805,12 @@ AccessorReferenceSourceRule =
   | RegisteredAccessorSource(RegisteredAccessorProvenanceRule)
 
 AccessorReferenceResultContract = {
-    selector: AbstractAccessorSelector,
+    selector: AbstractStorageAccessorSelector,
     signature: CallableSignatureId,
     resultType: TypeId,
-    kind: ReferenceHandleKind,
+    kind: PointerLikeKind,
     referent: TypeId,
-    access: AccessMode,
+    access: StorageAccessMode,
     addressSpace: AccessorReferenceAddressSpaceRule,
     mutability: AccessorReferenceMutabilityRule,
     lifetime: AccessorReferenceLifetimeRule,
@@ -1798,21 +1820,21 @@ AccessorReferenceResultContract = {
 
 AccessorReferenceResultContractId = ContentId<AccessorReferenceResultContract>
 
-FixedReferenceHandleResultContract = {
+FixedPointerLikeResultContract = {
     resultType: TypeId,
-    result: ReferenceHandleValueShape
+    result: PointerLikeValueShape
 }
 
-FixedReferenceHandleResultContractId =
-    ContentId<FixedReferenceHandleResultContract>
+FixedPointerLikeResultContractId =
+    ContentId<FixedPointerLikeResultContract>
 
-RegisteredReferenceHandleResultContract = {
+RegisteredPointerLikeResultContract = {
     registration: RegisteredDataOperationRegistration,
     resultType: TypeId
 }
 
-RegisteredReferenceHandleResultContractId =
-    ContentId<RegisteredReferenceHandleResultContract>
+RegisteredPointerLikeResultContractId =
+    ContentId<RegisteredPointerLikeResultContract>
 
 CallableResultAuthorityAnchor =
     DeclaredCallableResultAnchor(declaration: DeclId,
@@ -1822,12 +1844,12 @@ CallableResultAuthorityAnchor =
 
 CallableResultAuthorityKind =
     OrdinaryCallableResult
-  | FixedReferenceHandleCallableResult(
-        contract: FixedReferenceHandleResultContractId)
-  | AccessorReferenceHandleCallableResult(
+  | FixedPointerLikeCallableResult(
+        contract: FixedPointerLikeResultContractId)
+  | AccessorPointerLikeCallableResult(
         contract: AccessorReferenceResultContractId)
-  | RegisteredReferenceHandleCallableResult(
-        contract: RegisteredReferenceHandleResultContractId)
+  | RegisteredPointerLikeCallableResult(
+        contract: RegisteredPointerLikeResultContractId)
 
 CallableResultAuthority = {
     anchor: CallableResultAuthorityAnchor,
@@ -1836,25 +1858,25 @@ CallableResultAuthority = {
 
 CallableResultAuthorityId = ContentId<CallableResultAuthority>
 
-AbstractRefAccessor = {
-    access: AccessMode,
-    selector: AbstractAccessorSelector,
+AbstractStorageRefAccessor = {
+    access: StorageAccessMode,
+    selector: AbstractStorageAccessorSelector,
     resultContract: AccessorReferenceResultContractId
 }
 
-accessorResultAuthority(a: AbstractRefAccessor) =
+accessorResultAuthority(a: AbstractStorageRefAccessor) =
     resolveCallableResultAuthority(a.selector,
                                    resolve(a.resultContract).signature)
 
-AbstractAccessorContract = {
-    getter: Option<AbstractAccessor>,
-    setter: Option<AbstractAccessor>,
-    referenceAccessors: CanonicallyOrderedMap<AccessMode, AbstractRefAccessor>
+AbstractStorageAccessorContract = {
+    getter: Option<AbstractStorageAccessor>,
+    setter: Option<AbstractStorageAccessor>,
+    referenceAccessors: CanonicallyOrderedMap<StorageAccessMode, AbstractStorageRefAccessor>
 }
 
 AbstractStorageProjection =
-    PropertyProjection(property: CanonicalDeclRef)
-  | DeclaredSubscriptProjection(subscript: CanonicalDeclRef)
+    PropertyProjection(property: DeclRef)
+  | DeclaredSubscriptProjection(subscript: DeclRef)
   | AbstractSwizzleProjection(elements: NonEmpty<UInt8>)
   | RegisteredAbstractProjection(rule: StandardEnvironmentRuleId,
                                  inputs: CanonicalArguments)
@@ -1862,27 +1884,27 @@ AbstractStorageProjection =
 AbstractStorageRef = {
     valueType: TypeId,
     projection: AbstractStorageProjection,
-    accessors: AbstractAccessorContract,
-    access: AccessMode,
+    accessors: AbstractStorageAccessorContract,
+    access: StorageAccessMode,
     mutability: Mutability,
     capturedSources: CapturedStorageSources,
     evaluationIdentity: NodeId<Typed>,
     witnessResolutions: WitnessResolutionStamp
 }
 
-PlaceRef =
-    PhysicalPlace(PhysicalStorageRef)
-  | AbstractPlace(AbstractStorageRef)
+StorageRef =
+    PhysicalStorage(PhysicalStorageRef)
+  | AbstractStorage(AbstractStorageRef)
 
-placeValueType(PhysicalPlace(p)) = p.valueType
-placeValueType(AbstractPlace(a)) = a.valueType
+storageValueType(PhysicalStorage(p)) = p.valueType
+storageValueType(AbstractStorage(a)) = a.valueType
 
 ValueCategory =
     RValue
-  | Place(PlaceRef)
+  | Storage(StorageRef)
 
 PhysicalStorageRequirement = {
-    access: AccessMode,
+    access: StorageAccessMode,
     minimumLifetime: LifetimeId,
     addressSpace: AddressSpaceRequirement,
     source: PhysicalStorageSourceRequirement
@@ -1949,8 +1971,8 @@ sourceRequirement(p: PhysicalStorageSourceAdmissionProof) =
     p.provenanceProof.requirement
 
 AccessProvisionProof = {
-    actual: AccessMode,
-    required: AccessMode
+    actual: StorageAccessMode,
+    required: StorageAccessMode
 }
 
 PhysicalStorageProof = {
@@ -1976,16 +1998,24 @@ effectiveAccess(storage: PhysicalStorageRef | AbstractStorageRef) =
     storage.access                                    when storage.mutability = Mutable
     remove(Write, storage.access)                     when storage.mutability = Immutable
     remove(Write, storage.access)                     when storage.mutability = UnknownMutability
-effectiveAccess(PhysicalPlace(p)) = effectiveAccess(p)
-effectiveAccess(AbstractPlace(a)) = effectiveAccess(a)
+effectiveAccess(PhysicalStorage(p)) = effectiveAccess(p)
+effectiveAccess(AbstractStorage(a)) = effectiveAccess(a)
 
-isPhysicalStorage(PhysicalPlace(_)) = true
-isPhysicalStorage(AbstractPlace(_)) = false
+isPhysicalStorage(PhysicalStorage(_)) = true
+isPhysicalStorage(AbstractStorage(_)) = false
 ```
+
+`TYP-ACC-001`: `PtrType` and `ExplicitRefType` retain Slang's `AccessQualifier` as a structural
+type field. For every valid `PointerLikeShape h`, `(h.access, h.mutability) =
+pointerStorageView(h.qualifier)`. Thus `Read` is a read-only view whose underlying storage may
+still be mutable, while `Immutable` additionally promises that the storage cannot change. The
+general `StorageAccessMode` domain is used for storage operations and may express states, such as
+write-only or atomic access, that have no pointer-type `AccessQualifier`; no implicit reverse map
+is defined for those states.
 
 Meet is operation intersection and join is operation union when disciplines match. Different
 disciplines are incompatible rather than silently joining; any language bridge between atomic and
-ordinary access is a named standard-environment operation with an explicit plan. Public place/ref
+ordinary access is a named standard-environment operation with an explicit plan. Public storage/ref
 types require a non-empty operation set, while the empty internal meet represents `NoAccess`.
 
 `TYP-ALS-001`: `joinAlias` is a canonical commutative, associative, and idempotent operation.
@@ -2032,7 +2062,7 @@ an exact proof for its actual address space.
 
 `TYP-ADR-002`: `FormalPhysicalAddressSpace(entry)` is permitted only on a physical formal root. The
 entry proof resolves the same callable signature and role as that root, contains a well-formed
-physical `PassingMode`, and its mode's location requirement is the sole declared address-space and
+physical `ParamPassingMode`, and its mode's location requirement is the sole declared address-space and
 source guarantee. `FormalAddressSpaceAdmission` proves that guarantee implies the consumer's
 required address-space predicate by reflexivity, finite-set inclusion, a versioned standard rule,
 or exact generic evidence. Its implication endpoints are exactly
@@ -2041,7 +2071,7 @@ whose semantics require one concrete address space must either be specialized un
 space is concrete or consume a registered operation proof explicitly defined over the symbolic
 space.
 
-`TYP-ADR-003`: `PointerType`, `ReferenceType`, and `ReferenceHandleShape` require one concrete
+`TYP-ADR-003`: `PtrType`, `ExplicitRefType`, and `PointerLikeShape` require one concrete
 `AddressSpace`. Forming a first-class pointer/reference from physical storage therefore consumes a
 `ConcreteAddressSpaceProjectionProof`. `AlreadyConcreteAddressSpace` unwraps exactly
 `ConcretePhysicalAddressSpace(result)`. `ExactFormalAddressSpace(entry)` is valid only when the
@@ -2062,30 +2092,30 @@ fact is invalid. `PhysicalSourceProvenanceAdmissionProof` with
 `RegisteredPhysicalSourceFact` checks exact rule, static inputs, and
 environment, so a varying-input-only or similar intrinsic cannot accept unrelated readable memory.
 
-`TYP-PLC-001`: `PhysicalPlace` and `AbstractPlace` are disjoint closed alternatives. A stored local,
+`TYP-STO-001`: `PhysicalStorage` and `AbstractStorage` are disjoint closed alternatives. A stored local,
 physical parameter, global, stored field, builtin element, or dereferenced reference is physical
 only when its constructor proves the path, address space, lifetime, alias provenance, and typed
 source provenance. A property,
 declared/user subscript, or setter-backed projection is abstract even when it is readable and
-writable. For every successful `ValueClassifier(t, Place(place))`,
-`placeValueType(place) = t`; a place cannot rely on its enclosing expression to supply a different
+writable. For every successful `ValueClassifier(t, Storage(storage))`,
+`storageValueType(storage) = t`; a storage cannot rely on its enclosing expression to supply a different
 storage element type. Physical/abstract projection constructors compute `valueType` from their
 checked declaration, element, or dereference result, and validators compare it with the enclosing
 classifier after substitution.
 
-`TYP-PLC-002`: A reference accessor does not retroactively make its property or subscript physical.
+`TYP-STO-002`: A reference accessor does not retroactively make its property or subscript physical.
 Invoking the exact access-indexed accessor is an explicit effectful operation in the checked plan.
 Explicit reference syntax may expose its result as a first-class reference value; parameter access
 planning for `ConstRefMode` or `RefMode` may instead consume that result immediately with a stored
 dereference. Neither operation changes the original property's classifier. Applying
-`DereferencedReference` under the selected operation creates a new physical place with the returned
+`DereferencedReference` under the selected operation creates a new physical storage with the returned
 reference's lifetime, access, alias, address-space, and source-provenance facts. Receiver and indices
 are evaluated exactly once by the access plan. A getter, setter, value conversion, or temporary can
 never stand in for this operation.
 
-`TYP-PLC-003`: A registered resource or target projection may construct `PhysicalPlace` only when
+`TYP-STO-003`: A registered resource or target projection may construct `PhysicalStorage` only when
 its checked `RegisteredPhysicalProjectionApplicationAt<S>` supplies stable reference semantics.
-The place path contains only the application's stage-free
+The storage path contains only the application's stage-free
 `RegisteredPhysicalProjectionIdentity`; resolving the enclosing typed expression must recover the
 one immutable application with that identity. The application retains the exact
 `RegisteredDataOperationRegistration` (including `StandardEnvironmentId` and static inputs), every
@@ -2097,10 +2127,10 @@ use-specific `PhysicalStorageProof`; a later consumer proves its own requirement
 canonical static arguments, or reconstructed base path is not physical-storage evidence. Physical
 referenceability is not the same as permission to form a general byte pointer.
 
-`TYP-PLC-004`: Every ordinary `AbstractAccessor.selector` and every
-`AbstractRefAccessor.selector` resolves to one callable surface whose signature matches the
+`TYP-STO-004`: Every ordinary `AbstractStorageAccessor.selector` and every
+`AbstractStorageRefAccessor.selector` resolves to one callable surface whose signature matches the
 getter/setter/access-indexed reference role and captured receiver/index shape. Every map key equals
-the contained `AbstractRefAccessor.access`, which in turn equals its result contract's access.
+the contained `AbstractStorageRefAccessor.access`, which in turn equals its result contract's access.
 Only the exact key requested by an operation may be selected: `ReadWriteAccess` is not a fallback
 for a missing `ReadAccess` accessor, nor vice versa. A witness selector retains the
 exact all-kind accessor entry key, not a property declaration position; dynamic and builtin
@@ -2109,16 +2139,16 @@ provides the only bridge from its standard-environment registration to its logic
 dispatch. `AbstractStorageRef.witnessResolutions` is the
 minimal published resolution union for all witness IDs in its selectors and specialized
 declaration refs. Accessor selection is therefore executable without name or conformance search,
-while the abstract place itself remains nonphysical.
+while the abstract storage itself remains nonphysical.
 
-`TYP-PLC-005`: `AbstractStorageRef.capturedSources` is the sole runtime-source authority for every
-accessor of that place. A receiver has the unique `StorageReceiverSource` key. Each source index has
+`TYP-STO-005`: `AbstractStorageRef.capturedSources` is the sole runtime-source authority for every
+accessor of that storage. A receiver has the unique `StorageReceiverSource` key. Each source index has
 one `StorageArgumentSource(argument.id)` key whose value contains the complete checked
 `SourceArgument`, including label, form, and origin. Pack expansion paths are projections of that
 one captured argument, not independently evaluated copies. No projection constructor stores a
 second base/index list from which an accessor call could be reconstructed.
 
-`TYP-PLC-006`: `CapturedStorageSources.evaluationOrder` is a duplicate-free bijection onto
+`TYP-STO-006`: `CapturedStorageSources.evaluationOrder` is a duplicate-free bijection onto
 `captures`: receiver first when present, then source arguments in source order. Each capture is
 evaluated exactly once. A `CapturedStorageProjection` may then select the empty path or one expanded
 element from that captured value without evaluating the original expression again; a zero-length
@@ -2127,7 +2157,7 @@ formation, or authorized access-indexed reference-accessor invocation is planned
 re-read syntax to choose different
 sources or evaluation order.
 
-`TYP-PLC-007`: An `AbstractRefAccessor.resultContract` resolves to an immutable contract whose
+`TYP-STO-007`: An `AbstractStorageRefAccessor.resultContract` resolves to an immutable contract whose
 `selector` is byte-identical to the accessor selector and whose signature is the specialized
 callable signature selected for that accessor. Its result type projects to its declared handle kind,
 referent, address space, access, and lifetime fields. Its five nontrivial provenance components have
@@ -2143,7 +2173,7 @@ A declaration contract can never contain `CapturedStorageSourceRole`, `SourceArg
 other call-site node identity.
 `accessorResultAuthority(accessor)` resolves the selected callable surface under that same
 selector/signature and its kind is exactly
-`AccessorReferenceHandleCallableResult(accessor.resultContract)`. The declaration header,
+`AccessorPointerLikeCallableResult(accessor.resultContract)`. The declaration header,
 requirement entry, dynamic-slot introducer, or registered builtin record that owns the surface
 publishes that authority. A property use cannot replace it with an ordinary, fixed, registered, or
 sibling-accessor authority.
@@ -2151,7 +2181,7 @@ For `AccessDerivedAccessorMutability`, `ReadAccess` derives `UnknownMutability`:
 cannot claim that its underlying storage is immutable. `ReadWriteAccess` derives `Mutable`. Every
 other access/discipline is rejected unless a separately registered mutability rule defines it.
 
-`TYP-PLC-008`: Instantiating an accessor reference-result contract is a total checked operation over
+`TYP-STO-008`: Instantiating an accessor reference-result contract is a total checked operation over
 the accessor call's exact captured-source map, a stage-free `AccessorInvocationIdentity`, and an
 `AccessorProvenanceSourceMapId` validated for that invocation. The identity is derived from the
 authenticated `SemanticOperationSiteAssignment` stored by the checked accessor invocation:
@@ -2160,7 +2190,7 @@ authenticated `SemanticOperationSiteAssignment` stored by the checked accessor i
 `StableSemanticId`, or later IR producer ID. Resolving a
 declaration-stable role through that map yields one
 `CapturedStorageProjection`; the projection names an existing captured source and derives only from
-that source's checked place or reference-handle provenance. `FreshAccessorAlias(g)` is valid only
+that source's checked storage or pointer-like provenance. `FreshAccessorAlias(g)` is valid only
 when the versioned registration `g` proves that this invocation creates distinct storage, its
 allocation semantics occur on the retained accessor call, and `g.lifetimeRule` is the same rule used
 to derive the result contract's lifetime. It then derives exactly
@@ -2174,7 +2204,7 @@ mismatched result type/signature, or any attempted access, mutability, lifetime,
 alias, or source-provenance amplification is a failed instantiation, never an arbitrary successful
 handle shape.
 
-`TYP-PLC-009`: An `AccessorProvenanceSourceMap` is canonical invocation evidence, not declaration
+`TYP-STO-009`: An `AccessorProvenanceSourceMap` is canonical invocation evidence, not declaration
 metadata. Its receiver entry is present exactly when the specialized accessor signature has a
 receiver and maps to the captured projection bound to `ReceiverSlotRole`. It has one
 `AccessorParameterProvenance(k)` entry for every expanded `ParameterSlotRole(k)` and no other
@@ -2184,7 +2214,7 @@ parameter entry; each maps to the projection on the unique source binding that t
 or choosing a different pack element therefore cannot alter a declaration contract, while an
 invalid or missing formal-to-captured binding is a closed invocation failure.
 
-`TYP-PLC-010`: A `RegisteredPhysicalProjectionResultProof` is intrinsic construction evidence. Its
+`TYP-STO-010`: A `RegisteredPhysicalProjectionResultProof` is intrinsic construction evidence. Its
 identity and registration equal the enclosing application, its storage path is exactly
 `RegisteredPhysicalProjection(identity)`, and its type equality relates the registered result type
 to `storage.valueType`. Its access, mutability, lifetime, address-space, alias, and source-provenance
@@ -2193,10 +2223,10 @@ name only a registered schema value or runtime operand role in that same applica
 component rule in `registration.environment` with `registration.staticInputs`. It contains no
 consumer requirement. `provePhysicalStorage(storage, requirement, context)` remains the only
 constructor of a use-specific `PhysicalStorageProof`, so checking the same projection for two later
-uses cannot change its place identity or intrinsic provenance.
+uses cannot change its storage identity or intrinsic provenance.
 
-`TYP-PLC-011`: A `ConstRefMode(r)` parameter or receiver name denotes
-`PhysicalPlace(storage)` whose path is the exact `ConstRefFormalRoot(signature, role)`. Its access
+`TYP-STO-011`: A `ConstRefMode(r)` parameter or receiver name denotes
+`PhysicalStorage(storage)` whose path is the exact `ConstRefFormalRoot(signature, role)`. Its access
 view is `ReadAccess`, lifetime is `CallableActivationLifetime(signature)`, alias is
 `UnknownAliasRoot`, and address space and source-provenance facts are the reusable formal facts
 proved by the parameter's checked location requirement and logical ABI entry: its address space is
@@ -2205,39 +2235,39 @@ exactly `FormalPhysicalAddressSpace(entry)` and its source facts equal
 `UnknownMutability`, not `Immutable`: the formal does not know whether each caller supplied mutable
 or immutable storage, while its read-only access view independently forbids writes. A call-site
 admission retains the caller's more precise storage and alias proof without mutating this formal
-root. Ordinary proof-carrying physical projections from the formal remain `PhysicalPlace`, preserve
+root. Ordinary proof-carrying physical projections from the formal remain `PhysicalStorage`, preserve
 the activation-lifetime ceiling and source provenance unless their registered rule proves an exact
 transformation, and can never amplify `ReadAccess`. The result can be loaded, passed to another
 compatible `ConstRefMode`, or used by physical read operations, but cannot satisfy `OutMode`,
 `InOutMode`, or `RefMode`, be written, or escape its activation lifetime.
 
-`TYP-PLC-012`: A `RefMode(r)` parameter or receiver analogously denotes `PhysicalPlace(storage)`
+`TYP-STO-012`: A `RefMode(r)` parameter or receiver analogously denotes `PhysicalStorage(storage)`
 with `RefFormalRoot(signature, role)`, `ReadWriteAccess`,
 `CallableActivationLifetime(signature)`, `Mutable`, and `UnknownAliasRoot`; its formal address space
 and source facts use the same exact entry equations. The two physical formal
 roots are nominally distinct so body checking cannot infer a mutable view from an equal value type.
 For both roots, every non-root physical projection uses the ordinary proof-carrying constructors in
-`PhysicalPlacePath`; there is no third nonphysical read-view path, auxiliary lifetime operation, or
+`PhysicalStoragePath`; there is no third nonphysical read-view path, auxiliary lifetime operation, or
 hidden read-only ABI category.
 
-`TYP-PLC-013`: Every `BuiltinElement(base, application)` names one immutable
+`TYP-STO-013`: Every `BuiltinElement(base, application)` names one immutable
 `BuiltinPhysicalProjectionApplicationAt<S>` by `BuiltinPhysicalProjectionIdentity`. Its result
 path is exactly `BuiltinElement(application.output.inputStorage.path, application.identity)`, so the
 separately stored `base` must equal the application's input path. The path never stores an index
 expression or any other AST identity. The named application is the sole authority for the exact
 checked base, converted index, written evaluation order, builtin operation rule, result-type proof,
 and complete output storage. Resolving the path identity to zero, two, a registered projection, or
-an application with a different input path is an invalid typed projection. Later Core and IR
+an application with a different input path is an invalid typed projection. The later IR-ready AST and IR
 consumers retain the complete application beside the path rather than requiring a global raw-ID
 resolver.
 
-`TYP-PLC-014`: Every `DereferencedReference(application)` names one immutable dereference
+`TYP-STO-014`: Every `DereferencedReference(application)` names one immutable dereference
 application by `DereferenceApplicationIdentity`. For explicit syntax that application is the enclosing
 `CheckedDereferenceAt<S>`; for an internal reference-accessor operation it is the dereference stored
 in an `InternalRefStoragePlanAt<S>` or `ParameterReferenceAccessorPlanAt<S>`. In every case the exact executable handle operand and
-its `ReferenceHandleProof` are retained independently of the path, and the resulting
+its `PointerLikeProof` are retained independently of the path, and the resulting
 `DereferencedStorageProof.identity = application` with
-`output.storage.path = DereferencedReference(application)`. Core and IR retain that identity with
+`output.storage.path = DereferencedReference(application)`. The IR-ready AST and IR retain that identity with
 the executable handle operand and proof-derived endpoint shapes. A typed-node ID, the handle's
 producer node, or an equal handle type can never substitute for the application identity.
 The internal operation's dereference site is the fixed-role child of its accessor invocation's
@@ -2246,7 +2276,7 @@ For a parameter-reference-accessor operation, `CallSlotProjectionOwner` retains 
 call, exact `BoundCallSlot`, and full child role path instead of pretending the dereference has a
 standalone Typed projection node.
 
-`TYP-PLC-015`: A retained operational application identity is constructed only from a serialized
+`TYP-STO-015`: A retained operational application identity is constructed only from a serialized
 `SemanticOperationSiteKey`. Parsed syntax anchors the key in its canonical physical source ranges
 and deterministic same-range occurrence before a CST or AST snapshot exists. Macro-origin ranges
 are projected through the immutable preprocessing origin map. Synthesized, imported, and recovery
@@ -2259,13 +2289,13 @@ fixed `RuleId` and deterministic ordinal to `rolePath`; cloning or expansion app
 role rather than reusing the source
 application. Physical projection, dereference, accessor invocation, and temporary-storage allocation
 constructors content-address that complete key and wrap the result in
-distinct nominal types. None accepts `StableSemanticId`, `CstNodeId`, `AnyNodeId`, `NodeId<Typed>`, a Core
+distinct nominal types. None accepts `StableSemanticId`, `CSTNodeId`, `AnyNodeId`, `NodeId<Typed>`, an IR-ready AST
 value ID, or an IR instruction ID. Requests carry an authenticated site assignment explicitly, and
 their successful
 application identity must equal the corresponding constructor result, avoiding both an AST content-
 identity cycle and a later attempt to recover a site from `Origin`.
 
-`TYP-PLC-016`: `AssignSemanticOperationSite` normalizes the supplied origin to exactly one closed
+`TYP-STO-016`: `AssignSemanticOperationSite` normalizes the supplied origin to exactly one closed
 source/synthesis/import/recovery anchor using only its explicit frozen assignment context. That
 context is part of the query key and records the exact source snapshots, expanded-token views, and
 earlier-stage provenance snapshot traversed; it cannot include the Typed snapshot being built, and
@@ -2303,32 +2333,32 @@ slot's `PhysicalParameterSourceAt<S>`, not the enclosing call node: the accessor
 validates against that source's `NodeId<Typed>`, and the stored child dereference site extends that
 same anchor by the fixed dereference role. Pairing an accessor plan with an equal-classified sibling
 source, or validating its site against `call`, is invalid.
-Duplicate or unresolved owners make the semantic snapshot invalid. Core
+Duplicate or unresolved owners make the semantic snapshot invalid. The IR-ready AST
 and IR carry complete applications and do not serialize this Typed-snapshot index.
 
-`TYP-PLC-017`: `StoredRoot` contains only the stage-free `CanonicalDeclRef` that owns the physical
+`TYP-STO-017`: `StoredRoot` contains only the stage-free `DeclRef` that owns the physical
 storage. Checking a name expression obtains that root from `BoundDeclUse.target`, but retains the
 complete `BoundDeclUse` separately on the typed expression for lookup, access, witnesses,
-extensions, diagnostics, and origin. No `LookupPath`, `AccessDecision`, witness-resolution sidecar,
-`Origin`, or AST node is copied into `PhysicalPlacePath`. Consequently copying a use of the same
-specialized declaration preserves physical-storage identity, while Core/IR static storage proofs
+extensions, diagnostics, and origin. No `LookupPath`, `VisibilityDecision`, witness-resolution sidecar,
+`Origin`, or AST node is copied into `PhysicalStoragePath`. Consequently copying a use of the same
+specialized declaration preserves physical-storage identity, while IR-ready AST/IR static storage proofs
 cannot acquire an AST reference transitively through the root.
 
-`TYP-ACC-001`: `InMode` requires an ordinary readable value preparation. `OutMode` requires write
+`TYP-ACC-002`: `InMode` requires an ordinary readable value preparation. `OutMode` requires write
 access and performs no pre-read; `InOutMode` requires read/write access and an exclusive call claim.
 Those abstract-domain modes may use their separately named getter, setter, materialization, and
 write-back plans. A physical-domain mode has no such route. `ConstRefMode(r)` or `RefMode(r)` first
 instantiates its complete `PhysicalStorageRequirement` from the mode and invocation. It then
-requires either the argument's existing `PhysicalPlace(p)`, or an exact access-indexed reference
+requires either the argument's existing `PhysicalStorage(p)`, or an exact access-indexed reference
 accessor invocation followed by an explicit dereference whose endpoint is a new
-`PhysicalPlace(p)`. In either case it requires a `PhysicalStorageProof` for that exact endpoint and
+`PhysicalStorage(p)`. In either case it requires a `PhysicalStorageProof` for that exact endpoint and
 requirement, a non-recovery equality between `p.valueType` and the substituted parameter value
 type, and chapter 7's conversion-free `PhysicalStorageIdentityProof`. The chapter 7
 `PhysicalParameterBindingProofAt<S>`
 retains those facts, the exact `AccessEnvironmentId`, and whether the physical endpoint was direct
 or produced by the stored accessor plan.
 
-`TYP-ACC-002`: “Overlapping” means `CompareAliasOverlap` returned `MayOverlap`; syntax similarity or
+`TYP-ACC-003`: “Overlapping” means `CompareAliasOverlap` returned `MayOverlap`; syntax similarity or
 container order is never an alias test. Two `ConstRefMode` read claims may overlap. An exclusive
 `OutMode`/`InOutMode` claim conflicts with every overlapping live read/write claim. `RefMode`
 aliasing is permitted only by the versioned rule stored with its exact read/write access mode and
@@ -2336,13 +2366,13 @@ still obeys atomic discipline. Chapter 7's
 `CheckCallAliasClaims` applies this algebra to all receiver/argument plans together, and the
 selected candidate stores either every pairwise compatibility proof or the structured conflict.
 
-`TYP-ACC-003`: Access inclusion, meet/join within a discipline, immutable/unknown write removal, call-claim
+`TYP-ACC-004`: Access inclusion, meet/join within a discipline, immutable/unknown write removal, call-claim
 compatibility, and atomic/ordinary incompatibility have exhaustive table and algebra property tests.
 
-`TYP-ACC-004`: Neither `ConstRefMode`/`__constref` nor `RefMode`/`__ref` can use a materialized
+`TYP-ACC-005`: Neither `ConstRefMode`/`__constref` nor `RefMode`/`__ref` can use a materialized
 temporary, getter, setter/write-back, value conversion, or any plan that changes the selected
 physical endpoint's identity. A property or declared subscript is therefore inapplicable unless its
-`AbstractAccessorContract.referenceAccessors` contains the exact required key. A
+`AbstractStorageAccessorContract.referenceAccessors` contains the exact required key. A
 `ReadWriteAccess` (`ref`) accessor alone does not satisfy `ConstRefMode`; a `ReadAccess`
 (`constref`) accessor alone does not satisfy `RefMode`; getter-only and get-plus-set surfaces satisfy
 neither. Failure is reported as direct nonphysical storage, missing/wrong accessor kind, accessor
@@ -2350,7 +2380,7 @@ checking failure, forbidden nonidentity conversion, or the exact failed physical
 not collapsed to a generic l-value diagnostic. `OutMode` and `InOutMode` remain distinct because
 their explicit abstract write-back contracts are valid language behavior.
 
-`TYP-ACC-005`: A `PhysicalStorageProof` is valid only when its storage and requirement are the
+`TYP-ACC-006`: A `PhysicalStorageProof` is valid only when its storage and requirement are the
 stored endpoints, `accessProof` proves `provides(effectiveAccess(storage), requirement.access)`,
 `lifetimeProof` proves `storage.lifetime` outlives `requirement.minimumLifetime`, and
 `admittedAddressSpace(addressSpaceProof) = storage.addressSpace` with
@@ -2363,8 +2393,8 @@ that rule in the stored standard environment. Omitting address-space or source a
 not a weaker proof; it is an ill-formed proof value. Declaration context is never re-read to invent
 source provenance at the use.
 
-`TYP-ACC-006`: `PhysicalParameterBindingProofAt<S>` is shared by both physical modes and is indexed
-by the complete `PassingMode`. Its storage equals the endpoint of either its direct-source proof or
+`TYP-ACC-007`: `PhysicalParameterBindingProofAt<S>` is shared by both physical modes and is indexed
+by the complete `ParamPassingMode`. Its storage equals the endpoint of either its direct-source proof or
 its exact accessor-invocation-and-dereference plan; its type equality is non-recovery; its
 `PhysicalStorageProof.requirement` equals
 `instantiatePhysicalStorageRequirement(mode, accessEnvironment.invocationLifetime)`; and its
@@ -2502,9 +2532,9 @@ PackCountWitness = {
     derivation: PackCountDerivation
 }
 
-PackNonEmptyWitnessId = ContentId<PackNonEmptyWitness>
+NonEmptyPackWitnessId = ContentId<NonEmptyPackWitness>
 
-PackNonEmptyDerivation =
+NonEmptyPackWitnessDerivation =
     ConcreteNonEmptyPackWitness(count: BigNat)
   | DeclaredNonEmptyPackWitness(binder: CanonicalBinderRef,
                                 slot: CanonicalConstraintSlot)
@@ -2512,7 +2542,7 @@ PackNonEmptyDerivation =
                              proof: PositiveConstProof)
   | RegisteredNonEmptyPackWitness(rule: RuleId,
                                   inputs: CanonicalArguments,
-                                  premises: NodeList<PackNonEmptyWitnessId>)
+                                  premises: NodeList<NonEmptyPackWitnessId>)
 
 PositiveConstProof = {
     value: ConstValue,
@@ -2520,9 +2550,9 @@ PositiveConstProof = {
     rule: RuleId
 }
 
-PackNonEmptyWitness = {
+NonEmptyPackWitness = {
     pack: PackId,
-    derivation: PackNonEmptyDerivation
+    derivation: NonEmptyPackWitnessDerivation
 }
 
 TypeEqualityProofId = ContentId<TypeEqualityProof>
@@ -2550,13 +2580,10 @@ TypeEqualityDerivation =
 
 ConstraintEvidence = TypeEqualityProof | ValueEqualityProof |
                      RepresentationAdjustmentPath |
-                     InterfaceRefinementProof | ConformanceEvidence |
+                     InterfaceRefinementProof | SubtypeWitnessRef<Published> |
                      TypeCoercibilityEvidence | PackCountWitness |
-                     PackNonEmptyWitness | OutlivesProof | ValueDifferentialInfoEvidence |
+                     NonEmptyPackWitness | OutlivesProof | ValueDifferentialInfoEvidence |
                      WellFormednessProof
-
-ConformanceEvidence =
-    InterfaceSubtypeEvidence(witness: InterfaceSubtypeWitnessId)
 
 ValueEqualityProof = {
     left: ConstValue,
@@ -2572,12 +2599,12 @@ WellFormednessProof = {
 TypeCoercibilityEvidence = {
     source: TypeId,
     target: TypeId,
-    witness: ConversionWitness<Published>,
-    rank: ConversionRank,
+    witness: TypeCoercionWitness<Published>,
+    rank: ConversionCost,
     environment: ConversionEnvironmentId
 }
 
-GenericSolutionAt<S: WitnessUseStage> = {
+GenericSolutionAt<S: WitnessTableState> = {
     specializations: CanonicalSpecializationSpine,
     witnessResolutions: WitnessResolutionSetAt<S>,
     residual: NodeList<Constraint>,
@@ -2614,7 +2641,7 @@ an abstract nonempty pack is backed by a generic-context constraint or a replaya
 derivation, not the same placeholder used for a known concrete pack.
 
 `TYP-PACK-003`: First/last/trim and nonempty pack-branch rules consume a
-`PackNonEmptyWitnessId` whose `pack` is their exact operand. Count/nonempty evidence is substituted,
+`NonEmptyPackWitnessId` whose `pack` is their exact operand. Count/nonempty evidence is substituted,
 serialized, and compared structurally; container length or a runtime bounds guard cannot replace
 it.
 
@@ -2622,7 +2649,7 @@ A complete call solution has no residual constraints unless the output is explic
 applied generic value. Ordinary arguments and constraint evidence remain together in each
 `SpecializationFrame` and are later passed to generic IR as needed. Composed substitution and
 evidence maps are derived views, not a second stored authority. A solution's
-`witnessResolutions` is the stage-correct minimal union for every interface-subtype witness in its
+`witnessResolutions` is the stage-correct minimal union for every subtype witness in its
 spine; consuming the solution copies that sidecar into the selected `BoundDeclUseAt<S>`. There is no
 free-standing `SolutionQuality` scalar: completeness is determined by `residual`, and any
 language-defined inference preference is a proof-bearing component of the enclosing overload rank.
@@ -2630,26 +2657,26 @@ language-defined inference preference is a proof-bearing component of the enclos
 ## Declaration identity and use provenance
 
 ```text
-CanonicalDeclRef = {
+DeclRef = {
     declaration: DeclId,
     specializations: CanonicalSpecializationSpine
 }
 
-ResolvedDeclRefAt<S: WitnessUseStage> = {
-    target: CanonicalDeclRef,
+ResolvedDeclRefAt<S: WitnessTableState> = {
+    target: DeclRef,
     witnessResolutions: WitnessResolutionSetAt<S>
 }
 
 ResolvedDeclRef = ResolvedDeclRefAt<Published>
 
-BoundDeclUseAt<S: WitnessUseStage> = {
-    target: CanonicalDeclRef,
+BoundDeclUseAt<S: WitnessTableState> = {
+    target: DeclRef,
     lookupPath: LookupPath,
-    memberEvidence: Option<MemberAccessEvidence>,
+    memberEvidence: Option<MemberVisibilityEvidence>,
     extensionUses:
         CanonicallyOrderedMap<ExtensionApplicabilityEvidenceId,
                               ExtensionFacetUseAt<S>>,
-    accessDecision: AccessDecision,
+    visibilityDecision: VisibilityDecision,
     witnessResolutions: WitnessResolutionSetAt<S>,
     origin: Origin
 }
@@ -2665,6 +2692,9 @@ origins are properties of `BoundDeclUse`; they cannot affect canonical declarati
 decl-ref normalizes to a declaration plus alpha-normalized specialization frames, and clients do
 not pattern-match on an implementation linked-list shape.
 
+`BoundDeclUse` is the immutable checked successor to the codebase's `LookupResultItem`;
+`LookupPath` retains the ordered semantic equivalent of its `LookupResultItem::Breadcrumb` chain.
+
 `specializationRequirements(declaration)` is the sole authority for its frame spine. It walks the
 lexical owner chain outermost to innermost and emits each non-empty canonical binder in the declared
 role order `LexicalBinder`, `TypeBinder`, `MemberOwnerBinder`, `CallableBinder`. A requirement is
@@ -2676,7 +2706,7 @@ use through `T : I` separately carries the lookup path and evidence that justify
 of `I`.
 
 `TYP-DRF-002`: Two uses with different spellings, import routes, or diagnostics paths may have the
-same `CanonicalDeclRef`. Conversely, specializations with equal ordinary arguments but different
+same `DeclRef`. Conversely, specializations with equal ordinary arguments but different
 proof-relevant constraint evidence are not silently merged. Each constraint kind declares whether
 its evidence is proof-irrelevant and, if so, its canonical erasure rule.
 
@@ -2688,10 +2718,10 @@ provides argument/evidence totality. Thus equivalent references have one seriali
 application always proceeds from the outermost owner to the referenced declaration.
 
 `TYP-DRF-004`: A `ResolvedDeclRefAt<S>` or `BoundDeclUseAt<S>` resolution map has exactly the
-canonical union of `requiredDefinitions` for every interface-subtype witness reachable from its
+canonical union of `requiredDefinitions` for every subtype witness reachable from its
 specialization spine, lookup path, member evidence, and referenced accessor selector. Map keys and
 definition refs obey chapter 14's stage rule; unrelated definitions are forbidden. The map is a
-dependency/materialization sidecar and never participates in `CanonicalDeclRef`, `LookupPathRole`,
+dependency/materialization sidecar and never participates in `DeclRef`, `LookupPathRole`,
 `FacetKey`, overload identity, or mangling. Projecting a selected bound use to a callable preserves
 this sidecar rather than reconstructing table revisions from an ambient snapshot.
 
@@ -2699,15 +2729,15 @@ this sidecar rather than reconstructing table revisions from an ambient snapshot
 `ExtensionApplicabilityEvidenceId` occurring in its retained lookup path and no other entry. Each
 map key equals `use.applicability`. Chapter 14 validates the ordinary capability-use map against the
 specialized extension and optional target requirements. The sidecar is use provenance, not lookup-
-route identity: it is excluded from `CanonicalDeclRef`, `LookupPathRole`, and `FacetKey`, but every
+route identity: it is excluded from `DeclRef`, `LookupPathRole`, and `FacetKey`, but every
 projection/elaboration of the committed bound use preserves and aggregates it exactly once.
 
 ## Evidence and witnesses
 
-Evidence is typed proof data. Representation adjustment, interface refinement, interface-subtype
+Evidence is typed proof data. Representation adjustment, interface refinement, subtype
 witness values, existential opening, and conversion are distinct relations. Chapter 14 is the
 schema and operational authority for `RepresentationAdjustmentPath` and
-`InterfaceSubtypeWitnessId`:
+`SubtypeWitnessId`:
 
 ```text
 RepresentationAdjustmentPathId = ContentId<RepresentationAdjustmentPath>
@@ -2733,7 +2763,7 @@ ExtensionReachabilityProof = {
 }
 
 ExtensionIntrinsicApplicabilityEvidence = {
-    extension: CanonicalDeclRef,
+    extension: DeclRef,
     queriedType: TypeId,
     matchedTarget: TypeId,
     targetEquality: TypeEqualityProofId,
@@ -2752,7 +2782,7 @@ ExtensionApplicabilityEvidence = {
 
 ExtensionApplicabilityEvidenceId = ContentId<ExtensionApplicabilityEvidence>
 
-ExtensionFacetUseAt<S: WitnessUseStage> = {
+ExtensionFacetUseAt<S: WitnessTableState> = {
     applicability: ExtensionApplicabilityEvidenceId,
     inferredCapabilityUses:
         CanonicallyOrderedMap<CapabilityUseId, CapabilityUse<S>>
@@ -2762,24 +2792,24 @@ ExistentialOpeningEvidence = {
     opening: OpenedTypeId,
     existential: TypeId,
     interface: InterfaceInstanceKey,
-    witness: InterfaceSubtypeWitnessId
+    witness: SubtypeWitnessId
 }
 
-MemberAccessEvidence =
+MemberVisibilityEvidence =
     IdentityMemberAccess
   | RepresentationBase(RepresentationAdjustmentPathId)
-  | RefinedInterface(InterfaceSubtypeWitnessId)
-  | ConformingInterface(InterfaceSubtypeWitnessId)
+  | RefinedInterface(SubtypeWitnessId)
+  | ConformingInterface(SubtypeWitnessId)
   | OpenedExistential(ExistentialOpeningEvidence)
   | ApplicableExtension(ExtensionApplicabilityEvidenceId)
   | ErrorMemberAccess(ErrorId)
 
-ConversionWitness<S: WitnessUseStage> = {
+TypeCoercionWitness<S: WitnessTableState> = {
     source: TypeId,
     target: TypeId,
     operation: ConversionOperation<S>,
-    declaration: Option<CanonicalDeclRef>,
-    nested: NodeList<ContentId<ConversionWitness<S>>>
+    declaration: Option<DeclRef>,
+    nested: NodeList<ContentId<TypeCoercionWitness<S>>>
 }
 ```
 
@@ -2791,7 +2821,7 @@ chapter 7 names every permitted bridge.
 `TYP-EVD-001`: Resolving a proof ID yields a payload whose canonical encoding exactly matches the
 typed `ContentId`; recursive proof edges form a finite DAG. `TypeEqualityProofId`,
 `RepresentationAdjustmentPathId`, `InterfaceRefinementProofId`, and
-`InterfaceSubtypeWitnessId` cannot resolve to another evidence family, and all premise endpoints
+`SubtypeWitnessId` cannot resolve to another evidence family, and all premise endpoints
 compose with the parent constructor. Digest equality alone never selects proof payloads.
 
 `TYP-EVD-002`: The extension in an `ExtensionIntrinsicApplicabilityEvidence` is fully specialized,
@@ -2806,7 +2836,7 @@ that the extension is selectable there.
 Only class representation bases and registered standard-representation rules may contribute a
 step; concrete struct bases, interface conformances, and interface refinements cannot. Applying an
 `InterfaceRefinementProof.path` to an interface witness folds one exact
-`LookupSubtypeWitness(previous, RefinementWitnessEntry(step))` per step. There is no binary
+`LookupSubtypeWitness(previous, BaseInterfaceEntry(step))` per step. There is no binary
 `TransitiveSubtypeWitness` or generic transitive representation-proof constructor.
 
 `TYP-EVD-004`: For intrinsic extension applicability, the resolved `extension.declaration` owns a
@@ -2832,34 +2862,34 @@ extension, specialization, or semantic environment is invalid.
 
 ## Interfaces, conformances, and evidence graphs
 
-Chapter 8 is the sole schema authority for `ConformanceIdentity`, `ConformanceDefinitionRevision`,
-`ValidatedConformanceRef`, `ConformanceDefinition`, `RequirementEvidenceMap`, and the kind-indexed
-`GuardedSatisfaction<K>`/`RequirementSatisfaction<K>` families. An allocated `ConformanceId` may
+Chapter 8 is the sole schema authority for `WitnessTableIdentity`, `WitnessTableDefinitionRevision`,
+`ValidatedWitnessTableRef`, `WitnessTableDefinition`, `RequirementDictionary`, and the kind-indexed
+`GuardedRequirementWitness<K>`/`RequirementWitness<K>` families. An allocated `WitnessTableId` may
 name a draft identity and participate in an atomic recursive build. A
-`ValidatedConformanceRef(identity, revision)` resolves one frozen definition and is a dependency
-stamp, not itself a subtype proof. Positive evidence is an `InterfaceSubtypeWitnessId` together
+`ValidatedWitnessTableRef(identity, revision)` resolves one frozen definition and is a dependency
+stamp, not itself a subtype proof. Positive evidence is an `SubtypeWitnessId` together
 with the stage-appropriate resolution set when its operation reads table definitions. This admits
 generic, specialized, bound, lookup, and existential witnesses without inventing definition
 references for abstract proof values.
 
-`WIT-MAP-001`: A requirement map is keyed by canonical `RequirementKey`, including the viewed and
+`WIT-MAP-001`: A requirement map is keyed by canonical `InterfaceRequirementKeyOf<K>`, including the viewed and
 declaring interface specializations and refinement path. Interface source order is presentation
 metadata only. Path-distinct diamond occurrences remain addressable; sharing requires explicit
 typed reuse evidence, never map insertion order.
 
 `WIT-MAP-002`: For every active condition, a conformance is complete only when each required
-requirement has exactly one kind-correct satisfaction. Conditional alternatives form a canonical,
+requirement has exactly one kind-correct `RequirementWitness`. Conditional alternatives form a canonical,
 disjoint partition of the conformance's availability domain. Defaults and synthesized adapters
 appear as ordinary keyed satisfactions with provenance.
 
-`WIT-GRAPH-001`: Conformances and their requirement satisfactions form a graph, not a tree or DAG.
-`ConformanceIdentity` may be published before `ConformanceDefinition`; an atomic definition SCC may
+`WIT-GRAPH-001`: Witness tables and their requirement witnesses form a graph, not a tree or DAG.
+`WitnessTableIdentity` may be published before `WitnessTableDefinition`; an atomic definition SCC may
 preallocate its revision endpoints. A complete definition is published atomically, and every
 published proof consumer stores a stable witness value; table-backed operations additionally carry
-exact `ValidatedConformanceRef` resolutions. Clients never observe a mutable, partially filled map
+exact `ValidatedWitnessTableRef` resolutions. Clients never observe a mutable, partially filled map
 or use a raw identity as proof. A construction-stage conversion, generated body, or requirement map
 may carry a scope-authorized operational definition resolution through
-`WitnessCallRef<Construction>`, but it cannot escape that construction. Atomic freeze replaces the
+`SubtypeWitnessRef<Construction>`, but it cannot escape that construction. Atomic freeze replaces the
 resolution with the validated reference for the same identity without changing the witness ID.
 
 The current `RequirementDictionary` is already keyed by requirement `Decl*`, which is the right
@@ -2880,12 +2910,12 @@ Facet = {
     kind: FacetKind,
     route: FacetRouteKey,
     memberScope: ScopeId,
-    evidence: Option<MemberAccessEvidence>,
+    evidence: Option<MemberVisibilityEvidence>,
     witnessResolutions: WitnessResolutionStamp,
     conditions: GenericConditionSet
 }
 
-FacetOrigin = TypeOrigin(TypeId, CanonicalDeclRef) | ExtensionOrigin(CanonicalDeclRef)
+FacetOrigin = TypeOrigin(TypeId, DeclRef) | ExtensionOrigin(DeclRef)
 
 FacetId = ContentId<FacetKey>
 FacetSet = {
@@ -2921,7 +2951,7 @@ Canonical map/source/import iteration never defines semantic lookup order.
 
 `TYP-FAC-001`: Facet closure is computed separately from the class representation chain, interface
 conformances/refinements, existential openings, and applicable extensions. Every route step carries
-the correctly typed representation adjustment, interface-subtype witness/lookup key,
+the correctly typed representation adjustment, subtype witness/lookup key,
 existential-opening, or extension-applicability evidence used to reach it. Folding the route must
 reproduce the facet evidence exactly. `witnessResolutions` is the minimal canonical union required
 by witness IDs in the route/evidence and is excluded from `FacetKey`; a selected candidate copies
@@ -2938,21 +2968,21 @@ an immutable route-keyed set and explicit partial priority.
 ## Conversion and overload domains
 
 ```text
-ConversionResult<S: WitnessUseStage> =
-    Applicable(plan: ConversionPlan<S>, rank: ConversionRank)
+ConversionResult<S: WitnessTableState> =
+    Applicable(plan: ConversionPlan<S>, rank: ConversionCost)
   | Inapplicable(reason: ConversionFailure<S>)
   | Recovered(plan: ConversionPlan<S>, error: ErrorId)
 
-ConversionPlan<S: WitnessUseStage> = {
+ConversionPlan<S: WitnessTableState> = {
     source: TypeId,
     target: TypeId,
     operation: ConversionOperation<S>,
-    evidence: Option<ConversionWitness<S>>,
+    evidence: Option<TypeCoercionWitness<S>>,
     semanticUses: PlanSemanticUses<S>,
     origin: Origin
 }
 
-PlanSemanticUses<S: WitnessUseStage> = {
+PlanSemanticUses<S: WitnessTableState> = {
     effects: CanonicallyOrderedMap<EffectUseId, EffectUse<S>>,
     capabilities: CapabilitySelectionAt<S>
 }
@@ -2962,16 +2992,16 @@ BoundCallSlot = ReceiverSlotRole | ParameterSlotRole(ParameterKey)
 CallSlotInputRole = ComparedCallSource(SourceCallRole)
                   | DefaultedCallSource(ParameterKey)
 
-ApplicableCallSlotPlan<S: WitnessUseStage> = {
+ApplicableCallSlotPlan<S: WitnessTableState> = {
     source: CallSlotInputRole,
     accessEnvironment: AccessEnvironmentId,
-    access: AccessPlan<S>
+    access: StorageAccessPlan<S>
 }
 
 CallAliasAccessKind =
-    SharedPhysicalRead(access: AccessMode)
-  | ExclusiveAbstractAccess(access: AccessMode)
-  | AliasablePhysicalAccess(access: AccessMode,
+    SharedPhysicalRead(access: StorageAccessMode)
+  | ExclusiveAbstractAccess(access: StorageAccessMode)
+  | AliasablePhysicalAccess(access: StorageAccessMode,
                             rule: StandardEnvironmentRuleId)
 
 CallAliasClaim = {
@@ -3037,7 +3067,7 @@ RecoveredApplicableCandidate = {
     use: Option<BoundDeclUse>,
     signature: Option<CallableSignature>,
     argumentMap: RecoveryArgumentMap,
-    accessPlans: NodeMap<BoundCallSlot, AccessPlan<Published>>,
+    accessPlans: NodeMap<BoundCallSlot, StorageAccessPlan<Published>>,
     resultType: TypeId,
     trace: CandidateTraceId
 }
@@ -3078,7 +3108,7 @@ OverloadResult =
 }
 ```
 
-Unqualified `ConversionResult`, `ConversionPlan`, `ConversionWitness`, `ApplicableCallSlotPlan`, and
+Unqualified `ConversionResult`, `ConversionPlan`, `TypeCoercionWitness`, `ApplicableCallSlotPlan`, and
 `PlanSemanticUses` mean their `<Published>` forms. Construction-only forms are confined to the
 synthesis transaction and are rewritten together with their operational witness edges.
 
@@ -3099,10 +3129,10 @@ expansion mapped to that slot, or
 `DefaultedCallSource(k)` exactly when slot `k` has a default binding. Defaulted sources participate
 in default/specificity ranking but not pointwise source-conversion comparison. Every
 `access.terminal` is `PassArgument`; a standalone storage terminal cannot inhabit a call slot.
-`access.rankingConversion = Some(rankingConversion)`. Chapter 7 derives the slot's sole
-`SourceAdaptationRank` from that value. `ConvertedAccess` selects the conversion operation used both
+`access.rankingCoercion = Some(rankingCoercion)`. Chapter 7 derives the slot's sole
+`SourceAdaptationRank` from that value. `AppliedStorageCoercion` selects the conversion operation used both
 for pairwise ranking and eventual elaboration as required by `ELB-ACC-003` and records exactly
-`conversionEnvironment`; `ConsumedWithoutAccessConversion(rule)` names the exact candidate-passing
+`conversionEnvironment`; `ConsumedWithoutStorageCoercion(rule)` names the exact candidate-passing
 rule that consumes no conversion, including physical-storage identity. A candidate contains no
 parallel conversion, rank, or access-plan map. Every entry's `accessEnvironment` is exactly the
 candidate's `accessEnvironment`; all invocation-lifetime, access-context, world-assumption, and
@@ -3121,7 +3151,7 @@ or retaining a proof while dropping its source list, is invalid.
 
 ## Visibility and capabilities
 
-Chapter 9 is the sole schema authority for the `Visibility` alternatives, their declaration-level
+Chapter 9 is the sole schema authority for the `DeclVisibility` alternatives, their declaration-level
 order, and the separate contextual access predicate. Composite exposure uses that order:
 
 ```text
@@ -3149,7 +3179,7 @@ Every domain has a generated validator. At minimum it checks:
   signature, while non-callable headers have none;
 - parameter/storage address-space and source requirements are well formed and every admission proof
   replays; a formal symbolic address space names an exact physical-formal entry proof and is never
-  replaced by an invented concrete address space, while every first-class reference handle from
+  replaced by an invented concrete address space, while every first-class pointer-like value from
   such storage carries a valid concrete-address-space projection proof;
 - reference-accessor maps have exact `ReadAccess`/`ReadWriteAccess` keys, result contracts resolve
   their exact selector/signature/access, and all five provenance derivations are closed;
@@ -3162,7 +3192,7 @@ Every domain has a generated validator. At minimum it checks:
   a `MayOverlap` reason and cannot contain disjointness evidence;
 - every call-slot source agrees with its typed binding and argument map, an accessor-produced
   physical source's operation site validates against that exact source node, and its sole adaptation
-  rank is derived from `AccessPlan.rankingConversion` rather than stored in parallel;
+  rank is derived from `StorageAccessPlan.rankingCoercion` rather than stored in parallel;
 - proof endpoints match their stored `sub`, `sup`, `source`, and `target`;
 - extension facet routes retain context-dependent concrete applicability while bound-use sidecars
   retain exact caller-owned ordinary uses;

@@ -62,6 +62,7 @@ UInt32     = { n : BigNat | 0 <= n < 2^32 }
 UInt64     = { n : BigNat | 0 <= n < 2^64 }
 BigNat     = arbitrary-precision non-negative integer
 BigInt     = arbitrary-precision signed integer
+UnicodeScalar = { n : UInt32 | n < 0xD800 or 0xDFFF < n <= 0x10FFFF }
 ByteString = finite sequence of octets
 BitString  = finite sequence of bits
 Utf8String = finite, well-formed UTF-8 encoding of Unicode scalar values
@@ -114,10 +115,13 @@ CanonicalSetInclusionProof<T> = {
     superset: CanonicalFiniteSet<T>
 }
 
-Expr<S> = NameExpr<S>(name: Name)
-        | CallExpr<S>(callee: Expr<S>, arguments: NodeList<Argument<S>>)
-        | ErrorExpr<S>(recovery: RecoveryId)
+ExampleExpr<S> = VarExpr<S>(name: Name)
+               | InvokeExpr<S>(callee: Expr<S>, arguments: NodeList<Argument<S>>)
 ```
+
+`ExampleExpr` is notation for this example sum, not an AST kind. Its alternatives deliberately use
+the established `VarExpr` and `InvokeExpr` node names; the complete `Expr` registry is defined by
+the syntax schema rather than this illustrative fragment.
 
 `S` is a representation stage. A field ending in `Id` is a stable identity, not an owning pointer.
 `NodeRef<S, K>` is a reference to a node of stage `S` and kind family `K` in the same immutable
@@ -169,7 +173,7 @@ Common judgments are:
 Γ ⊢ name ⇝ LookupResult                         name lookup
 Δ ⊢ τ ≡ ρ                                      type equality
 Δ ⊢ τ ≤repr ρ ⇝ RepresentationAdjustmentPath   representation adjustment
-Σ; Γ; Δ ⊢ τ <: I ⇝ InterfaceSubtypeWitness     interface subtyping/conformance
+Σ; Γ; Δ ⊢ τ <: I ⇝ SubtypeWitness     interface subtyping/conformance
 Δ ⊢ I refines J ⇝ InterfaceRefinementProof      interface refinement
 Σ; Γ; Δ ⊢ Coerce(e, ρ) ⇝ ConversionResult       implicit coercion planning
 Σ; Γ; Δ ⊢ call(args) ⇝ OverloadResult           overload resolution
@@ -287,7 +291,7 @@ Scheduler, synthesis, and builtin-rule inputs use one closed, versioned key alge
 
 ```text
 AnyNodeId = exists S: Stage . NodeId<S>
-SemanticValue = exists K: registered semantic NodeKind . Value<K>
+SchemaValue = exists K: registered semantic NodeKind . Value<K>
 
 ContentId<T> = {
     schemaKind: QualifiedName,
@@ -296,18 +300,18 @@ ContentId<T> = {
 }
 
 StableSemanticId =
-    SourceSnapshotIdentity(document: SourceDocumentId,
-                           revision: RevisionId,
-                           content: Hash256)
+    SourceFileSnapshotIdentity(file: SourceFileId,
+                               revision: RevisionId,
+                               content: Hash256)
   | SyntaxNodeIdentity(AnyNodeId)
-  | DeclarationIdentity(DeclId)
+  | DeclIdentity(DeclId)
   | ScopeIdentity(ScopeId)
   | TypeIdentity(TypeId)
-  | ConformanceIdentity(ConformanceId)
+  | WitnessTableIdentity(WitnessTableId)
   | RequirementIdentity(kind: RequirementKind,
                         encoding: ByteString)
   | SynthesizedIdentity(SynthesizedSemanticId)
-  | ContentIdentity(ContentId<SemanticValue>)
+  | ContentIdentity(ContentId<SchemaValue>)
 
 CanonicalArgumentKey = {
     wireTag: UInt32,
@@ -323,7 +327,7 @@ CanonicalArgument =
   | TextArgument(Utf8String)
   | EnumArgument(type: QualifiedName, variantTag: UInt32)
   | IdentityArgument(StableSemanticId)
-  | SemanticValueArgument(ContentId<SemanticValue>)
+  | SchemaValueArgument(ContentId<SchemaValue>)
   | ListArgument(NodeList<CanonicalArgument>)
   | MapArgument(CanonicallyOrderedMap<CanonicalArgumentKey, CanonicalArgument>)
 
@@ -368,10 +372,10 @@ the implementation must not use it as a scheduler lattice.
 Every transformation output carries one of:
 
 ```text
-ModuleInterfaceContentId = ContentId<SemanticValue>
+ModuleInterfaceContentId = ContentId<SchemaValue>
 
 Origin =
-    Parsed(cst: CstNodeId)
+    Parsed(cst: CSTNodeId)
   | Derived(previous: AnyNodeId, rule: RuleId)
   | Synthesized(group: SynthesisKey, outputRole: SynthesisOutputRole,
                 causes: NonEmpty<StableSemanticId>)

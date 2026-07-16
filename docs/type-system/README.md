@@ -66,8 +66,8 @@ frontend IR.
 ## Representation pipeline
 
 ```text
-SourceDocument { physical bytes, decoded SourceSnapshot }
-  -> PhysicalTokenTape
+SourceView { SourceFileRecord, decoded SourceFileSnapshot, interpretation }
+  -> PhysicalTokenList
   -> PreprocessorTree + ExpandedTokenView
   -> LosslessCST { SourceCST, ExpandedGrammarCST, TokenOriginDAG }
   -> SurfaceAST (from ExpandedGrammarCST)
@@ -75,7 +75,7 @@ SourceDocument { physical bytes, decoded SourceSnapshot }
   -> BoundAST
   -> TypedAST
   -> ElaboratedAST
-  -> CoreAST
+  -> IRReadyAST
   -> FrontendIR
 ```
 
@@ -94,7 +94,7 @@ overload sets or implicit conversions.
 The following invariants apply throughout this specification.
 
 1. **Losslessness.** Concatenating ordered physical slices reproduces the decoded UTF-8 snapshot;
-   `SourceDocument` separately preserves original encoded/BOM bytes for unmodified identity output. The
+   `SourceFileRecord` separately preserves original encoded/BOM bytes for unmodified identity output. The
    source CST owns directives and inactive regions; the linked expanded grammar CST owns active
    syntax, missing tokens, and skipped tokens. Identity formatting uses the source CST.
 2. **Immutability.** Published tokens, CST nodes, AST nodes, types, substitutions, witnesses,
@@ -120,26 +120,27 @@ The following invariants apply throughout this specification.
 
 ## Document map
 
-| Document                                                                        | Contract                                                                                                                          |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| [01 — Notation and conformance](01-notation.md)                                 | Grammar, algebraic-data-type, judgment, result, and rule-ID notation                                                              |
-| [02 — Lexical and syntactic grammar](02-syntax.md)                              | Source snapshots, tokens, trivia, preprocessing view, grammar, ambiguity, and recovery                                            |
-| [03 — Immutable representations](03-representations.md)                         | CST/AST schemas, provenance, reflection, editing, serialization, and stage invariants                                             |
-| [04 — Semantic domains](04-semantic-domains.md)                                 | Names, declarations, types, values, substitutions, decl-refs, facets, and evidence                                                |
-| [05 — Names and declarations](05-names-and-declarations.md)                     | Scope construction, lookup, imports, extensions, redeclaration, and visibility                                                    |
-| [06 — Expressions and statements](06-expressions-and-statements.md)             | Expression classifiers, property/subscript reference formation, statements, control context, and constants                        |
-| [07 — Calls, conversions, and generics](07-calls-and-generics.md)               | Coercion plans, overload resolution, argument mapping, generic deduction, and ranking                                             |
-| [08 — Interfaces and synthesis](08-interfaces-and-synthesis.md)                 | Conformance, requirement-keyed witness maps, associated types, defaults, and synthesis                                            |
-| [09 — Capabilities and visibility](09-capabilities-and-visibility.md)           | Capability DNF algebra, inference, availability, and visibility lattice                                                           |
-| [10 — Work scheduler](10-work-scheduler.md)                                     | Query model, dependencies, cycle policies, fixpoints, diagnostics, and incrementality                                             |
-| [11 — Elaboration and IR](11-elaboration-and-ir.md)                             | Explicit desugaring, checked function types, lambda/conformance synthesis, and IR contract                                        |
-| [12 — Compatibility ledger](12-compatibility-ledger.md)                         | Verified source map, open decisions, known gaps, and acceptance criteria                                                          |
-| [13 — Validation plan](13-validation.md)                                        | Unit-test seams, generated conformance tests, coverage, differential testing, and fuzzing                                         |
-| [14 — Subtyping, facets, and extensions](14-subtyping-facets-and-extensions.md) | Operational interface-subtype witnesses, generic witness tables, facet routes, extension application, and partial lookup priority |
-| [15 — Initialization and construction](15-initialization.md)                    | Initialization forms, strategies, aggregate shapes, constructors, definite initialization, and direct-to-destination lowering     |
-| [16 — Differentiability](16-differentiability.md)                               | Differential evidence, activity, derivative signatures/providers, interface dispatch, synthesis, and frontend-IR obligations      |
-| [Grammar source](grammar.ebnf)                                                  | Annotated first-edition EBNF used by the CST registry                                                                             |
-| [Rule manifest](rule-manifest.json)                                             | Generated machine-readable index of normative rule identities and locations                                                       |
+| Document                                                                        | Contract                                                                                                                      |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [00 — Terminology and implementation correspondence](00-terminology.md)         | Canonical Slang vocabulary, principled new terms, implementation anchors, and forbidden aliases                               |
+| [01 — Notation and conformance](01-notation.md)                                 | Grammar, algebraic-data-type, judgment, result, and rule-ID notation                                                          |
+| [02 — Lexical and syntactic grammar](02-syntax.md)                              | Source snapshots, tokens, trivia, preprocessing view, grammar, ambiguity, and recovery                                        |
+| [03 — Immutable representations](03-representations.md)                         | CST/AST schemas, provenance, reflection, editing, serialization, and stage invariants                                         |
+| [04 — Semantic domains](04-semantic-domains.md)                                 | Names, declarations, types, values, substitutions, decl-refs, facets, and evidence                                            |
+| [05 — Names and declarations](05-names-and-declarations.md)                     | Scope construction, lookup, imports, extensions, redeclaration, and visibility                                                |
+| [06 — Expressions and statements](06-expressions-and-statements.md)             | Expression classifiers, property/subscript reference formation, statements, control context, and constants                    |
+| [07 — Calls, conversions, and generics](07-calls-and-generics.md)               | Coercion plans, overload resolution, argument mapping, generic deduction, and ranking                                         |
+| [08 — Interfaces and synthesis](08-interfaces-and-synthesis.md)                 | Conformance, requirement-keyed witness maps, associated types, defaults, and synthesis                                        |
+| [09 — Capabilities and visibility](09-capabilities-and-visibility.md)           | Capability DNF algebra, inference, availability, and visibility lattice                                                       |
+| [10 — Work scheduler](10-work-scheduler.md)                                     | Query model, dependencies, cycle policies, fixpoints, diagnostics, and incrementality                                         |
+| [11 — Elaboration and IR](11-elaboration-and-ir.md)                             | Explicit desugaring, checked function types, lambda/conformance synthesis, and IR contract                                    |
+| [12 — Compatibility ledger](12-compatibility-ledger.md)                         | Verified source map, open decisions, known gaps, and acceptance criteria                                                      |
+| [13 — Validation plan](13-validation.md)                                        | Unit-test seams, generated conformance tests, coverage, cross-frontend comparison, and fuzzing                                |
+| [14 — Subtyping, facets, and extensions](14-subtyping-facets-and-extensions.md) | Operational subtype witnesses, generic witness tables, facet routes, extension application, and partial lookup priority       |
+| [15 — Initialization and construction](15-initialization.md)                    | Initialization forms, strategies, aggregate shapes, constructors, definite initialization, and direct-to-destination lowering |
+| [16 — Differentiability](16-differentiability.md)                               | Differential evidence, activity, derivative signatures/providers, interface dispatch, synthesis, and frontend-IR obligations  |
+| [Grammar source](grammar.ebnf)                                                  | Annotated first-edition EBNF used by the CST registry                                                                         |
+| [Rule manifest](rule-manifest.json)                                             | Generated machine-readable index of normative rule identities and locations                                                   |
 
 ## What “fully defined” means
 
@@ -151,7 +152,7 @@ A feature is fully defined only when all of the following exist:
 - typing, conversion, and elaboration judgments;
 - explicit success and failure result types;
 - interaction rules for generics, interfaces, visibility, and capabilities where relevant;
-- a Core AST and frontend-IR mapping, or an explicit statement that the feature is erased earlier;
+- an IR-ready AST and frontend-IR mapping, or an explicit statement that the feature is erased earlier;
 - stable rule IDs with validation cases; and
 - a compatibility disposition: preserve, intentionally change, or unresolved.
 
@@ -182,7 +183,7 @@ particular, settle these decisions first:
 
 1. physical/preprocessed token provenance and inactive-code representation;
 2. the exact AST stage boundaries;
-3. explicit receiver and parameter-mode representation in `FunctionType`;
+3. explicit receiver and parameter-mode representation in `FuncType`;
 4. requirement-keyed, first-class generic witness values and lookup-spine algebra;
 5. physical versus abstract storage and passing-mode access plans;
 6. initialization target/result conventions and strategy policies;

@@ -14,13 +14,13 @@ ambiguous, the parser produces a named ambiguous CST node and binding resolves i
 ## Inputs and outputs
 
 ```text
-LexPhysical(SourceDocument, LexOptions)
-    -> CheckResult<PhysicalTokenTape>
+LexPhysical(SourceView, LexOptions)
+    -> CheckResult<PhysicalTokenList>
 
-Preprocess(PhysicalTokenTape, IncludeProvider, MacroEnvironment, PpOptions)
+Preprocess(PhysicalTokenList, IncludeProvider, MacroEnvironment, PreprocessorDesc)
     -> CheckResult<(PreprocessorTree, ExpandedTokenView)>
 
-Parse(ExpandedTokenView, SyntaxFeatureSet, ParseOptions)
+Parse(ExpandedTokenView, SyntaxFeatureSet, ParserOptions)
     -> CheckResult<LosslessCST>
 
 LexOptions = {
@@ -29,7 +29,7 @@ LexOptions = {
     preserveInvalidTokens: True
 }
 
-PpOptions = {
+PreprocessorDesc = {
     languageRules: LanguageRuleSetId,
     retainInactiveRegions: True,
     expansionDepthLimit: UInt32,
@@ -50,10 +50,10 @@ SyntaxFeatureDescriptor = {
 SyntaxFeatureSet = {
     languageRules: LanguageRuleSetId,
     features: CanonicallyOrderedMap<SyntaxFeatureId, SyntaxFeatureDescriptor>,
-    revision: ContentId<SemanticValue>
+    revision: ContentId<SchemaValue>
 }
 
-ParseOptions = {
+ParserOptions = {
     preserveAmbiguities: Bool,
     parseInactiveRegionsSpeculatively: Bool,
     recoveryActionLimit: UInt32,
@@ -74,15 +74,15 @@ The literal `True` fields state required losslessness rather than caller-selecta
 
 The current compiler decodes input and strips a BOM before allocating source locations, so current
 offsets refer to decoded UTF-8 rather than original file bytes. The replacement stores both views
-when decoding is required. `SourceDocument` has the single authoritative schema in chapter 3; the
-lexer consumes that exact physical/decoded pair.
+when decoding is required. `SourceFileRecord` and `SourceView` have their single authoritative
+schemas in chapter 3; the lexer consumes the exact view and resolves its physical/decoded file pair.
 
 `LEX-SRC-001`: Diagnostics and grammar operate on decoded UTF-8 byte offsets. Identity formatting
 of an unmodified document writes `physicalBytes`; formatting an edited document writes UTF-8 unless
 the caller selects a supported output encoding.
 
 `LEX-SRC-002`: Invalid encoding sequences produce explicit decoding-error spans and replacement
-scalar values in the decoded snapshot; no source bytes disappear from `SourceDocument`.
+scalar values in the decoded snapshot; no source bytes disappear from `SourceFileRecord`.
 
 This closes the “byte-exact versus decoded-text-exact” item in the compatibility ledger while
 preserving today's semantic offset domain.
@@ -244,7 +244,7 @@ defined by the preprocessor rule; the physical trivia is not reconstructed from 
 preprocessing token, and records both operand origins. Failure produces an invalid expanded token
 and retains the paste node.
 
-`PP-INC-001`: Each included file has a separate `SourceDocument`, preprocessor tree, and grammar
+`PP-INC-001`: Each included file has a separate `SourceFileRecord`, preprocessor tree, and grammar
 CST. The including tree contains an `IncludeEdge`; it does not physically nest the included file's
 tokens into the formatter tree. The expanded semantic view may traverse the edge.
 
@@ -290,15 +290,15 @@ The accessor spelling is retained by the CST and normalized to a semantic role o
 property or subscript product is bound:
 
 ```text
-normalizeAccessorSpelling("get")      = AccessorRole.Get
-normalizeAccessorSpelling("set")      = AccessorRole.Set
-normalizeAccessorSpelling("constref") = AccessorRole.Ref(ReadAccess)
-normalizeAccessorSpelling("ref")      = AccessorRole.Ref(ReadWriteAccess)
+normalizeAccessorSpelling("get")      = Getter
+normalizeAccessorSpelling("set")      = Setter
+normalizeAccessorSpelling("constref") = RefAccessor(ReadAccess)
+normalizeAccessorSpelling("ref")      = RefAccessor(ReadWriteAccess)
 ```
 
 `PAR-ACC-001`: `constref` is a soft keyword only in the accessor-name position of a property or
-subscript accessor declaration. It maps exactly to `AccessorRole.Ref(ReadAccess)`; `ref` maps
-exactly to `AccessorRole.Ref(ReadWriteAccess)`. The two spellings may occur in the same accessor
+subscript accessor declaration. It maps exactly to `RefAccessor(ReadAccess)`; `ref` maps
+exactly to `RefAccessor(ReadWriteAccess)`. The two spellings may occur in the same accessor
 block, retain distinct CST tokens, and normalize to distinct map keys. Duplicate detection compares
 the complete normalized role, including its access index.
 
@@ -306,7 +306,7 @@ the complete normalized role, including its access index.
 `__constref`, and the callable/receiver attribute `[constref]` are three distinct productions.
 `__constref` is normalized by header checking to `ConstRefMode(locationRequirement)`;
 `[constref]` remains an attribute that selects the registered receiver rule; neither can construct
-an `AccessorRole`. Conversely, an accessor-name token cannot alter its containing callable's
+a property/subscript accessor role. Conversely, an accessor-name token cannot alter its containing callable's
 receiver mode. CST-to-Surface normalization preserves which of the three productions supplied the
 token so serialization, formatting, and diagnostics never infer the distinction from spelling
 alone.
@@ -316,12 +316,12 @@ alone.
 From lowest to highest:
 
 | Level          | Forms                                                       | Associativity                                          |
-| -------------- | ----------------------------------------------------------- | ------------------------------------------------------ | ------- | ---- |
+| -------------- | ----------------------------------------------------------- | ------------------------------------------------------ |
 | comma          | `,`                                                         | left (Slang 2026 uses tuple syntax inside parentheses) |
 | assignment     | `=` and compound assignment                                 | right                                                  |
 | conditional    | `?:`                                                        | right by grammar                                       |
-| logical        | `                                                           |                                                        | `, `&&` | left |
-| bitwise        | `                                                           | `, `^`, `&`                                            | left    |
+| logical        | `\|\|`, `&&`                                                | left                                                   |
+| bitwise        | `\|`, `^`, `&`                                              | left                                                   |
 | equality       | `==`, `!=`                                                  | left                                                   |
 | relational     | `<`, `>`, `<=`, `>=`, `is`, `as`                            | left                                                   |
 | shift          | `<<`, `>>`                                                  | left                                                   |

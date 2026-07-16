@@ -78,9 +78,11 @@ def main() -> None:
         "sourcePattern": "docs/type-system/*.md",
         "rules": rules,
     }
-    OUTPUT.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    # Canonical documentation artifacts use LF even when this generator runs through Windows
+    # Python. Otherwise a Windows checkout rewrites every JSON line with CRLF, and
+    # `git diff --check` reports each carriage return as trailing whitespace.
+    with OUTPUT.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":

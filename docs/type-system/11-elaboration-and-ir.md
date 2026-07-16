@@ -1,6 +1,6 @@
 # Elaboration, synthesis, and frontend IR
 
-Elaboration turns a typed program into an explicit program. Core lowering then maps that explicit
+Elaboration turns a typed program into an explicit program. IRReady lowering then maps that explicit
 program to frontend IR without name lookup, overload resolution, generic inference, implicit
 conversion search, or ad hoc declaration synthesis.
 
@@ -14,13 +14,13 @@ a named, independently testable transformation.
 ## Elaboration contract
 
 ```text
-TypedNode     = AstNode<Typed>
-ElaboratedNode = AstNode<Elaborated>
-CoreNode      = AstNode<Core>
+TypedNode     = SyntaxNode<Typed>
+ElaboratedNode = SyntaxNode<Elaborated>
+IRReadyNode      = SyntaxNode<IRReady>
 
 ElaborateNode : TypedNode -> CheckResult<ElaboratedNode>
-LowerToCore   : ElaboratedNode -> CheckResult<CoreNode>
-LowerToIR     : CoreDecl -> CheckResult<FrontendIRFragment>
+LowerToIRReadyAST   : ElaboratedNode -> CheckResult<IRReadyNode>
+LowerToIR     : IRReadyDecl -> CheckResult<FrontendIRFragment>
 ```
 
 These aliases range over the complete registered node set at exactly one representation stage.
@@ -54,16 +54,16 @@ parallel task order therefore cannot change mangling or capture layout.
 A checked call lowers to one form:
 
 ```text
-CallableValue<S: WitnessUseStage> = {
+CallableValue<S: WitnessTableState> = {
     dispatch: CallableDispatch<S>,
     contract: CallableContractStateAt<S>
 }
 
-CallableDispatch<S: WitnessUseStage> =
+CallableDispatch<S: WitnessTableState> =
     Direct(ResolvedDeclRefAt<S>)
-  | WitnessMethod(witness: WitnessCallRef<S>, entry: WitnessRuntimeEntryKey)
+  | WitnessMethod(witness: SubtypeWitnessRef<S>, entry: RuntimeInterfaceRequirementKey)
   | DynamicSlot(owner: TypeId, slot: DynamicDispatchKey)
-  | ClosureInvoke(ResolvedDeclRefAt<S>)
+  | LambdaInvoke(ResolvedDeclRefAt<S>)
   | Builtin(rule: RuleId,
             operands: CanonicalArguments,
             witnessResolutions: WitnessResolutionSetAt<S>)
@@ -88,11 +88,11 @@ CallableContractStateAt<Published> =
 CallableContractState = CallableContractStateAt<Published>
 
 CallableContractSubject =
-    DirectContractSubject(CanonicalDeclRef)
-  | WitnessContractSubject(witness: InterfaceSubtypeWitnessId,
-                           entry: WitnessRuntimeEntryKey)
+    DirectContractSubject(DeclRef)
+  | WitnessContractSubject(witness: SubtypeWitnessId,
+                           entry: RuntimeInterfaceRequirementKey)
   | DynamicContractSubject(owner: TypeId, slot: DynamicDispatchKey)
-  | ClosureContractSubject(CanonicalDeclRef)
+  | LambdaContractSubject(DeclRef)
   | BuiltinContractSubject(rule: RuleId, operands: CanonicalArguments)
 
 CallableContractCompletion =
@@ -109,26 +109,26 @@ CallableContractCompletionKey = {
 ContractCompletionMap =
     CanonicallyOrderedMap<CallableContractCompletionKey, CallableContractCompletion>
 
-TypedCallReferenceResultAuthorityAt<S: WitnessUseStage> =
-    FixedReferenceHandleCallResult(
-        authority: FixedReferenceHandleResultContractId)
-  | AccessorReferenceHandleCallResult(
+TypedCallReferenceResultAuthorityAt<S: WitnessTableState> =
+    FixedPointerLikeCallResult(
+        authority: FixedPointerLikeResultContractId)
+  | AccessorPointerLikeCallResult(
         certificate: AccessorReferenceResultCertificate)
-  | RegisteredReferenceHandleCallResult(
+  | RegisteredPointerLikeCallResult(
         registration: ReferenceOperationRegistration,
         staticInputs: CanonicalArguments,
         environment: StandardEnvironmentId)
 
-TypedCallReferenceHandleResultAt<S: WitnessUseStage> = {
-    result: ReferenceHandleValueShape,
+TypedCallPointerLikeResultAt<S: WitnessTableState> = {
+    result: PointerLikeValueShape,
     authority: TypedCallReferenceResultAuthorityAt<S>
 }
 
-TypedCallResultProvenanceAt<S: WitnessUseStage> =
+TypedCallResultProvenanceAt<S: WitnessTableState> =
     OrdinaryCallResult
-  | ReferenceHandleCallResult(TypedCallReferenceHandleResultAt<S>)
+  | PointerLikeCallResult(TypedCallPointerLikeResultAt<S>)
 
-TypedCallAt<S: WitnessUseStage> = {
+TypedCallAt<S: WitnessTableState> = {
     id: NodeId<Typed>,
     dispatch: CallableDispatch<S>,
     signature: CallableSignature,
@@ -158,9 +158,9 @@ CallableResultAuthorityResolutionFailure =
   | CallableResultAuthorityKindMismatch(
         authority: CallableResultAuthorityId,
         requested: OrdinaryCallableResult |
-                   FixedReferenceHandleCallableResult |
-                   AccessorReferenceHandleCallableResult |
-                   RegisteredReferenceHandleCallableResult)
+                   FixedPointerLikeCallableResult |
+                   AccessorPointerLikeCallableResult |
+                   RegisteredPointerLikeCallableResult)
 
 ResolveCallableResultAuthorityAt<S>(dispatch: CallableDispatch<S>,
                                     signature: CallableSignatureId)
@@ -170,7 +170,7 @@ ResolveCallableResultAuthorityAt<S>(dispatch: CallableDispatch<S>,
 BuildTypedCall(id, Selected(winner, comparisons, considered), contractContext)
     -> CheckResult<TypedCall>
 
-AccessorReferenceResultInstantiationInputAt<S: WitnessUseStage> = {
+AccessorReferenceResultInstantiationInputAt<S: WitnessTableState> = {
     contract: AccessorReferenceResultContractId,
     invocationIdentity: AccessorInvocationIdentity,
     invocationSite: SemanticOperationSiteAssignment,
@@ -188,22 +188,22 @@ InstantiateAccessorReferenceResultAt<S>(
     -> Result<AccessorReferenceResultCertificate,
               AccessorReferenceResultContractFailure>
 
-SelectedSurfaceCallResultInputAt<S: WitnessUseStage> =
+SelectedSurfaceCallResultInputAt<S: WitnessTableState> =
     OrdinarySurfaceCallResult
-  | FixedReferenceHandleSurfaceCallResult(
-        result: ReferenceHandleValueShape)
-  | AccessorReferenceHandleSurfaceCallResult(
+  | FixedPointerLikeSurfaceCallResult(
+        result: PointerLikeValueShape)
+  | AccessorPointerLikeSurfaceCallResult(
         invocationIdentity: AccessorInvocationIdentity,
         invocationSite: SemanticOperationSiteAssignment,
         sources: CapturedStorageSources,
         provenanceSources: AccessorProvenanceSourceMapId,
         expectedReferent: TypeId,
         context: ExpressionCheckContextId,
-        result: ReferenceHandleValueShape)
-  | RegisteredReferenceHandleSurfaceCallResult(
-        result: ReferenceHandleValueShape)
+        result: PointerLikeValueShape)
+  | RegisteredPointerLikeSurfaceCallResult(
+        result: PointerLikeValueShape)
 
-SelectedSurfaceCallInputAt<S: WitnessUseStage> = {
+SelectedSurfaceCallInputAt<S: WitnessTableState> = {
     dispatch: CallableDispatch<S>,
     signature: CallableSignature,
     selectionContract: PreInferenceCallableContract,
@@ -232,17 +232,17 @@ BuildConstructionTypedCall(id, ConstructionCallInput, contractContext)
 ElaborateTypedCallAt<S>(
     call: TypedCallAt<S>,
     sourceEnvironment: ElaboratedCallSourceEnvironmentAt<S>,
-    bindings: NodeMap<BoundCallSlot, BoundAccessPlan<S>>,
+    bindings: NodeMap<BoundCallSlot, BoundStorageAccessPlan<S>>,
     completions: ContractCompletionMap)
     -> CheckResult<ElaboratedCallAt<S>>
 
-ElaboratedReceiverAt<S: WitnessUseStage> = {
+ElaboratedReceiverAt<S: WitnessTableState> = {
     sourceType: TypeId,
-    access: BoundAccessPlan<S>,
+    access: BoundStorageAccessPlan<S>,
     origin: Origin
 }
 
-ElaboratedCallAt<S: WitnessUseStage> = {
+ElaboratedCallAt<S: WitnessTableState> = {
     callee: CallableValue<S>,
     signature: CallableSignature,
     resultAuthority: CallableResultAuthorityId,
@@ -264,18 +264,18 @@ typedCallInvocationLifetime(call) =
 elaboratedCallInvocationLifetime(call) =
     resolve(call.accessEnvironment).invocationLifetime
 
-ElaboratedArgumentAt<S: WitnessUseStage> = {
+ElaboratedArgumentAt<S: WitnessTableState> = {
     parameter: ParameterKey,
-    access: BoundAccessPlan<S>
+    access: BoundStorageAccessPlan<S>
 }
 
-ElaboratedBuiltinPhysicalProjectionOperandAt<S: WitnessUseStage> = {
+ElaboratedBuiltinPhysicalProjectionOperandAt<S: WitnessTableState> = {
     source: ElaboratedExprAt<S>,
     endpointType: TypeId,
     endpointCategory: ValueCategory
 }
 
-ElaboratedBuiltinPhysicalProjectionAt<S: WitnessUseStage> = {
+ElaboratedBuiltinPhysicalProjectionAt<S: WitnessTableState> = {
     identity: BuiltinPhysicalProjectionIdentity,
     site: PhysicalProjectionSiteAssignment,
     operation: BuiltinPhysicalProjectionOperation,
@@ -291,14 +291,14 @@ ElaborateBuiltinPhysicalProjectionAt<S>(
     application: BuiltinPhysicalProjectionApplicationAt<S>)
     -> CheckResult<ElaboratedBuiltinPhysicalProjectionAt<S>>
 
-ElaboratedRegisteredPhysicalProjectionOperandAt<S: WitnessUseStage> = {
+ElaboratedRegisteredPhysicalProjectionOperandAt<S: WitnessTableState> = {
     source: ElaboratedExprAt<S>,
-    access: BoundAccessPlan<S>,
+    access: BoundStorageAccessPlan<S>,
     endpointType: TypeId,
     endpointCategory: ValueCategory
 }
 
-ElaboratedRegisteredPhysicalProjectionAt<S: WitnessUseStage> = {
+ElaboratedRegisteredPhysicalProjectionAt<S: WitnessTableState> = {
     identity: RegisteredPhysicalProjectionIdentity,
     site: PhysicalProjectionSiteAssignment,
     registration: RegisteredDataOperationRegistration,
@@ -313,16 +313,16 @@ ElaboratedRegisteredPhysicalProjectionAt<S: WitnessUseStage> = {
 ElaborateRegisteredPhysicalProjectionAt<S>(
     application: RegisteredPhysicalProjectionApplicationAt<S>,
     bindings:
-        NodeMap<RegisteredPhysicalProjectionOperandRole, BoundAccessPlan<S>>)
+        NodeMap<RegisteredPhysicalProjectionOperandRole, BoundStorageAccessPlan<S>>)
     -> CheckResult<ElaboratedRegisteredPhysicalProjectionAt<S>>
 
-AccessOperandId = { ordinal: UInt32 }
-AccessStepId = { ordinal: UInt32 }
-AccessCompletionStepId = { ordinal: UInt32 }
+StorageAccessOperandId = { ordinal: UInt32 }
+StorageAccessStepId = { ordinal: UInt32 }
+StorageAccessCompletionStepId = { ordinal: UInt32 }
 PhysicalStorageObligationId = { ordinal: UInt32 }
 PlanValueId = { ordinal: UInt32 }
-PlanPhysicalPlaceId = { ordinal: UInt32 }
-PlanAbstractPlaceId = { ordinal: UInt32 }
+PlanPhysicalStorageId = { ordinal: UInt32 }
+PlanAbstractStorageId = { ordinal: UInt32 }
 TemporaryId = { ordinal: UInt32 }
 ReferenceCaptureResultId = { ordinal: UInt32 }
 CapturedStorageSourcesId = ContentId<CapturedStorageSources>
@@ -333,45 +333,45 @@ capturedSourceRole(CapturedStorageArgument(a)) = StorageArgumentSource(a.id)
 capturedSourceExpr(CapturedStorageReceiver(value)) = value
 capturedSourceExpr(CapturedStorageArgument(argument)) = argument.value
 
-ReferenceCaptureResultAt<S: WitnessUseStage> = {
+ReferenceCaptureResultAt<S: WitnessTableState> = {
     id: ReferenceCaptureResultId,
     source: CapturedStorageSource,
     evaluation: ElaboratedExprAt<S>
 }
 
-ReferenceCaptureEnvironmentAt<S: WitnessUseStage> = {
+ReferenceCaptureEnvironmentAt<S: WitnessTableState> = {
     sourceSet: CapturedStorageSourcesId,
     results: NodeMap<ReferenceCaptureResultId, ReferenceCaptureResultAt<S>>,
     evaluationOrder: NodeList<ReferenceCaptureResultId>
 }
 
-ElaboratedCallSourceEnvironmentAt<S: WitnessUseStage> =
+ElaboratedCallSourceEnvironmentAt<S: WitnessTableState> =
     IndependentCallSources
   | CapturedReferenceSources(ReferenceCaptureEnvironmentAt<S>)
 
-AccessPlan<S: WitnessUseStage> = {
-    operands: NodeMap<AccessOperandId, AccessOperand>,
+StorageAccessPlan<S: WitnessTableState> = {
+    operands: NodeMap<StorageAccessOperandId, StorageAccessOperand>,
     physicalStorageObligations:
         NodeMap<PhysicalStorageObligationId, PhysicalStorageObligation>,
-    preparation: NodeList<AccessStepRecord<S>>,
-    terminal: AccessPlanTerminal<S>,
-    completion: NodeList<AccessCompletionStepRecord<S>>,
-    rankingConversion: Option<RankedAccessConversion>,
-    lifetime: AccessLifetime,
+    preparation: NodeList<StorageAccessStepRecord<S>>,
+    terminal: StorageAccessPlanTerminal<S>,
+    completion: NodeList<StorageAccessCompletionStepRecord<S>>,
+    rankingCoercion: Option<RankedStorageCoercion>,
+    lifetime: StorageAccessLifetime,
     aliasClass: AliasClass,
     semanticUses: PlanSemanticUses<S>
 }
 
-AccessLifetime = {
-    temporary: Option<TemporaryAccessExtent>
+StorageAccessLifetime = {
+    temporary: Option<TemporaryStorageAccessExtent>
 }
 
-TemporaryAccessExtent = {
+TemporaryStorageAccessExtent = {
     temporary: TemporaryId,
     cleanup: CompletionCondition
 }
 
-ImmediateAccessLifetime = AccessLifetime(None)
+ImmediateStorageAccessLifetime = StorageAccessLifetime(None)
 
 UniqueAliasProof =
     FreshTemporaryAlias(temporary: TemporaryId, identity: TemporaryStorageIdentity)
@@ -392,30 +392,30 @@ aliasClassProvenance(UniqueAlias(p)) = uniqueAliasProvenance(p)
 aliasClassProvenance(SharedAlias(p)) = p
 aliasClassProvenance(UnknownAlias) = UnknownAliasRoot
 
-AccessOperand =
+StorageAccessOperand =
     TypedInput(node: NodeId<Typed>, type: TypeId, category: ValueCategory)
   | AdapterInput(role: AdapterSourceRole,
                  type: TypeId,
                  category: AdapterInputCategory)
 
-BoundAccessPlan<S: WitnessUseStage> = {
-    recipe: AccessPlan<S>,
-    bindings: NodeMap<AccessOperandId, ElaboratedAccessOperandAt<S>>,
+BoundStorageAccessPlan<S: WitnessTableState> = {
+    recipe: StorageAccessPlan<S>,
+    bindings: NodeMap<StorageAccessOperandId, ElaboratedStorageAccessOperandAt<S>>,
     physicalStorageProofs:
         NodeMap<PhysicalStorageObligationId, PhysicalStorageProof>
 }
 
 PhysicalStorageObligation =
-    ConcreteStorageObligation(input: AccessOperandId,
+    ConcreteStorageObligation(input: StorageAccessOperandId,
                               requirement: PhysicalStorageRequirement,
                               proof: PhysicalStorageProof)
-  | AdapterStorageObligation(input: AccessOperandId,
+  | AdapterStorageObligation(input: StorageAccessOperandId,
                              requirement: PhysicalStorageRequirement)
 
-PhysicalPlaceProjectionAuthority =
+PhysicalStorageProjectionAuthority =
     RequiredPhysicalStorage(obligation: PhysicalStorageObligationId)
 
-MaterializedTemporaryStorageAt<S: WitnessUseStage> = {
+MaterializedTemporaryStorageAt<S: WitnessTableState> = {
     id: TemporaryId,
     site: SemanticOperationSiteAssignment,
     identity: TemporaryStorageIdentity,
@@ -430,27 +430,27 @@ MaterializedTemporaryStorage = MaterializedTemporaryStorageAt<Published>
 
 TemporaryInitializationSource =
     PreparedInitializationValue(value: PlanValueId)
-  | PhysicalInitializationPlace(place: PlanPhysicalPlaceId)
-  | AbstractInitializationPlace(place: PlanAbstractPlaceId)
+  | PhysicalInitializationStorage(storage: PlanPhysicalStorageId)
+  | AbstractInitializationStorage(storage: PlanAbstractStorageId)
 
-ElaboratedExprAt<S: WitnessUseStage> =
+ElaboratedExprAt<S: WitnessTableState> =
     an Elaborated-stage expression whose witness-bearing descendants all have stage S
 
-ElaboratedDeclAt<S: WitnessUseStage> =
+ElaboratedDeclAt<S: WitnessTableState> =
     an Elaborated-stage declaration whose bodies contain only ElaboratedExprAt<S>
 
-ElaboratedFunctionBodyAt<S: WitnessUseStage> =
+ElaboratedFunctionBodyAt<S: WitnessTableState> =
     an Elaborated-stage function body whose witness-bearing descendants all have stage S
 
-ElaboratedAccessOperandAt<S: WitnessUseStage> =
+ElaboratedStorageAccessOperandAt<S: WitnessTableState> =
     ValueSource(ElaboratedExprAt<S>)
-  | PlaceSource(PlaceRef)
+  | StorageSource(StorageRef)
   | CapturedSourceProjection(result: ReferenceCaptureResultId,
                              projection: CapturedStorageProjection)
 
 AbstractAccessorRole = Get | Set(valueParameter: ParameterKey)
 
-AbstractAccessorInvocationAt<S: WitnessUseStage> = {
+AbstractAccessorInvocationAt<S: WitnessTableState> = {
     storage: AbstractStorageRef,
     role: AbstractAccessorRole,
     callable: CallableValue<S>,
@@ -463,75 +463,75 @@ Explicit reference formation does not inhabit `AbstractAccessorRole`. It owns th
 `ReferenceAccessorPlanAt<S>` from chapter 6, so no ordinary getter/setter access recipe can be
 retagged as a ref accessor.
 
-AccessStepRecord<S: WitnessUseStage> = {
-    id: AccessStepId,
-    operation: AccessStepOperation<S>
+StorageAccessStepRecord<S: WitnessTableState> = {
+    id: StorageAccessStepId,
+    operation: StorageAccessStepOperation<S>
 }
 
-AccessStepOperation<S: WitnessUseStage> =
-    EvaluateOnce(input: AccessOperandId, result: PlanValueId)
-  | ProjectPhysicalPlace(input: AccessOperandId,
-                         result: PlanPhysicalPlaceId,
-                         authority: PhysicalPlaceProjectionAuthority)
-  | ProjectAbstractPlace(input: AccessOperandId,
-                         result: PlanAbstractPlaceId)
-  | ReadAbstractPlace(input: PlanAbstractPlaceId,
+StorageAccessStepOperation<S: WitnessTableState> =
+    EvaluateOnce(input: StorageAccessOperandId, result: PlanValueId)
+  | ProjectPhysicalStorage(input: StorageAccessOperandId,
+                         result: PlanPhysicalStorageId,
+                         authority: PhysicalStorageProjectionAuthority)
+  | ProjectAbstractStorage(input: StorageAccessOperandId,
+                         result: PlanAbstractStorageId)
+  | ReadAbstractStorage(input: PlanAbstractStorageId,
                       invocation: AbstractAccessorInvocationAt<S>,
                       result: PlanValueId)
-  | ResolveAbstractPlaceThroughReference(
-        input: PlanAbstractPlaceId,
+  | ResolveAbstractStorageThroughReference(
+        input: PlanAbstractStorageId,
         plan: InternalRefStoragePlanAt<S>,
         handle: PlanValueId,
-        result: PlanPhysicalPlaceId)
-  | ProjectPhysicalPlaceThroughParameterAccessor(
-        input: PlanAbstractPlaceId,
+        result: PlanPhysicalStorageId)
+  | ProjectPhysicalStorageThroughParameterAccessor(
+        input: PlanAbstractStorageId,
         plan: ParameterReferenceAccessorPlanAt<S>,
         handle: PlanValueId,
-        result: PlanPhysicalPlaceId)
-  | ReadPhysicalPlace(input: PlanPhysicalPlaceId,
+        result: PlanPhysicalStorageId)
+  | ReadPhysicalStorage(input: PlanPhysicalStorageId,
                       result: PlanValueId)
-  | ConvertValue(input: PlanValueId, plan: ConversionPlan<S>, result: PlanValueId)
+  | ApplyCoercion(input: PlanValueId, plan: ConversionPlan<S>, result: PlanValueId)
   | InitializeTemporary(storage: MaterializedTemporaryStorageAt<S>,
                         source: TemporaryInitializationSource)
 
-RuntimeArgumentAt<S: WitnessUseStage> =
+RuntimeArgumentAt<S: WitnessTableState> =
     ImmediateValue(PlanValueId)
-  | OutDestination(PlanPhysicalPlaceId)
+  | OutDestination(PlanPhysicalStorageId)
   | TemporaryAddress(TemporaryId)
-  | PhysicalPlaceArgument(
-        place: PlanPhysicalPlaceId,
+  | PhysicalStorageArgument(
+        storage: PlanPhysicalStorageId,
         binding: PhysicalParameterBindingProofAt<S>)
 
 StorageWriteSource = ComputedValue(PlanValueId)
 
-StorageWriteOperationAt<S: WitnessUseStage> =
-    WritePhysicalStorage(destination: PlanPhysicalPlaceId,
+StorageWriteOperationAt<S: WitnessTableState> =
+    WritePhysicalStorage(destination: PlanPhysicalStorageId,
                          source: StorageWriteSource,
                          conversion: ConversionPlan<S>,
                          when: CompletionCondition)
-  | WriteAbstractStorage(destination: PlanAbstractPlaceId,
+  | WriteAbstractStorage(destination: PlanAbstractStorageId,
                          invocation: AbstractAccessorInvocationAt<S>,
                          source: StorageWriteSource,
                          conversion: ConversionPlan<S>,
                          when: CompletionCondition)
 
-AccessPlanTerminal<S: WitnessUseStage> =
+StorageAccessPlanTerminal<S: WitnessTableState> =
     PassArgument(argument: RuntimeArgumentAt<S>)
   | YieldStorageRead(result: PlanValueId)
   | CompleteStorageWrite(operation: StorageWriteOperationAt<S>,
                          result: PlanValueId)
 
-AccessCompletionStepRecord<S: WitnessUseStage> = {
-    id: AccessCompletionStepId,
-    operation: AccessCompletionStepOperation<S>
+StorageAccessCompletionStepRecord<S: WitnessTableState> = {
+    id: StorageAccessCompletionStepId,
+    operation: StorageAccessCompletionStepOperation<S>
 }
 
-AccessCompletionStepOperation<S: WitnessUseStage> =
-    WritePhysicalBack(destination: PlanPhysicalPlaceId,
+StorageAccessCompletionStepOperation<S: WitnessTableState> =
+    WritePhysicalBack(destination: PlanPhysicalStorageId,
                       source: TemporaryValue(TemporaryId) | ComputedValue(PlanValueId),
                       conversion: ConversionPlan<S>,
                       when: CompletionCondition)
-  | WriteAbstractBack(destination: PlanAbstractPlaceId,
+  | WriteAbstractBack(destination: PlanAbstractStorageId,
                       invocation: AbstractAccessorInvocationAt<S>,
                       source: TemporaryValue(TemporaryId) | ComputedValue(PlanValueId),
                       conversion: ConversionPlan<S>,
@@ -542,31 +542,31 @@ AccessCompletionStepOperation<S: WitnessUseStage> =
 
 CompletionCondition = OnNormalCompletion | OnExceptionalCompletion | Always
 
-AccessConversionSite = PreparationConversion(AccessStepId)
-                     | TemporaryInitialization(step: AccessStepId,
+StorageAccessCoercionSite = PreparationCoercion(StorageAccessStepId)
+                     | TemporaryInitializationCoercion(step: StorageAccessStepId,
                                                conversion: InitializationPath)
-                     | TerminalStorageWriteConversion
+                     | TerminalStorageWriteCoercion
 
-RankedAccessConversion =
-    ConvertedAccess(site: AccessConversionSite, rank: ConversionRank,
+RankedStorageCoercion =
+    AppliedStorageCoercion(site: StorageAccessCoercionSite, rank: ConversionCost,
                     environment: ConversionEnvironmentId)
-  | ConsumedWithoutAccessConversion(rule: RuleId)
+  | ConsumedWithoutStorageCoercion(rule: RuleId)
 ```
 
 Plan- and call-local IDs are typed ordinals, not process addresses or global semantic identities.
 Operand ordinals are dense in canonical operand-role order; preparation and completion step
-ordinals are dense in serialized execution order; value, physical-place, abstract-place, and
+ordinals are dense in serialized execution order; value, physical-storage, abstract-storage, and
 temporary ordinals are dense in first-definition order within their separate domains.
 Reference-capture-result ordinals are dense in the capture environment's evaluation order.
 Renumbering a valid plan or environment by these rules is part of canonicalization, so
 alpha-equivalent local numbering cannot create a second encoding.
 
-`ELB-PLC-001`: `ElaborateRegisteredPhysicalProjectionAt<S>` preserves the application's identity,
+`ELB-STO-001`: `ElaborateRegisteredPhysicalProjectionAt<S>` preserves the application's identity,
 authenticated site assignment,
 registration (including environment and static inputs), operand-role domain, evaluation order,
 intrinsic output proof, and control proof byte-for-byte. In that exact order it elaborates each
 stored `runtimeOperands[role].source` once and binds the unchanged access recipe to that elaborated
-source, producing the corresponding `BoundAccessPlan<S>`. The supplied binding map has exactly the
+source, producing the corresponding `BoundStorageAccessPlan<S>`. The supplied binding map has exactly the
 operand domain and each recipe equals the source application's recipe; it may discharge operands
 and physical-storage obligations but cannot replace endpoint type/category or select another
 conversion. Every operand recipe has a `PassArgument` terminal matching its registered runtime
@@ -574,35 +574,35 @@ endpoint; a storage read/write terminal is invalid. Selection effects/capabiliti
 semantic uses have already been contributed once during checking and are not rediscovered during
 elaboration.
 
-`ELB-PLC-002`: Lowering the elaborated application executes those bound plans in
-`evaluationOrder` and records the resulting `CoreValueId` under the same role in one
-`CoreRegisteredPhysicalProjection`. The Core output is exactly
-`PhysicalPlace(application.output.storage)`. No base/index is recovered from the output place path,
-and no generic Core primitive may manufacture that place. Reordering operands, dropping an index,
+`ELB-STO-002`: Lowering the elaborated application executes those bound plans in
+`evaluationOrder` and records the resulting `IRReadyValueId` under the same role in one
+`IRReadyRegisteredPhysicalProjection`. The IRReady output is exactly
+`PhysicalStorage(application.output.storage)`. No base/index is recovered from the output storage path,
+and no generic IRReady primitive may manufacture that storage. Reordering operands, dropping an index,
 or replacing one with an equal-typed value invalidates the application rather than changing only
 presentation order. The authenticated site has already fixed and validated the nominal identity;
-Core retains that identity but removes the site assignment and its `Origin`.
+IRReady retains that identity but removes the site assignment and its `Origin`.
 
-`ELB-PLC-003`: `ElaborateBuiltinPhysicalProjectionAt<S>` preserves the application's identity,
+`ELB-STO-003`: `ElaborateBuiltinPhysicalProjectionAt<S>` preserves the application's identity,
 authenticated site assignment, operation, operand-role domain, evaluation order, result proof, and
 control proof byte-for-byte. It
 elaborates the exact stored base and converted index once in that order. The base remains a
-`PhysicalPlace` for `output.inputStorage`; the index remains the checked `RValue` at its endpoint
+`PhysicalStorage` for `output.inputStorage`; the index remains the checked `RValue` at its endpoint
 type. Semantic uses were contributed during checking and are not rediscovered. Elaboration cannot
 recover either operand from `BuiltinElement`, the originating typed node, or the input storage's
 type.
 
-`ELB-PLC-004`: Lowering the elaborated builtin application records both resulting `CoreValueId`
+`ELB-STO-004`: Lowering the elaborated builtin application records both resulting `IRReadyValueId`
 operands under their unchanged roles and constructs exactly one
-`CoreBuiltinPhysicalProjection`. Its result is `PhysicalPlace(application.output.storage)`, and the
-Core node retains the identity, operation, input shapes, result proof, and control proof needed to
+`IRReadyBuiltinPhysicalProjection`. Its result is `PhysicalStorage(application.output.storage)`, and the
+IRReady node retains the identity, operation, input shapes, result proof, and control proof needed to
 replay that projection. Missing, duplicated, reordered, or equal-typed replacement operands make
 lowering invalid. A builtin application cannot lower as a
-`CoreRegisteredPhysicalProjection`, even when a target happens to use the same eventual opcode.
-The Core boundary removes the validated site assignment and its `Origin` while retaining its
+`IRReadyRegisteredPhysicalProjection`, even when a target happens to use the same eventual opcode.
+The IRReady boundary removes the validated site assignment and its `Origin` while retaining its
 nominal identity.
 
-`ELB-ACC-010`: `AccessPlan.terminal` is the closed purpose of the recipe. A plan produced by
+`ELB-ACC-010`: `StorageAccessPlan.terminal` is the closed purpose of the recipe. A plan produced by
 `PlanArgumentAccess` has exactly `PassArgument`; a plan produced by `PlanStorageAccessAt<S>` for a
 request whose intent is `ReadValueAccess` has exactly `YieldStorageRead`; and a plan produced for
 `WriteValueAccess(w)` has exactly `CompleteStorageWrite`. A registered physical-
@@ -613,9 +613,9 @@ standalone write with a dummy runtime argument.
 
 `PassArgument` transfers its prepared argument to the enclosing call or registered operation; its
 completion conditions are interpreted on that operation's normal and exceptional return edges.
-`YieldStorageRead` names the result of the selected `ReadPhysicalPlace` or `ReadAbstractPlace` and
+`YieldStorageRead` names the result of the selected `ReadPhysicalStorage` or `ReadAbstractStorage` and
 returns that prepared value from the storage-access expression; a fallback names the physical read
-after its single `ResolveAbstractPlaceThroughReference`.
+after its single `ResolveAbstractStorageThroughReference`.
 `CompleteStorageWrite` executes its stored physical store or abstract setter and returns the named
 already-evaluated source value only after that operation completes normally. Its operation's `when`
 condition is interpreted against completion of the preparation phase; completion-list conditions
@@ -624,14 +624,14 @@ are interpreted against the selected terminal's outcome. Thus `OnNormalCompletio
 imply that every access plan contains a call.
 
 `ELB-ACC-011`: A physical-domain call slot has exactly one
-`PassArgument(PhysicalPlaceArgument(p, binding))` terminal. `binding.mode` is the slot's complete
-substituted `PassingMode`, whose domain is `PhysicalOperand(_)`; its access is `ReadAccess` for
+`PassArgument(PhysicalStorageArgument(p, binding))` terminal. `binding.mode` is the slot's complete
+substituted `ParamPassingMode`, whose domain is `PhysicalOperand(_)`; its access is `ReadAccess` for
 `ConstRefMode` and `ReadWriteAccess` for `RefMode`. The plan has no temporary extent, conversion,
-write-back, borrow step, or cleanup step. The physical place `p` is produced in exactly one of two
-ways. For `DirectPhysicalParameterSource`, `ProjectPhysicalPlace` discharges the stored physical
-obligation for the source's existing `PhysicalPlace`. For
-`AccessorProducedPhysicalParameterSource`, `ProjectAbstractPlace` is followed by exactly one
-`ProjectPhysicalPlaceThroughParameterAccessor` carrying the byte-identical
+write-back, borrow step, or cleanup step. The physical storage `p` is produced in exactly one of two
+ways. For `DirectPhysicalParameterSource`, `ProjectPhysicalStorage` discharges the stored physical
+obligation for the source's existing `PhysicalStorage`. For
+`AccessorProducedPhysicalParameterSource`, `ProjectAbstractStorage` is followed by exactly one
+`ProjectPhysicalStorageThroughParameterAccessor` carrying the byte-identical
 `ParameterReferenceAccessorPlanAt<S>` from `binding.source`; that operation evaluates the captured
 receiver and indices once, invokes the accessor whose key is exactly `binding.mode.access`, retains
 its handle result and admission proof, and executes its stored dereference to produce `p`.
@@ -660,20 +660,20 @@ other plan preserves selected source provenance or uses `UnknownAlias`; it canno
 from access mode, result type, node identity, or container position. `aliasClassProvenance` is the
 sole alias-provenance input from an access plan to `CheckCallAliasClaims`.
 
-`ELB-ACC-001`: Every `AccessOperandId` used by a preparation step or physical-storage obligation
+`ELB-ACC-001`: Every `StorageAccessOperandId` used by a preparation step or physical-storage obligation
 exists in `operands`, and obligation ordinals are dense.
-`ProjectPhysicalPlace(..., RequiredPhysicalStorage(o))` names one existing obligation whose input
+`ProjectPhysicalStorage(..., RequiredPhysicalStorage(o))` names one existing obligation whose input
 equals the step input. A `ConcreteStorageObligation` is permitted only for a `TypedInput` already
-classified as its proof's exact `PhysicalPlace`; an `AdapterStorageObligation` only for
-`AdapterPhysicalPlace`. `ProjectPhysicalPlaceThroughParameterAccessor` is permitted only when the
+classified as its proof's exact `PhysicalStorage`; an `AdapterStorageObligation` only for
+`AdapterPhysicalStorage`. `ProjectPhysicalStorageThroughParameterAccessor` is permitted only when the
 terminal binding's source is `AccessorProducedPhysicalParameterSource(source, plan)`, the preceding
-`ProjectAbstractPlace` projects that exact typed `source`, and its result storage is exactly
+`ProjectAbstractStorage` projects that exact typed `source`, and its result storage is exactly
 `plan.endpoint.output.storage`. The plan's mode, access environment, and derived requirement equal
 the terminal binding's corresponding fields. Each
-`PlanValueId`, `PlanPhysicalPlaceId`, `PlanAbstractPlaceId`, and `TemporaryId` has exactly one
-definition. Preparation is SSA-ordered: every value/place use refers to an earlier definition, and
+`PlanValueId`, `PlanPhysicalStorageId`, `PlanAbstractStorageId`, and `TemporaryId` has exactly one
+definition. Preparation is SSA-ordered: every value/storage use refers to an earlier definition, and
 `InitializeTemporary(d, source)` defines `d.id` only at its stored initialization application's
-normal checkpoint. Every terminal ID refers to a prepared value, physical place, or initialized
+normal checkpoint. Every terminal ID refers to a prepared value, physical storage, or initialized
 temporary of the exact required alternative. A validator derives the complete def-use map; no
 parallel table is serialized.
 
@@ -685,59 +685,59 @@ For every descriptor `d`, `d.site = d.initialization.site`,
 `d.identity = d.initialization.identity = temporaryStorageIdentity(d.site.site)`, and
 `d.alias = ExactAliasRoot(temporaryStorageAliasRoot(d.identity))`. Thus neither plan ordinals nor
 initialization-storage content IDs become ownership/alias identities.
-`AccessLifetime.temporary` has exactly the domain of the plan's initialized temporary; an immediate
+`StorageAccessLifetime.temporary` has exactly the domain of the plan's initialized temporary; an immediate
 or physical-domain plan has none. Abstract `OutMode`/`InOutMode` write-back reads an initialized
-temporary/value, targets a defined physical or abstract place, and precedes destruction of its
-source. Completion order cannot use a destroyed temporary or a value/place outside its declared
+temporary/value, targets a defined physical or abstract storage, and precedes destruction of its
+source. Completion order cannot use a destroyed temporary or a value/storage outside its declared
 access lifetime. The validator symbolically checks the terminal-relative normal and exceptional
 paths from `ELB-ACC-010`.
 
-`ELB-ACC-003`: `Some(ConvertedAccess(...))` selects one existing `ConvertValue`, a conversion at the
+`ELB-ACC-003`: `Some(AppliedStorageCoercion(...))` selects one existing `ApplyCoercion`, a conversion at the
 `InitializationPath` stored by an `InitializeTemporary` application, or a terminal
 `StorageWriteOperationAt<S>` conversion, and its stored rank must equal
 `rankConversion(selectedConversion, environment)`. The environment is serialized and
 must equal the candidate's registered conversion environment, so deserialization can replay the
 rank without ambient target or language settings.
-`Some(ConsumedWithoutAccessConversion(...))` is permitted only for a candidate-passing rule that
+`Some(ConsumedWithoutStorageCoercion(...))` is permitted only for a candidate-passing rule that
 consumes no converted input. Every access plan installed in an overload candidate or call slot has
 `Some`; `None` is permitted only when the plan is not a candidate-comparison input, including a
 standalone storage read/write. Thus ranking and elaboration inspect the same conversion operation
 rather than parallel plans, while a non-candidate plan carries no fabricated rank.
 
-`ELB-ACC-004`: `BoundAccessPlan.bindings` has exactly the domain of `recipe.operands`; each bound
-value/place or capture projection matches the operand's stated type and category, and an
+`ELB-ACC-004`: `BoundStorageAccessPlan.bindings` has exactly the domain of `recipe.operands`; each bound
+value/storage or capture projection matches the operand's stated type and category, and an
 `AdapterInput` may bind only the declared adapter role. A capture projection is checked in the
 enclosing call's source environment under `ELB-ACC-007`; it is not permission to resolve the
 original typed expression again. `physicalStorageProofs` has exactly the domain of
-`recipe.physicalStorageObligations`. Each proof's storage is the `PhysicalPlace` bound to that
+`recipe.physicalStorageObligations`. Each proof's storage is the `PhysicalStorage` bound to that
 obligation's input and satisfies its requirement. For a concrete obligation it equals the proof
 already selected during applicability; for an adapter obligation it discharges the pathless formal
-promise when the thunk input is bound. An `AdapterPhysicalPlace` endpoint promises a requirement at
-least as strong, while an `AdapterAbstractPlace` can never supply a proof. Binding
+promise when the synthesized requirement witness method input is bound. An `AdapterPhysicalStorage` endpoint promises a requirement at
+least as strong, while an `AdapterAbstractStorage` can never supply a proof. Binding
 substitutes leaves and discharges obligations only; it cannot alter steps, local IDs, ranking,
 lifetime, or cleanup. Lowering can therefore execute a validated recipe without re-running access
 or conversion selection.
 
-`ELB-ACC-005`: `PassArgument(PhysicalPlaceArgument(p, binding))` consumes only the
-`PlanPhysicalPlaceId` for `physicalParameterStorage(binding)`. `binding.identity` is the
+`ELB-ACC-005`: `PassArgument(PhysicalStorageArgument(p, binding))` consumes only the
+`PlanPhysicalStorageId` for `physicalParameterStorage(binding)`. `binding.identity` is the
 conversion-free physical-storage identity proof and contains its sole type-equality proof. That
 proof, `binding.instantiatedRequirement`, `binding.physicalStorage`, `binding.mode`, and
 `binding.accessEnvironment` are exactly those selected for that call slot; no separately supplied
 lifetime, address-space selection, source-provenance fact, equality, or conversion can replace
-them. A direct source uses `ProjectPhysicalPlace(..., RequiredPhysicalStorage(o))`, whose discharged
-obligation requires that exact existing `PhysicalPlace`. An accessor-produced source instead uses
-`ProjectPhysicalPlaceThroughParameterAccessor` and the exact access-indexed plan stored in
-`binding.source`; the plan's dereference endpoint is the argument place. No ordinary getter,
+them. A direct source uses `ProjectPhysicalStorage(..., RequiredPhysicalStorage(o))`, whose discharged
+obligation requires that exact existing `PhysicalStorage`. An accessor-produced source instead uses
+`ProjectPhysicalStorageThroughParameterAccessor` and the exact access-indexed plan stored in
+`binding.source`; the plan's dereference endpoint is the argument storage. No ordinary getter,
 setter/write-back, temporary, or nonidentity conversion satisfies either physical mode.
 `WriteAbstractBack` remains available only to the separately specified abstract `OutMode` and
-`InOutMode` policies. This is the elaboration invariant corresponding to `TYP-ACC-004`,
-`TYP-ACC-006`, and the chapter 7 physical-mode rules.
+`InOutMode` policies. This is the elaboration invariant corresponding to `TYP-ACC-005`,
+`TYP-ACC-007`, and the chapter 7 physical-mode rules.
 
-`ELB-ACC-008`: `ResolveAbstractPlaceThroughReference` is the closed lowering hook for an ordinary
+`ELB-ACC-008`: `ResolveAbstractStorageThroughReference` is the closed lowering hook for an ordinary
 read/write fallback already selected by `PlanStorageAccessAt<S>`; it is not a physical-parameter
-binding operation. Its input is the exact `AbstractPlace(plan.invocation.storage)` selected by the
+binding operation. Its input is the exact `AbstractStorage(plan.invocation.storage)` selected by the
 stored `InternalRefStoragePlanAt<S>`. The authorization kind is `ReadThroughRefAccessor` when
-followed by `ReadPhysicalPlace` and `WriteThroughRefAccessor` when its result is the destination of
+followed by `ReadPhysicalStorage` and `WriteThroughRefAccessor` when its result is the destination of
 a `CompleteStorageWrite(WritePhysicalStorage(...))` terminal. The stored `plan.storageProof`
 satisfies that authorization's complete requirement. No terminal form changes which authorization
 was selected.
@@ -748,18 +748,18 @@ ref-accessor call, obtains the exact raw result and certificate stored in
 use-specific `plan.handle.admitted` satisfies `plan.authorization.requirement` without changing the
 raw shape; that admitted handle is the exact input of the stored dereference to
 `plan.endpoint.output.storage`. `handle` denotes this plan-internal raw/admission pair and `result`
-denotes the resulting physical place. The handle has exactly one semantic consumer: the stored
+denotes the resulting physical storage. The handle has exactly one semantic consumer: the stored
 dereference (or the registered transform followed immediately by that dereference). It cannot be
 named by the plan terminal, become a `RuntimeArgumentAt<S>`, be stored, returned, captured, merged, or
 escape to another operation.
 The invocation's `requestContext` is the originating `StorageAccessRequestAt<S>.context`,
 `plan.endpoint.output.storage.lifetime` equals that context's `evaluationLifetime`, and the stored
 source-lifetime proof has the admitted handle lifetime and that exact result lifetime as endpoints.
-`ReadPhysicalPlace` performs the physical load and terminal `WritePhysicalStorage` performs the
+`ReadPhysicalStorage` performs the physical load and terminal `WritePhysicalStorage` performs the
 physical store; neither operation changes the original property's classifier. Thus the fallback
 remains an explicit ref-accessor-call/dereference/load-or-store sequence, while the source property
-remains `AbstractPlace`. It is distinct from
-`ProjectPhysicalPlaceThroughParameterAccessor`, which requires a
+remains `AbstractStorage`. It is distinct from
+`ProjectPhysicalStorageThroughParameterAccessor`, which requires a
 `ParameterReferenceAccessorPlanAt<S>` selected specifically for a physical-mode call and yields the
 physical endpoint only to that call plan.
 
@@ -769,15 +769,15 @@ stored write source. Its terminal is exactly `CompleteStorageWrite(operation, so
 `sourceValue` is that `EvaluateOnce` result. The selected `WritePhysicalStorage` or
 `WriteAbstractStorage` operation has `source = ComputedValue(sourceValue)`,
 `conversion = w.conversion`, and `when = w.completion`; a ref-accessor fallback first executes its
-single `ResolveAbstractPlaceThroughReference` and then uses the same `WritePhysicalStorage`
+single `ResolveAbstractStorageThroughReference` and then uses the same `WritePhysicalStorage`
 equation. The
-conversion endpoints equal the source value type and destination `placeValueType`, its semantic uses
-occur exactly once in the plan union, and `rankingConversion` is `Some` naming that stored
+conversion endpoints equal the source value type and destination `storageValueType`, its semantic uses
+occur exactly once in the plan union, and `rankingCoercion` is `Some` naming that stored
 conversion exactly when it participates in ranking and otherwise `None`. No parameter-mode
 temporary/write-back or independently reconstructed
 right-hand side may satisfy this rule.
 
-`ELB-ACC-006`: `AccessPlan.semanticUses` is the exact canonical union of every
+`ELB-ACC-006`: `StorageAccessPlan.semanticUses` is the exact canonical union of every
 `AbstractAccessorInvocationAt<S>`, `InternalRefStoragePlanAt<S>` invocation,
 `ParameterReferenceAccessorPlanAt<S>` invocation, nested conversion, and
 registered preparation/terminal/completion operation in the plan. For each
@@ -792,7 +792,7 @@ callable target. Receiver presence matches that signature; `indices` covers ever
 parameter except the `Set.valueParameter`, whose value is supplied by `WriteAbstractStorage` for a
 standalone write or `WriteAbstractBack` for a call-argument write-back.
 
-`ELB-ACC-007`: `IndependentCallSources` permits only `ValueSource` and `PlaceSource` bindings. For
+`ELB-ACC-007`: `IndependentCallSources` permits only `ValueSource` and `StorageSource` bindings. For
 `CapturedReferenceSources(environment)`, `environment.evaluationOrder` is a duplicate-free
 bijection onto `environment.results`, and `environment.sourceSet` resolves the exact
 `CapturedStorageSources` from which it was built. Result IDs are dense in that source set's
@@ -801,12 +801,12 @@ evaluation order, every map key equals the stored ID, and
 position. `result.evaluation` is the stage-correct elaboration of
 `capturedSourceExpr(result.source)` and its required `Origin` points to that exact typed expression;
 this relation, not equal type/category, authorizes the capture. The evaluation remains an explicit
-`ElaboratedExprAt<S>` even when its classifier is a place, so lowering has one executable producer
-rather than only a semantic `PlaceRef`.
+`ElaboratedExprAt<S>` even when its classifier is a storage, so lowering has one executable producer
+rather than only a semantic `StorageRef`.
 `CapturedSourceProjection(result, projection)` is valid only in this environment; the result
 exists, `projection.source = capturedSourceRole(result.source)`, and projecting
 `projection.expansion` from the evaluation's derived classifier yields exactly the bound
-`AccessOperand` type and category. No separately stored result category may disagree. An empty pack
+`StorageAccessOperand` type and category. No separately stored result category may disagree. An empty pack
 has no projection. Multiple expansion paths may name one result and never re-evaluate it.
 
 For an explicit reference-accessor plan, every `sourceBindings[role]` names an existing call slot,
@@ -821,17 +821,17 @@ projected `TypeId` happens to agree.
 
 `ELB-REF-001`: Elaborating `DirectPhysicalReference` validates its stored
 `PhysicalStorageProof` and `DirectStorageHandleProof` and then emits the closed
-`CoreAddressOfPhysicalStorage` alternative. The latter proof retains the exact
+`IRReadyAddressOfPhysicalStorage` alternative. The latter proof retains the exact
 `ConcreteAddressSpaceProjectionProof` from the possibly symbolic physical address space to the
 handle's concrete address space, plus the complete source-provenance equality. A
 `RegisteredDirectReferenceApplication` instead emits
-`CoreRegisteredDirectReference`; its exact standard-environment registration, physical input,
-handle output, unary/nonthrowing control proof, and runtime operand are retained. The Core
+`IRReadyRegisteredDirectReference`; its exact standard-environment registration, physical input,
+handle output, unary/nonthrowing control proof, and runtime operand are retained. The IRReady
 application stores `input.operandType`, `input.storage`, and `input.proof` in its corresponding
-stage-free fields, while the elaborated physical value becomes the separate `place` operand.
+stage-free fields, while the elaborated physical value becomes the separate `storage` operand.
 Selection state, semantic-use edges, and `input.operand` are consumed rather than copied. Neither
 form uses
-generic Core `Primitive`, and lowering never chooses an operation from syntax or operand type.
+generic IRReady `Primitive`, and lowering never chooses an operation from syntax or operand type.
 Semantic-use edges have already entered the caller's inference graph and are not contributed a
 second time during elaboration.
 
@@ -839,7 +839,7 @@ second time during elaboration.
 `ReferenceCaptureEnvironmentAt<S>` with
 `sourceSet = ContentId(plan.invocation.sources)`: it elaborates and
 evaluates every exact stored source expression once in
-`plan.invocation.sources.evaluationOrder`, assigns the resulting value/place the dense
+`plan.invocation.sources.evaluationOrder`, assigns the resulting value/storage the dense
 `ReferenceCaptureResultId` for that position, and projects each
 `plan.invocation.sourceBindings[role].projection` through that result without re-evaluating its
 source. Those
@@ -853,70 +853,70 @@ or access planning is repeated. The stored `AccessorReferenceResultCertificate` 
 its contract instantiation over this same capture environment and source-binding map. Its
 instantiation's `provenanceSources` is byte-identical to
 `plan.invocation.provenanceSources`; resolving that map sends each declaration-stable accessor
-receiver/parameter role to the captured projection validated under `TYP-PLC-009`. Before
+receiver/parameter role to the captured projection validated under `TYP-STO-009`. Before
 completion, validation requires
 `call.resultAuthority = accessorResultAuthority(plan.invocation.declared)` and exactly
 the following provenance; deserialization rechecks the same equation:
 
 ```text
-call.resultProvenance = ReferenceHandleCallResult({
+call.resultProvenance = PointerLikeCallResult({
     result = plan.invocation.rawResult.result,
-    authority = AccessorReferenceHandleCallResult(
+    authority = AccessorPointerLikeCallResult(
         plan.invocation.rawResult.certificate)
 })
 ```
 
 On normal completion,
 the `CallRegion` result has
-`ReferenceHandleValue(plan.invocation.rawResult.result.handle)` under that certificate; this is the
+`PointerLikeValue(plan.invocation.rawResult.result.handle)` under that certificate; this is the
 inner accessor call's raw result provenance, not a type-based classification or a use-specific
 storage requirement. Then
-`CoreAccessorReferenceResult(callResult, coreProof)` validates the checked certificate and projects
-it before crossing the Core boundary. `coreProof.normalResult = callResult`; its contract,
+`IRReadyAccessorReferenceResult(callResult, irReadyProof)` validates the checked certificate and projects
+it before crossing the IRReady boundary. `irReadyProof.normalResult = callResult`; its contract,
 invocation identity, subject, signature, expected referent, equalities, result, and component-rule
 derivation equal the checked certificate. Every typed captured source is replaced by the exact
-`CoreValueId` produced by the capture environment, and every formal-to-source projection becomes a
-`CoreCallOperandProjection` naming the corresponding Core call operand and expansion path. Neither
+`IRReadyValueId` produced by the capture environment, and every formal-to-source projection becomes a
+`IRReadyCallOperandProjection` naming the corresponding IRReady call operand and expansion path. Neither
 `AccessorHandleResultProof`, `AccessorReferenceResultCertificate`, `CapturedStorageSources`, nor a
 `NodeId<Typed>` is retained transitively. The wrapper preserves the already handle-shaped normal
 result without re-executing or reclassifying it.
 `InvokeReferenceAccessor` returns that wrapper under its stored `AccessorHandleAdmissionProof`;
-`InvokeReferenceAccessorThenRegistered` feeds the wrapper to one `CoreRegisteredHandleTransform`.
-The transform's stage-free Core application retains registration, input/output handle proofs, and
+`InvokeReferenceAccessorThenRegistered` feeds the wrapper to one `IRReadyRegisteredHandleTransform`.
+The transform's stage-free IRReady application retains registration, input/output handle proofs, and
 control proof, while the exact wrapper becomes its separate `handle` operand. It drops the typed
 `input.operand`, selection state, and semantic-use edges only after validating them. The optional
 data operation therefore carries its validated application rather than a bare rule tag.
 
-`ELB-REF-003`: A typed `CheckedDereferenceAt<S>` emits `CoreReferenceDereference`,
-`CorePointerDereference`, or `CoreRegisteredReferenceDereference` according to its stored closed
+`ELB-REF-003`: A typed `CheckedDereferenceAt<S>` emits `IRReadyReferenceDereference`,
+`IRReadyPointerDereference`, or `IRReadyRegisteredReferenceDereference` according to its stored closed
 operation. Its `DereferencedStorageProof` supplies the complete physical result type, access,
 mutability, address space, lifetime, alias provenance, and source relation. The result lifetime is
 exactly `resolve(checked.context).evaluationLifetime`, and its source-lifetime proof has the input
 handle lifetime and that exact result lifetime as endpoints. No pass derives that shape from the
 operand type or original property. The proof identity equals `checked.identity`, its path is
-`DereferencedReference(checked.identity)`, and the exact elaborated handle becomes the Core operand;
+`DereferencedReference(checked.identity)`, and the exact elaborated handle becomes the IRReady operand;
 `checked.identity = dereferenceApplicationIdentity(checked.site.site)`, and the authenticated site
-assignment and typed operand node are not copied into Core. A registered dereference is not erased to generic Core
-`Primitive`/IR `DataOperation`.
+assignment and typed operand node are not copied into IRReady. A registered dereference is not
+erased to a generic IRReady `Primitive` or an unproved registered-data instruction.
 
 `ELB-REF-004`: The accessor call, optional registered reference operation, and explicit dereference
 remain distinct ordered operations. Lowering cannot fuse an abstract property's reference accessor
-into a physical call operand or treat the handle result itself as a place. For an explicit
-reference expression, only the separately checked dereference creates a physical place. For a
-physical-parameter plan, `ProjectPhysicalPlaceThroughParameterAccessor` retains the same ordered
+into a physical call operand or treat the handle result itself as a storage. For an explicit
+reference expression, only the separately checked dereference creates a physical storage. For a
+physical-parameter plan, `ProjectPhysicalStorageThroughParameterAccessor` retains the same ordered
 call/optional-transform/dereference sequence and passes only its proven endpoint through
-`PhysicalPlaceArgument`. In neither case does the original property's classifier change from
-`AbstractPlace`.
+`PhysicalStorageArgument`. In neither case does the original property's classifier change from
+`AbstractStorage`.
 
 `ElaboratedCall`, `ElaboratedReceiver`, `ElaboratedArgument`, `ElaboratedExpr`, `ElaboratedDecl`,
-`AccessPlan`, and `BoundAccessPlan` are shorthand for their `<Published>` forms.
+`StorageAccessPlan`, and `BoundStorageAccessPlan` are shorthand for their `<Published>` forms.
 `ConstructionElaboratedDecl = ElaboratedDeclAt<Construction>` is permitted only inside a synthesis
-construction; `publishElaboratedDecl(decl, validatedConformances, contractCompletions)` recursively
+construction; `publishElaboratedDecl(decl, validatedWitnessTables, contractCompletions)` recursively
 rewrites every operational witness ref and completes every construction contract state, returning
 `ElaboratedDeclAt<Published>` or failing atomically.
 
-`subjectOf(dispatch)` projects a witness use to its stable `InterfaceSubtypeWitnessId` and otherwise
-projects a direct/closure `ResolvedDeclRefAt<S>` to its stable `target`; dependency revisions remain
+`subjectOf(dispatch)` projects a witness use to its stable `SubtypeWitnessId` and otherwise
+projects a direct/lambda `ResolvedDeclRefAt<S>` to its stable `target`; dependency revisions remain
 on the dispatch value but do not split a callable contract subject. Builtin dispatch likewise
 projects away only its resolution sidecar. It otherwise preserves the exact dispatch identity
 shown above. A
@@ -934,8 +934,8 @@ branches or worlds have distinct completion keys and cannot overwrite one anothe
 
 An access recipe is stage-neutral. Typed overload resolution supplies `TypedInput` operands;
 abstract interface adapters supply `AdapterInput` roles. Elaboration binds each operand to an
-elaborated value/place or to a projection of one explicitly evaluated capture result, producing
-`BoundAccessPlan`; it does not rerun applicability or change the recipe. This allows the same plan
+elaborated value/storage or to a projection of one explicitly evaluated capture result, producing
+`BoundStorageAccessPlan`; it does not rerun applicability or change the recipe. This allows the same plan
 algebra to be unit-tested without either a full typed expression tree or generated adapter body.
 
 Default arguments and named/positional reordering are already reflected by `parameter`. Every
@@ -943,16 +943,16 @@ temporary, post-conversion, and write-back for an abstract-domain mode is explic
 prepares an ordinary value; `OutMode` and `InOutMode` may use their named temporary/write-back
 policies and an abstract destination may invoke its getter/setter contract as those policies
 require. `ConstRefMode` and `RefMode` instead pass only the exact physical endpoint retained by
-`PhysicalParameterBindingProofAt<S>`: either an existing `PhysicalPlace` or the result of the exact
+`PhysicalParameterBindingProofAt<S>`: either an existing `PhysicalStorage` or the result of the exact
 access-indexed reference-accessor call and stored dereference. Neither physical mode admits an
 rvalue, ordinary getter/setter path, conversion, temporary, or write-back. The checker validates
 all simultaneous `aliasClass` values and mode-specific claims before the call. A different
 throw/write-back policy must be a named language rule, never an incidental lowering choice.
 
 Dispatch is a property of `CallableValue`: a direct symbol, witness method
-`(WitnessCallRef<S>, WitnessRuntimeEntryKey)`, dynamic slot, closure invocation, or builtin.
+`(SubtypeWitnessRef<S>, RuntimeInterfaceRequirementKey)`, dynamic slot, lambda invocation, or builtin.
 It is deliberately absent from
-`FunctionType`; the same signature can be invoked through different dispatch paths.
+`FuncType`; the same signature can be invoked through different dispatch paths.
 
 `ELB-DYN-001`: `DynamicDispatchKey` is the canonical serialized identity of a dynamic slot. Its
 `introducer` is the declaration that first creates the slot, `signature` is that declaration's
@@ -964,9 +964,9 @@ assigned. A mismatched owner, signature, or role is invalid dispatch, not a look
 
 `ELB-CALL-001`: The number and identity of elaborated ordinary arguments match the
 `CallableSignature.parameterSlots`; each slot ordinal selects the corresponding semantic
-`FunctionType` parameter. The receiver is separate; specialization frames are owned by the
-canonical declaration reference, conformance, or closure identity inside `CallableValue`.
-For direct, closure, or builtin dispatch, the stage-correct witness-resolution sidecar is the exact
+`FuncType` parameter. The receiver is separate; specialization frames are owned by the
+canonical declaration reference, conformance, or lambda identity inside `CallableValue`.
+For direct, lambda, or builtin dispatch, the stage-correct witness-resolution sidecar is the exact
 minimal union required by all witness evidence in its specialization/static operands and is copied
 from the selected bound use or synthesis input without ambient definition search.
 
@@ -987,7 +987,7 @@ participate in those fixpoints; `publishElaboratedDecl` consumes the stabilized
 `ContractCompletionMap`. Thus a published elaboration cannot enter the inference SCC, and the
 callee has one contract authority.
 
-`ELB-CALL-008`: `ElaborateTypedCallAt<S>` requires one `BoundAccessPlan<S>` for every key in
+`ELB-CALL-008`: `ElaborateTypedCallAt<S>` requires one `BoundStorageAccessPlan<S>` for every key in
 `call.callSlots` and no other key. Each binding discharges only the stored recipe's operands and
 physical-storage obligations, and every recipe has a `PassArgument` terminal; a storage-read or
 storage-write terminal is a closed elaboration failure at a call slot. `IndependentCallSources` is
@@ -1006,7 +1006,7 @@ type, and copies `winner.aliasCompatibility` byte-for-byte. It constructs `capab
 `BoundCallSlot` order; `dispatch` is the unique dispatch proven by the
 winner's `BoundDeclUse.memberEvidence`/lookup path or registered builtin rule. The direct-use keys
 name the enclosing callable and this call's stable child ordinal. Their requirements project the
-same `subjectOf(dispatch)` and selection effect/capability facts: direct/closure calls retain their
+same `subjectOf(dispatch)` and selection effect/capability facts: direct/lambda calls retain their
 resolved declaration target plus exact stage-correct witness resolutions, witness calls retain
 their witness value and entry, and dynamic/builtin calls retain the
 closed registered selection requirement. `selectionContract.signature = intern(signature)` and its
@@ -1089,10 +1089,10 @@ zero, one, and multiple sources all use the same equation.
 `ELB-CALL-010`: A call-result provenance is checked against `call.resultAuthority` before the call
 is published. Resolving that ID must yield the exact declaration/registered anchor selected by
 `call.dispatch` and `intern(call.signature)`. `OrdinaryCallResult` is valid exactly for
-`OrdinaryCallableResult`. For `FixedReferenceHandleCallResult(a)`, the authority kind is
-`FixedReferenceHandleCallableResult(a)` and resolving `a` yields the call result type and the
-byte-identical stored `ReferenceHandleValueShape`. For a registered call result, the authority kind
-names one `RegisteredReferenceHandleResultContract`; its registration, environment, and static
+`OrdinaryCallableResult`. For `FixedPointerLikeCallResult(a)`, the authority kind is
+`FixedPointerLikeCallableResult(a)` and resolving `a` yields the call result type and the
+byte-identical stored `PointerLikeValueShape`. For a registered call result, the authority kind
+names one `RegisteredPointerLikeResultContract`; its registration, environment, and static
 inputs are copied into the call-specific provenance and replay over the exact runtime inputs to
 derive the stored raw result shape. Call-result provenance states what the call produces; a
 consumer separately proves that shape against its own physical-storage/reference requirement.
@@ -1100,10 +1100,10 @@ Equal signature, result `TypeId`, or pointer-like machine representation cannot 
 authority alternative.
 
 The explicit-accessor path is atomic and has no construction cycle. The caller supplies the
-`AccessorReferenceHandleSurfaceCallResult` alternative with `invocationIdentity`, `invocationSite`, `sources`,
+`AccessorPointerLikeSurfaceCallResult` alternative with `invocationIdentity`, `invocationSite`, `sources`,
 `provenanceSources`, `expectedReferent`, `context`, and `result`, not an authority, contract, or
 certificate containing an already-built call. The builder requires the already resolved authority kind to be
-`AccessorReferenceHandleCallableResult(contract)` and constructs the following immutable input from
+`AccessorPointerLikeCallableResult(contract)` and constructs the following immutable input from
 its own prospective identity and selected surface:
 
 ```text
@@ -1122,8 +1122,8 @@ AccessorReferenceResultInstantiationInputAt<S> {
 ```
 
 It invokes `InstantiateAccessorReferenceResultAt<S>` once and publishes a
-`ReferenceHandleCallResult` whose result is `result` and whose authority is
-`AccessorReferenceHandleCallResult(certificate)` only when the returned
+`PointerLikeCallResult` whose result is `result` and whose authority is
+`AccessorPointerLikeCallResult(certificate)` only when the returned
 certificate repeats every semantic input field other than the consumed source-only
 `invocationSite`, its instantiation has the identical `invocationIdentity` and `provenanceSources`,
 `certificate.result = result`, and
@@ -1134,15 +1134,15 @@ this alternative; the ordinary, fixed, and registered alternatives cannot stand 
 builder also requires `ValidateSemanticOperationSite(id, invocationSite) = Success(Unit)` and
 `invocationIdentity = accessorInvocationIdentity(invocationSite.site)`, so a caller cannot choose
 another fresh-alias seed or derive one from the prospective typed-call ID. The source-only site
-assignment is consumed before Core; the nominal content ID is the stage-free value retained by
-Core and IR.
+assignment is consumed before IRReady; the nominal content ID is the stage-free value retained by
+IRReady and IR.
 
 `ELB-CALL-011`: `ElaborateTypedCallAt<S>` copies `call.accessEnvironment`,
 `call.resultAuthority`, `call.resultProvenance`, `call.aliasCompatibility`, and the complete
 `call.capabilitySelection`
 byte-for-byte to the
 `ElaboratedCallAt<S>`. A reference-handle alternative
-determines the call region's handle-shaped normal result before `CoreAccessorReferenceResult` is
+determines the call region's handle-shaped normal result before `IRReadyAccessorReferenceResult` is
 emitted. That wrapper validates the stored
 accessor certificate and preserves the already handle-shaped result; it cannot fabricate handle
 provenance, change a component of the shape, or reclassify an ordinary result.
@@ -1168,27 +1168,28 @@ elaborated call's exact `resultAuthority`, and `resultProvenance` validates agai
 ## Lambda elaboration
 
 Lambda processing uses the following pure queries. `DiscoverFreeVariables` runs while constructing
-`TypedLambda`; elaboration consumes that stored result and does not rediscover it:
+the `TypedLambdaInfo` carried by `LambdaExpr<Typed>`; elaboration consumes that stored result and
+does not rediscover it:
 
 ```text
 DiscoverFreeVariables(lambda, boundBody) -> FreeVariableSet
-AnalyzeTypedCaptures(lambda, typedLambda.freeVariables, typedLambda.captureUseFacts) -> CaptureSet
-BuildClosureType(lambda, captureSet, signature)
-    -> ClosureDeclAt<Construction>
-RewriteLambdaBody(lambda, closureDecl)
+AnalyzeTypedCaptures(lambda, lambda.info.freeVariables, lambda.info.captureUseFacts) -> CaptureSet
+BuildLambdaSynthesis(lambda, captureSet, signature)
+    -> LambdaSynthesisResultAt<Construction>
+RewriteLambdaBody(lambda, synthesis)
     -> ElaboratedFunctionBodyAt<Construction>
-BuildClosureValue(lambda, closureDecl)
+BuildLambdaValue(lambda, synthesis)
     -> ElaboratedExprAt<Construction>
 ```
 
 ```text
 CapturePlan = {
-    source: LocalCapture(CanonicalDeclRef)
+    source: LocalCapture(DeclRef)
           | ReceiverCapture
           | ForwardedCapture(ForwardedCaptureIdentity),
     type: TypeId,
     mode: ByValue | BorrowedReadCapture | BorrowedReadWriteCapture |
-          RefCapture(access: AccessMode),
+          RefCapture(access: StorageAccessMode),
     lifetime: CaptureLifetime,
     lifetimeProof: Option<CaptureLifetimeProof>,
     firstUse: Origin
@@ -1211,10 +1212,10 @@ ForwardedCaptureIdentity = {
 
 CaptureIdentity = {
     lambda: NodeId<Typed>,
-    source: CanonicalDeclRef | ReceiverCapture | ForwardedCaptureIdentity
+    source: DeclRef | ReceiverCapture | ForwardedCaptureIdentity
 }
 
-CaptureLifetime = OwnedByClosure | BorrowedUntil(LifetimeId)
+CaptureLifetime = OwnedByLambda | BorrowedUntil(LifetimeId)
 
 CaptureLifetimeProof = {
     capturedSource: CaptureIdentity,
@@ -1224,7 +1225,7 @@ CaptureLifetimeProof = {
 }
 ```
 
-`ELB-LAM-001`: `TypedLambda.captureUseFacts` is the sole typed-body projection consumed by capture
+`ELB-LAM-001`: `lambda.info.captureUseFacts` is the sole typed-body projection consumed by capture
 analysis. Every fact's source occurs in `freeVariables`, and every typed use of a free variable has
 exactly one fact with the same origin, type, category, access, and source lifetime. The typed-lambda
 constructor validates this bijection; elaboration neither walks `typedBody` to rediscover uses nor
@@ -1250,74 +1251,90 @@ first source use with stable declaration identity as a tie-breaker. Nested-lambd
 is explicit in `source`. Capture mode and lifetime are inferred from the typed uses and type
 properties; they cannot be decided from a merely bound body. A non-copyable value cannot silently
 become a by-value capture, and a borrowing/ref capture must carry a lifetime proof that covers every
-closure use. Whether escaping borrowed captures are supported is an explicit language decision in
-chapter 12.
+lambda-environment use. Whether escaping borrowed captures are supported is an explicit language
+decision in chapter 12.
 
 `CaptureSet.order` is a duplicate-free bijection onto `byIdentity` keys in that semantic order;
 `CaptureLayout.order` is byte-identical and is a duplicate-free bijection onto `fields` keys. The
 maps provide identity lookup while the explicit lists, not map iteration, define layout.
 
-The synthesized closure is construction-stage data until its declaration and callable conformance
-freeze together:
+The synthesized lambda environment is construction-stage data until its declaration and callable
+conformance freeze together. `LambdaExpr` is the source AST node; `LambdaDecl` is the synthesized
+`StructDecl` for the environment, matching the established codebase distinction. The following
+product collects that declaration with the other results of lambda synthesis:
 
 ```text
-ClosureDeclAt<S: WitnessUseStage> = {
-    declaration: SynthesizedDeclId,
+LambdaSynthesisResultAt<S: WitnessTableState> = {
+    lambdaDecl: SynthesizedDeclId,
+    environmentType: TypeId,
     layout: CaptureLayout,
     initializer: CallableSignature(
-        FunctionType(NoReceiver, one parameter per capture, result=Self),
+        FuncType(receiver=NoReceiver,
+                 parameters=one parameter per capture,
+                 result=environmentType),
         stable synthesized ParameterKeys),
     invoke: CallableSignature(
-        FunctionType(receiver=Receiver(Self, selected mode),
+        FuncType(receiver=Receiver(environmentType, selected mode),
                      parameters=lambda parameters,
                      result=lambda result),
         lambda ParameterKeys),
-    callableConformance: WitnessCallRef<S>
+    callableWitness: SubtypeWitnessRef<S>
 }
 
-ClosureDecl = ClosureDeclAt<Published>
+LambdaSynthesisResult = LambdaSynthesisResultAt<Published>
 ```
 
 The rewritten body replaces each captured reference with a field access through the explicit
-receiver. The lambda expression becomes `ConstructClosure(closure, capturedValues)`. No `LambdaExpr`
-reaches Core AST.
+receiver. The lambda expression becomes an elaborated construction of
+`synthesis.environmentType` from the values in `synthesis.layout.order`. No `LambdaExpr`
+reaches `IRReadyAST`.
 
 `SYN-LAM-001`: Free-variable discovery reads a bound body; capture-mode analysis reads the typed
 body. Both return immutable data and neither inserts fields while walking.
 
-`SYN-LAM-002`: The callable conformance's witness map is keyed by the standard environment's call
-requirement key. Closure layout order is not used as witness identity. During construction the
-field is an operational reference authorized by the closure's `SynthesisConstruction`; atomic
-freeze rewrites it to the validated reference for the same conformance identity at the same time
-that it publishes the closure declaration and rewritten body.
+`SYN-LAM-002`: The callable witness table's `RequirementDictionary` is keyed by the standard
+environment's call requirement key. Lambda layout order is not used as witness identity. During
+construction the field is an operational reference authorized by the lambda environment's
+`SynthesisConstruction`; atomic freeze rewrites it to the validated reference for the same
+witness-table identity at the same time that it publishes the environment declaration and
+rewritten body.
 
 `SYN-LAM-003`: Inferred result types are solved from all reachable returns and the fall-through
-path before closure synthesis. A mutable “first return fills the type” protocol is forbidden.
+path before lambda-environment synthesis. A mutable “first return fills the type” protocol is
+forbidden.
 
 `SYN-LAM-004`: Capture identity excludes discovery/task order. A non-owned capture's lifetime proof
-must name the same capture, source lifetime, and every closure-use requirement; validators reject a
-missing/mismatched proof before assigning `CaptureLayout`. `RefCapture(access)` preserves the exact
-read/write/atomic access mode established by typed use analysis.
+must name the same capture, source lifetime, and every lambda-environment-use requirement;
+validators reject a missing/mismatched proof before assigning `CaptureLayout`.
+`RefCapture(access)` preserves the exact read/write/atomic access mode established by typed use
+analysis.
+
+`SYN-LAM-005`: `environmentType` resolves to a `DeclRefType` whose `DeclRef` names
+`lambdaDecl` under the synthesis group's canonical specialization, and that declaration resolves
+to a `LambdaDecl`. The initializer result and invoke receiver use that exact `TypeId`; neither
+signature contains an unnamed receiver-type placeholder or recovers its receiver type from
+declaration nesting.
 
 The result solver combines the contextual expected result, every reachable `return`, the
-fall-through result (`Unit` when permitted), `Never` paths, and recovery expressions using the join
-rules in chapter 6. A captureless lambda may additionally elaborate to a static thunk when a raw
-function type is expected; a capturing lambda is never silently converted to a raw function
-pointer. The thunk and any closure declarations belong to the same atomic `SynthesisGroup`.
+fall-through result (`VoidType` when permitted), `BottomType` paths, and recovery expressions using
+the join rules in chapter 6. A captureless lambda may additionally elaborate to a static thunk when
+a raw function type is expected; a capturing lambda is never silently converted to a raw function
+pointer. The thunk and any lambda-environment declarations belong to the same atomic
+`SynthesisGroup`.
 
 ## Interface requirement synthesis
 
 Conformance checking first produces the authoritative kind-indexed `RequirementMatch<K>` from
 chapter 8 for every
-`RequirementKey<K>`. The payload/proof shapes are parallel to `RequirementSatisfaction<K>`: an
+`RequirementKey<K>`. The payload/proof shapes are parallel to `RequirementWitness<K>`: an
 associated type carries a `TypeId` plus constraint proofs, a callable carries a canonical
 declaration plus a signature proof, an accessor aggregate carries a role-keyed accessor map, a
 constant carries a checked value, and a nested conformance carries an
-`InterfaceSubtypeWitnessId` plus its stage-appropriate resolution set.
+`SubtypeWitnessId` plus its stage-appropriate resolution set.
 
 `Exact` and `OptionalAbsent` never create code. `Adaptable` creates an adapter; `Defaulted` and
 `Builtin` create code only when their typed plans declare generated output roles. Callable adapters
-use exactly `RequirementAdapterPlan<CallableKind>` and default matching uses
+use exactly `RequirementWitnessSynthesisPlan<CallableKind>` and default matching uses
 `DefaultUsePlan<K, Construction>` from chapter 8. Its `ParameterCorrespondence`
 maps requirement slots (including receiver and pack expansions) to independently keyed
 implementation slots; the keys are not compared for equality. Its parameter access plans consume
@@ -1328,12 +1345,12 @@ propagation, conversion, catching, or the absence of thrown errors.
 `SYN-WIT-001`: Synthesis is permitted only from a validated adapter plan. Code generation never
 rediscovers how a candidate satisfies a requirement.
 
-`SYN-WIT-002`: A synthesized thunk has the exact required `FunctionType`, including receiver,
+`SYN-WIT-002`: A synthesized requirement witness method has the exact required `FuncType`, including receiver,
 parameter modes, result/error type, traits, and calling convention. Its separate effective callable
 contract satisfies the requirement's effect and capability obligations. Its body applies the
 adapter plan and calls the chosen implementation.
 
-`SYN-WIT-003`: The resulting witness-map entry is keyed by `RequirementKey` and refers to the
+`SYN-WIT-003`: The resulting `RequirementDictionary` entry is keyed by `RequirementKey` and refers to the
 synthesized declaration by stable ID. Associated-type and nested-conformance requirements produce
 typed witness alternatives, not function stubs.
 
@@ -1344,9 +1361,9 @@ constructor; they do not share a large branch that mutates arbitrary AST fields.
 
 ## Other desugarings
 
-The initial Core AST has these explicit rewrites:
+The initial `IRReadyAST` has these explicit rewrites:
 
-| Typed/elaborated form            | Core form                                                       |
+| Typed/elaborated form            | IRReady form                                                    |
 | -------------------------------- | --------------------------------------------------------------- |
 | operator syntax                  | direct call or declared primitive operation                     |
 | property/subscript read          | explicit getter call                                            |
@@ -1356,39 +1373,39 @@ The initial Core AST has these explicit rewrites:
 | existential conversion           | `PackExistential(value, type, witness)`                         |
 | existential member use           | `OpenExistential` region plus witness lookup                    |
 | `fwd_diff` / `bwd_diff`          | selected provider plus `DerivativeSignatureMapId`               |
-| `no_diff`                        | explicit `StopGradient` boundary                                |
+| `no_diff`                        | explicit `DetachExpr` boundary                                  |
 | `defer`                          | explicit cleanup regions on every exiting edge                  |
-| lambda                           | closure declaration plus construction                           |
+| lambda                           | lambda-environment declaration plus construction                |
 | default argument                 | expression cloned through provenance-preserving substitution    |
-| target/stage switch              | conditional Core regions with capability presence formulas      |
+| target/stage switch              | conditional IRReady regions with capability presence formulas   |
 | compile-time loop/pack expansion | explicit expansion nodes or materialized sequence after solving |
 
 Desugaring order is defined by dependencies between rewrite queries, not by a mutable visitor's
 incidental traversal. A rewrite consumes only the node forms listed in its input schema and produces
-a strictly later Core form, preventing rewrite loops.
+a strictly later IRReady form, preventing rewrite loops.
 
-## Core AST
+## `IRReadyAST`
 
-Core AST is deliberately small:
+`IRReadyAST` is deliberately small:
 
 ```text
-CoreExpr = Constant | PhysicalPlace(CorePhysicalPlace) |
-           BuiltinPhysicalProjection(CoreBuiltinPhysicalProjection) |
-           RegisteredPhysicalProjection(CoreRegisteredPhysicalProjection) |
-           Load(CoreLoad) | Store | TemporaryStorage(CoreTemporaryStorage) |
-           ReferenceProducer(CoreReferenceProducer) | Dereference(CoreDereference) |
-           Convert | Initialize(CoreInitialization) | Extract | Update | CallRegion |
+IRReadyExpr = Constant | PhysicalStorage(IRReadyPhysicalStorage) |
+           BuiltinPhysicalProjection(IRReadyBuiltinPhysicalProjection) |
+           RegisteredPhysicalProjection(IRReadyRegisteredPhysicalProjection) |
+           Load(IRReadyLoad) | Store | TemporaryStorage(IRReadyTemporaryStorage) |
+           ReferenceProducer(IRReadyReferenceProducer) | Dereference(IRReadyDereference) |
+           Convert | Initialize(IRReadyInitialization) | Extract | Update | CallRegion |
            Witness | PackExistential | OpenExistential | Differentiate |
-           StopGradient | Primitive | Error
+           DetachExpr | Primitive | Error
 
-CoreStmt = Let | Var | Assign | ExprStmt | DestroyTemporary(CoreDestroyTemporary) |
+IRReadyStmt = Let | Var | Assign | ExpressionStmt | DestroyTemporary(IRReadyDestroyTemporary) |
            If | Switch | Loop | Break | Continue | Return | Throw | Region |
            CleanupRegion | Error
 
-CoreDecl = TypeDecl | FunctionDecl | GlobalDecl | ConformanceDecl | ImportDecl | ErrorDecl
+IRReadyDecl = TypeDecl | FunctionDecl | GlobalDecl | WitnessTableDecl | ImportDecl | ErrorDecl
 
-CorePhysicalPlaceShape = {
-    access: AccessMode,
+IRReadyPhysicalStorageShape = {
+    access: StorageAccessMode,
     mutability: Mutability,
     addressSpace: PhysicalStorageAddressSpace,
     lifetime: LifetimeId,
@@ -1396,66 +1413,66 @@ CorePhysicalPlaceShape = {
     sourceProvenance: PhysicalStorageSourceProvenance
 }
 
-CorePhysicalPlace = {
+IRReadyPhysicalStorage = {
     valueType: TypeId,
     storage: PhysicalStorageRef
 }
 
-CoreTemporaryStorageShape = {
+IRReadyTemporaryStorageShape = {
     identity: TemporaryStorageIdentity,
     lifetime: LifetimeId,
     alias: AliasProvenance
 }
 
-CoreTemporaryStorage = {
+IRReadyTemporaryStorage = {
     descriptor: MaterializedTemporaryStorage,
-    source: CoreValueId
+    source: IRReadyValueId
 }
 
-CoreDestroyTemporary = {
-    storage: CoreValueId,
+IRReadyDestroyTemporary = {
+    storage: IRReadyValueId,
     destruction: DestructionExecutionAt<Published>
 }
 
-CoreBuiltinPhysicalProjection = {
+IRReadyBuiltinPhysicalProjection = {
     identity: BuiltinPhysicalProjectionIdentity,
     operation: BuiltinPhysicalProjectionOperation,
     runtimeOperands:
-        CanonicallyOrderedMap<BuiltinPhysicalProjectionOperandRole, CoreValueId>,
+        CanonicallyOrderedMap<BuiltinPhysicalProjectionOperandRole, IRReadyValueId>,
     evaluationOrder: NodeList<BuiltinPhysicalProjectionOperandRole>,
     inputShapes:
-        CanonicallyOrderedMap<BuiltinPhysicalProjectionOperandRole, CoreValueShape>,
+        CanonicallyOrderedMap<BuiltinPhysicalProjectionOperandRole, IRReadyValueShape>,
     output: BuiltinPhysicalProjectionResultProof,
     control: BuiltinPhysicalProjectionControlProof
 }
 
-CoreLoad = LoadPhysicalStorage(source: CoreValueId)
+IRReadyLoad = LoadPhysicalStorage(source: IRReadyValueId)
 
-CoreRegisteredPhysicalProjection = {
+IRReadyRegisteredPhysicalProjection = {
     identity: RegisteredPhysicalProjectionIdentity,
     registration: RegisteredDataOperationRegistration,
     runtimeOperands:
-        CanonicallyOrderedMap<RegisteredPhysicalProjectionOperandRole, CoreValueId>,
+        CanonicallyOrderedMap<RegisteredPhysicalProjectionOperandRole, IRReadyValueId>,
     evaluationOrder: NodeList<RegisteredPhysicalProjectionOperandRole>,
     inputShapes:
-        CanonicallyOrderedMap<RegisteredPhysicalProjectionOperandRole, CoreValueShape>,
+        CanonicallyOrderedMap<RegisteredPhysicalProjectionOperandRole, IRReadyValueShape>,
     output: RegisteredPhysicalProjectionResultProof,
     control: RegisteredPhysicalProjectionControlProof
 }
 
-CoreRegisteredDirectReferenceApplication = {
+IRReadyRegisteredDirectReferenceApplication = {
     registration: ReferenceOperationRegistration,
     operandType: TypeId,
     storage: PhysicalStorageRef,
     storageProof: PhysicalStorageProof,
-    output: ReferenceHandleProof,
+    output: PointerLikeProof,
     control: ReferenceDataOperationControlProof
 }
 
-CoreRegisteredHandleTransformApplication = {
+IRReadyRegisteredHandleTransformApplication = {
     registration: ReferenceOperationRegistration,
-    input: ReferenceHandleProof,
-    output: ReferenceHandleProof,
+    input: PointerLikeProof,
+    output: PointerLikeProof,
     control: ReferenceDataOperationControlProof
 }
 
@@ -1498,19 +1515,19 @@ AccessorReferenceResultDerivation = {
     sourceProvenance: AccessorSourceProvenanceDerivation
 }
 
-CoreCallOperandProjection = {
+IRReadyCallOperandProjection = {
     slot: BoundCallSlot,
-    operand: CoreValueId,
+    operand: IRReadyValueId,
     expansion: ExpansionPath
 }
 
-CoreCapturedSourceBinding = {
-    capturedValue: CoreValueId,
-    projections: NodeList<CoreCallOperandProjection>
+IRReadyCapturedSourceBinding = {
+    capturedValue: IRReadyValueId,
+    projections: NodeList<IRReadyCallOperandProjection>
 }
 
-CoreAccessorReferenceResultProof = {
-    normalResult: CoreValueId,
+IRReadyAccessorReferenceResultProof = {
+    normalResult: IRReadyValueId,
     contract: AccessorReferenceResultContractId,
     invocationIdentity: AccessorInvocationIdentity,
     subject: CallableContractSubject,
@@ -1519,83 +1536,87 @@ CoreAccessorReferenceResultProof = {
     referentEquality: TypeEqualityProofId,
     sources:
         CanonicallyOrderedMap<AccessorProvenanceSourceRole,
-                              CoreCapturedSourceBinding>,
+                              IRReadyCapturedSourceBinding>,
     derivation: AccessorReferenceResultDerivation,
-    result: ReferenceHandleValueShape,
+    result: PointerLikeValueShape,
     callResultType: TypeId,
     resultEquality: TypeEqualityProofId
 }
 
-CoreReferenceProducer =
-    CoreAddressOfPhysicalStorage(
-        place: CoreValueId,
+IRReadyReferenceProducer =
+    IRReadyAddressOfPhysicalStorage(
+        storage: IRReadyValueId,
         proof: DirectStorageHandleProof)
-  | CoreAccessorReferenceResult(
-        value: CoreValueId,
-        proof: CoreAccessorReferenceResultProof)
-  | CoreRegisteredDirectReference(
-        place: CoreValueId,
-        application: CoreRegisteredDirectReferenceApplication)
-  | CoreRegisteredHandleTransform(
-        handle: CoreValueId,
-        application: CoreRegisteredHandleTransformApplication)
+  | IRReadyAccessorReferenceResult(
+        value: IRReadyValueId,
+        proof: IRReadyAccessorReferenceResultProof)
+  | IRReadyRegisteredDirectReference(
+        storage: IRReadyValueId,
+        application: IRReadyRegisteredDirectReferenceApplication)
+  | IRReadyRegisteredHandleTransform(
+        handle: IRReadyValueId,
+        application: IRReadyRegisteredHandleTransformApplication)
 
-CoreRegisteredDereferenceApplication = {
+IRReadyRegisteredDereferenceApplication = {
     identity: DereferenceApplicationIdentity,
     registration: ReferenceOperationRegistration,
-    input: ReferenceHandleProof,
+    input: PointerLikeProof,
     output: DereferencedStorageProof,
     control: ReferenceDataOperationControlProof
 }
 
-CoreDereference =
-    CoreReferenceDereference(
-        handle: CoreValueId,
+IRReadyDereference =
+    IRReadyReferenceDereference(
+        handle: IRReadyValueId,
         proof: DereferencedStorageProof)
-  | CorePointerDereference(
-        handle: CoreValueId,
+  | IRReadyPointerDereference(
+        handle: IRReadyValueId,
         proof: DereferencedStorageProof)
-  | CoreRegisteredReferenceDereference(
-        handle: CoreValueId,
-        application: CoreRegisteredDereferenceApplication)
+  | IRReadyRegisteredReferenceDereference(
+        handle: IRReadyValueId,
+        application: IRReadyRegisteredDereferenceApplication)
 
-CoreRuntimeValueCategory =
+IRReadyRuntimeValueCategory =
     RValue
-  | ReferenceHandleValue(ReferenceHandleShape)
-  | PhysicalPlace(CorePhysicalPlaceShape)
-  | TemporaryStorage(CoreTemporaryStorageShape)
+  | PointerLikeValue(PointerLikeShape)
+  | PhysicalStorage(IRReadyPhysicalStorageShape)
+  | TemporaryStorage(IRReadyTemporaryStorageShape)
 
-CoreValueShape =
-    RuntimeCoreValueShape(type: TypeId, category: CoreRuntimeValueCategory)
-  | GenericMetadataCoreValueShape(variable: CanonicalBoundVariable)
-  | WitnessCoreValueShape(classifier: InterfaceWitnessClassifier)
-  | WitnessEntryCoreValueShape(key: SomeWitnessEntryKey)
-  | OtherConstraintEvidenceCoreValueShape(slot: CanonicalConstraintSlot)
-
-CoreGenericInputs = {
-    genericArguments: NodeMap<CanonicalBoundVariable, CoreValueId>,
-    constraintEvidence: NodeMap<CanonicalConstraintSlot, CoreValueId>
+SubtypeWitnessValueShape = {
+    form: SubtypeWitnessForm
 }
 
-CoreWitnessOperation =
-    WitnessTableReference(definition: ValidatedConformanceRef)
-  | SpecializeWitness(generic: CoreValueId,
+IRReadyValueShape =
+    IRReadyRuntimeValueShape(type: TypeId, category: IRReadyRuntimeValueCategory)
+  | IRReadyGenericMetadataValueShape(variable: CanonicalBoundVariable)
+  | SubtypeWitnessValueShape
+  | IRReadyWitnessEntryValueShape(key: SomeInterfaceRequirementKey)
+  | IRReadyOtherConstraintEvidenceValueShape(slot: CanonicalConstraintSlot)
+
+IRReadyGenericInputs = {
+    genericArguments: NodeMap<CanonicalBoundVariable, IRReadyValueId>,
+    constraintEvidence: NodeMap<CanonicalConstraintSlot, IRReadyValueId>
+}
+
+IRReadyWitnessOperation =
+    WitnessTableReference(definition: ValidatedWitnessTableRef)
+  | SpecializeWitness(generic: IRReadyValueId,
                       specialization: CanonicalSpecializationSpine,
-                      inputs: CoreGenericInputs)
-  | LookupWitness(base: CoreValueId, key: SubtypeWitnessLookupKey)
-  | LookupWitnessEntry(base: CoreValueId, key: SomeWitnessEntryKey)
-  | ExtractExistentialWitness(package: CoreValueId,
+                      inputs: IRReadyGenericInputs)
+  | LookupWitness(base: IRReadyValueId, key: SubtypeWitnessLookupKey)
+  | LookupWitnessEntry(base: IRReadyValueId, key: SomeInterfaceRequirementKey)
+  | ExtractExistentialWitness(package: IRReadyValueId,
                               interface: InterfaceInstanceKey)
 
-CoreValueKey = {
-    producer: NodeId<Core>,
+IRReadyValueKey = {
+    producer: NodeId<IRReady>,
     resultOrdinal: UInt32,
-    shape: CoreValueShape
+    shape: IRReadyValueShape
 }
 
-CoreValueId = ContentId<CoreValueKey>
+IRReadyValueId = ContentId<IRReadyValueKey>
 
-CoreCallContract = {
+IRReadyCallContract = {
     signature: CallableSignatureId,
     resultAuthority: CallableResultAuthorityId,
     effective: EffectiveCallableContractId,
@@ -1604,54 +1625,54 @@ CoreCallContract = {
     capabilitySelection: CapabilitySelection
 }
 
-CorePhysicalParameterSourceProof =
-    ExistingCorePhysicalEndpoint
-  | AccessorCorePhysicalEndpoint(
+IRReadyPhysicalParameterSourceProof =
+    IRReadyExistingPhysicalEndpoint
+  | IRReadyAccessorPhysicalEndpoint(
         dereference: DereferenceApplicationIdentity)
 
-CorePhysicalParameterInputProof = {
-    mode: PassingMode,
+IRReadyPhysicalParameterInputProof = {
+    mode: ParamPassingMode,
     storage: PhysicalStorageRef,
     parameterValueType: TypeId,
     identity: PhysicalStorageIdentityProof,
     instantiatedRequirement: PhysicalStorageRequirement,
     physicalStorage: PhysicalStorageProof,
-    source: CorePhysicalParameterSourceProof
+    source: IRReadyPhysicalParameterSourceProof
 }
 
-CoreCallInputs = {
-    initializationTarget: Option<CoreValueId>,
-    receiver: Option<CoreValueId>,
-    parameters: NodeMap<ParameterKey, CoreValueId>,
+IRReadyCallInputs = {
+    initializationTarget: Option<IRReadyValueId>,
+    receiver: Option<IRReadyValueId>,
+    parameters: NodeMap<ParameterKey, IRReadyValueId>,
     physicalParameters:
-        NodeMap<BoundCallSlot, CorePhysicalParameterInputProof>,
-    generic: CoreGenericInputs
+        NodeMap<BoundCallSlot, IRReadyPhysicalParameterInputProof>,
+    generic: IRReadyGenericInputs
 }
 
 DirectCall = {
     callee: ResolvedDeclRef,
-    contract: CoreCallContract,
-    inputs: CoreCallInputs
+    contract: IRReadyCallContract,
+    inputs: IRReadyCallInputs
 }
 
 WitnessCall = {
-    witness: CoreValueId,
-    entry: WitnessRuntimeEntryKey,
-    contract: CoreCallContract,
-    inputs: CoreCallInputs
+    witness: IRReadyValueId,
+    entry: RuntimeInterfaceRequirementKey,
+    contract: IRReadyCallContract,
+    inputs: IRReadyCallInputs
 }
 
 DynamicCall = {
     owner: TypeId,
     slot: DynamicDispatchKey,
-    contract: CoreCallContract,
-    inputs: CoreCallInputs
+    contract: IRReadyCallContract,
+    inputs: IRReadyCallInputs
 }
 
-ClosureCall = {
+LambdaCall = {
     invoke: ResolvedDeclRef,
-    contract: CoreCallContract,
-    inputs: CoreCallInputs
+    contract: IRReadyCallContract,
+    inputs: IRReadyCallInputs
 }
 
 PrimitiveCall = {
@@ -1659,76 +1680,77 @@ PrimitiveCall = {
     registration: StandardEnvironmentRuleId,
     staticInputs: CanonicalArguments,
     witnessResolutions: WitnessResolutionStamp,
-    contract: CoreCallContract,
-    inputs: CoreCallInputs
+    contract: IRReadyCallContract,
+    inputs: IRReadyCallInputs
 }
 
-CoreCall = Direct(DirectCall) | Witness(WitnessCall) | Dynamic(DynamicCall) |
-           Closure(ClosureCall) | Primitive(PrimitiveCall)
+IRReadyCall = Direct(DirectCall) | Witness(WitnessCall) | Dynamic(DynamicCall) |
+           Lambda(LambdaCall) | Primitive(PrimitiveCall)
 
 CallRegion = {
-    preparation: NodeList<CoreStmt>,
-    call: CoreCall,
-    normalCompletion: NodeList<CoreStmt>,
-    exceptionalCompletion: NodeList<CoreStmt>,
-    result: CoreValueId,
-    thrownError: Option<CoreValueId>
+    preparation: NodeList<IRReadyStmt>,
+    call: IRReadyCall,
+    normalCompletion: NodeList<IRReadyStmt>,
+    exceptionalCompletion: NodeList<IRReadyStmt>,
+    result: IRReadyValueId,
+    thrownError: Option<IRReadyValueId>
 }
 ```
 
-Chapter 15 is the sole schema authority for `CoreInitialization` and its selected-operation
+Chapter 15 is the sole schema authority for `IRReadyInitialization` and its selected plan-step
 alternatives; the `Initialize` case above does not erase them to a generic construct flag. Its
 recovery alternative is tooling-only and is not a successful initialization operation.
 
-All Core nodes are typed. `PhysicalPlace`, `TemporaryStorage`, `ReferenceProducer`, and
+All IRReady nodes are typed. `PhysicalStorage`, `TemporaryStorage`, `ReferenceProducer`, and
 `Dereference` preserve their exact value type, access, lifetime, alias, and source provenance until
 IR lowering; only genuine physical storage carries mutability and a physical address-space fact.
 Abstract properties and declared subscripts have already become accessor call regions. High-level
 structured control remains where useful, but its exit and cleanup behavior is explicit.
 
-`ELB-CORE-001`: Core validation rejects unresolved names, overload sets, partial generic
-applications, implicit receivers, unplanned conversions, raw lambdas, and incomplete witness maps.
+`ELB-IRDY-001`: IRReady validation rejects unresolved names, overload sets, partial generic
+applications, implicit receivers, unplanned conversions, raw lambdas, and incomplete
+`RequirementDictionary` values.
 
-`ELB-CORE-002`: `LowerToCore` first lowers every access plan's preparation in order, then dispatches
+`ELB-IRDY-002`: `LowerToIRReadyAST` first lowers every access plan's preparation in order, then dispatches
 on its closed terminal. `PassArgument` contributes the named runtime argument and its completion
 steps to the enclosing call or registered-operation region. `YieldStorageRead` produces the named
-Core value directly; it does not synthesize a call region for a physical load. `CompleteStorageWrite`
+IRReady value directly; it does not synthesize a call region for a physical load. `CompleteStorageWrite`
 emits its exact physical `Store` or abstract-setter `CallRegion` and yields the terminal's result
 value after normal completion. Completion steps are placed on the normal/exceptional edges selected
 relative to that terminal. A captured-reference source environment first lowers each capture
-result's explicit `evaluation` to exactly one Core producer in its stored order, and every
+result's explicit `evaluation` to exactly one IRReady producer in its stored order, and every
 `CapturedSourceProjection` reads that producer. Thus no source capture, preparation, terminal, or
 completion behavior remains hidden inside a call opcode or inferred from the consuming syntax.
 
-Lowering an abstract `OutMode`/`InOutMode` temporary creates one `CoreTemporaryStorage` whose
+Lowering an abstract `OutMode`/`InOutMode` temporary creates one `IRReadyTemporaryStorage` whose
 descriptor is byte-identical to the access-plan descriptor and whose chapter 15 initialization is
-the descriptor's exact plan application. This Core node projects that application's unique
-`CreatePlanStorage` transition rather than allocating a second object. The nested Core
+the descriptor's exact plan application. This IRReady node projects that application's unique
+`CreatePlanStorage` transition rather than allocating a second object. The nested IRReady
 initialization owns pre-checkpoint exceptional cleanup; only its normal checkpoint produces the
-temporary value. Every later write-back and `CoreDestroyTemporary` carries the checked conversion
-or destruction execution from the plan, and no operation chooses either from the Core value type.
-Its `CoreTemporaryStorageShape.identity` is the descriptor's nominal
-`TemporaryStorageIdentity`, and its alias is the matching `temporaryStorageAliasRoot`; Core removes
+temporary value. Every later write-back and `IRReadyDestroyTemporary` carries the checked conversion
+or destruction execution from the plan, and no operation chooses either from the IRReady value type.
+Its `IRReadyTemporaryStorageShape.identity` is the descriptor's nominal
+`TemporaryStorageIdentity`, and its alias is the matching `temporaryStorageAliasRoot`; IRReady removes
 the site from the runtime value shape after checking that equation, while the selected
 initialization application retains its authenticated site as static validation data.
 
-`ELB-CORE-010`: Lowering `PhysicalPlaceArgument(p, binding)` emits the Core physical-place value for
+`ELB-IRDY-010`: Lowering `PhysicalStorageArgument(p, binding)` emits the IRReady physical-storage value for
 exactly `physicalParameterStorage(binding)`. A direct source reuses the lowered existing physical
 producer. An accessor-produced source expands the stored
 `ParameterReferenceAccessorPlanAt<S>` into its accessor `CallRegion`, optional registered handle
-transform, and `CoreDereference`, in that order; the dereference's output is the physical argument.
-The accessor handle has no other Core use. The resulting Core value retains access, mutability,
-physical address space, lifetime, alias, and source provenance, and no Core temporary, load,
+transform, and `IRReadyDereference`, in that order; the dereference's output is the physical argument.
+The accessor handle has no other IRReady use. The resulting IRReady value retains access, mutability,
+physical address space, lifetime, alias, and source provenance, and no IRReady temporary, load,
 conversion, or write-back intervenes. `ConstRefMode` and `RefMode` therefore share this one physical
-Core path while remaining distinguishable by `binding.mode.access` and the complete requirement
-proof selected before lowering. The corresponding `CoreCallInputs.physicalParameters` entry is the
+IRReady path while remaining distinguishable by `binding.mode.access` and the complete requirement
+proof selected before lowering. The corresponding `IRReadyCallInputs.physicalParameters` entry is the
 stage-free projection of `binding`: it retains mode, endpoint, parameter type, identity proof,
-instantiated requirement, and physical proof, and records whether the Core operand is an existing
+instantiated requirement, and physical proof, and records whether the IRReady operand is an existing
 endpoint or the result of the exact stored dereference. It contains no typed expression or accessor
 plan.
 
-`ELB-CORE-011`: At function entry, every `PhysicalStorageAbiInput` creates one
-`CorePhysicalPlace` whose `PhysicalStorageRef` is the contract's exact formal storage. A
+`ELB-IRDY-011`: At function entry, every `PhysicalStorageAbiInput` creates one
+`IRReadyPhysicalStorage` whose `PhysicalStorageRef` is the contract's exact formal storage. A
 `ConstRefMode` receiver/parameter uses its nominal `ConstRefFormalRoot`, has `ReadAccess`,
 `UnknownMutability`, `CallableActivationLifetime(signature)`, and cannot be stored through. A
 `RefMode` role uses its nominal `RefFormalRoot`, has `ReadWriteAccess`, `Mutable`, and may be read or
@@ -1736,52 +1758,52 @@ written subject to its checked contract. Both use the entry proof's formal addre
 facts, and `UnknownAliasRoot`. Physical projections preserve those facts and may not amplify
 access. There is no borrowed formal category or hidden conversion between the two roots.
 
-`ResolveAbstractPlaceThroughReference` expands to the stored accessor `CallRegion`, its
-already-proven handle result (and optional registered transform), and the stored `CoreDereference`.
+`ResolveAbstractStorageThroughReference` expands to the stored accessor `CallRegion`, its
+already-proven handle result (and optional registered transform), and the stored `IRReadyDereference`.
 The enclosing read terminal then selects the physical `Load`, while the write terminal selects the
-physical `Store`. The intermediate handle is kept in that local sequence and has no escaping Core
+physical `Store`. The intermediate handle is kept in that local sequence and has no escaping IRReady
 use.
 
-`ProjectPhysicalPlaceThroughParameterAccessor` expands through the same closed reference
+`ProjectPhysicalStorageThroughParameterAccessor` expands through the same closed reference
 primitives but from its distinct `ParameterReferenceAccessorPlanAt<S>`. It emits no load or store:
-the stored `CoreDereference` result is the `PhysicalPlaceArgument` endpoint. Its accessor access key,
+the stored `IRReadyDereference` result is the `PhysicalStorageArgument` endpoint. Its accessor access key,
 handle admission, dereference proof, and resulting physical storage are preserved exactly, so
 ordinary storage fallback and physical-parameter preparation cannot be interchanged.
 
-`ELB-CORE-003`: `CoreValueId = ContentId(CoreValueKey)` under chapter 1's exact encoding.
+`ELB-IRDY-003`: `IRReadyValueId = ContentId(IRReadyValueKey)` under chapter 1's exact encoding.
 Resolving the producer node must find `resultOrdinal` and the identical stored result shape. Two
 results of one node, or equal-shaped results of different nodes, therefore remain distinct without
-allocation-order identity. Every Core operand resolves in the containing immutable Core snapshot.
+allocation-order identity. Every IRReady operand resolves in the containing immutable IRReady snapshot.
 
-`ELB-CORE-004`: Resolving `CoreCallContract.effective` yields an effective contract whose
+`ELB-IRDY-004`: Resolving `IRReadyCallContract.effective` yields an effective contract whose
 signature equals `contract.signature`. Resolving that signature yields exactly the keys in
 `inputs.parameters`; the receiver is present exactly when its `ReceiverSlot` is present, and
-`initializationTarget` is present exactly when `CallablePurpose` is `InitializerCallable`. That
-target is a physical-place Core value satisfying the stored target slot and is never receiver or
-parameter zero. Each other input's type/category is valid for the corresponding `PassingMode` after
+`initializationTarget` is present exactly when `CallablePurpose` is `ConstructorCallable`. That
+target is a physical-storage IRReady value satisfying the stored target slot and is never receiver or
+parameter zero. Each other input's type/category is valid for the corresponding `ParamPassingMode` after
 the explicit preparation steps. A mode whose domain is `PhysicalOperand(location)` has exactly a
-`RuntimeCoreValueShape(valueType, PhysicalPlace(shape))` input. The originating call-slot plan has a
-`PhysicalPlaceArgument` whose binding names the same endpoint and complete mode, and its
+`IRReadyRuntimeValueShape(valueType, PhysicalStorage(shape))` input. The originating call-slot plan has a
+`PhysicalStorageArgument` whose binding names the same endpoint and complete mode, and its
 `physicalStorage` proof satisfies
 `instantiatePhysicalStorageRequirement(mode, callerInvocationLifetime)`, including access,
 lifetime, symbolic address space, and source provenance. `ConstRefMode` requires the read view;
-`RefMode` requires the read/write view. Core validation compares the retained endpoints and never
-re-instantiates a weaker requirement. An ordinary rvalue, abstract place, reference handle, or
+`RefMode` requires the read/write view. IRReady validation compares the retained endpoints and never
+re-instantiates a weaker requirement. An ordinary rvalue, abstract storage, reference handle, or
 temporary-storage value is invalid even if its `TypeId` agrees. A nonphysical-mode
 reference-handle value remains
-`ReferenceHandleValue(handle)` with the exact checked proof rather than becoming `RValue`.
+`PointerLikeValue(handle)` with the exact checked proof rather than becoming `RValue`.
 `inputs.physicalParameters` has exactly the receiver/parameter-role domain whose modes are physical.
-Each entry's storage projects to the corresponding Core input shape; its identity proof endpoints
+Each entry's storage projects to the corresponding IRReady input shape; its identity proof endpoints
 are that storage's value type and the substituted parameter type with zero rank; and its physical
-proof has the byte-identical storage and instantiated requirement. `ExistingCorePhysicalEndpoint`
+proof has the byte-identical storage and instantiated requirement. `IRReadyExistingPhysicalEndpoint`
 requires the call operand to be the lowered direct source.
-`AccessorCorePhysicalEndpoint(d)` requires it to be the output of the exact `CoreDereference` with
+`IRReadyAccessorPhysicalEndpoint(d)` requires it to be the output of the exact `IRReadyDereference` with
 identity `d`. No stage-specific binding is consulted after this projection.
 `generic.genericArguments` and `generic.constraintEvidence`
 contain exactly the runtime binder/evidence slots selected by the call's logical ABI map.
-Type/value/pack arguments use `GenericMetadataCoreValueShape` with the identical bound variable;
-`Conforms` evidence uses `WitnessCoreValueShape` with the exact predicate classifier, and every
-other evidence value uses `OtherConstraintEvidenceCoreValueShape` with the identical slot. The
+Type/value/pack arguments use `IRReadyGenericMetadataValueShape` with the identical bound variable;
+`Conforms` evidence uses `SubtypeWitnessValueShape` with the exact predicate classifier, and every
+other evidence value uses `IRReadyOtherConstraintEvidenceValueShape` with the identical slot. The
 callee's `ResolvedDeclRef.witnessResolutions` is the exact source for materializing table-backed
 evidence in its canonical specialization; no ambient definition lookup is permitted. Parameter
 order is derived only from `CallableSignature.parameterSlots`, never from the map's iteration order.
@@ -1792,134 +1814,135 @@ specifically for call-local ABI activation binding; it never enters the callee's
 plans, so no independent lifetime can disagree with them.
 `contract.aliasCompatibility` is copied from the originating elaborated call and replays over the
 same physical/abstract endpoint provenances and invocation lifetime. It cannot be rebuilt from
-Core operand order or dropped merely because target ABI lowering permits aliasing.
+IRReady operand order or dropped merely because target ABI lowering permits aliasing.
 `contract.resultAuthority` is copied byte-for-byte from the originating elaborated call and
-resolves under the Core dispatch target and `contract.signature` to the same anchored authority.
-Core construction cannot infer it from the result value or replace it during effective-contract
+resolves under the IRReady dispatch target and `contract.signature` to the same anchored authority.
+IRReady construction cannot infer it from the result value or replace it during effective-contract
 completion. `contract.capabilitySelection` is copied byte-for-byte from the originating elaborated
 call. It remains the complete `CAP-SEL-004` product after inference has consumed its ordinary-use
 map: its region, exact keyed uses, and zero/one/multiple concrete source set with combined
-requirement and proof all revalidate under `CAP-SEL-003`. Core construction cannot reconstruct it
-from `effective`, a flat capability formula, or the dispatch target.
+requirement and proof all revalidate under `CAP-SEL-003`. IRReady construction cannot reconstruct it
+from `effective`, a flat capability set, or the dispatch target.
 
-`ELB-CORE-005`: A direct target resolves to the stored signature; a witness target consumes a
-`WitnessCoreValueShape(ConcreteInterfaceWitness(target))` whose target interface owns the exact
+`ELB-IRDY-005`: A direct target resolves to the stored signature; a witness target consumes a
+`SubtypeWitnessValueShape(ConcreteSubtypeWitness(target))` whose target interface owns the exact
 runtime-entry key and resolves that
-entry to the signature; a dynamic slot and closure invocation resolve through their registered
+entry to the signature; a dynamic slot and lambda invocation resolve through their registered
 owner/invoke declaration; and a primitive rule resolves in the versioned standard environment.
 These are validation operations, not overload or conformance search. A target that resolves to a
-different signature or contract is an invalid Core graph.
+different signature or contract is an invalid IRReady graph.
 
-`ELB-CORE-006`: `result` is result ordinal zero of the `CallRegion` node and has the signature's
+`ELB-IRDY-006`: `result` is result ordinal zero of the `CallRegion` node and has the signature's
 normal result type. Its category is the exact checked result-channel proof admitted by
 `contract.resultAuthority`:
-`ReferenceHandleProvenance(proof)` becomes `ReferenceHandleValue(proof.shape)`, an inner explicit
+`PointerLikeProvenance(proof)` becomes `PointerLikeValue(proof.shape)`, an inner explicit
 ref-accessor call uses the result shape and stage-free instantiation projected from its exact
 `AccessorReferenceResultCertificate`, and
 `NoAdditionalValueProvenance` becomes `RValue`. `thrownError` is ordinal one with the corresponding
-checked provenance and the signature's error type exactly when that type is not `NeverType`,
-matching the logical ABI channel. A physical place is never returned as a call result. The exceptional edge
+checked provenance and the signature's error type exactly when that type is not `BottomType`,
+matching the logical ABI channel. A physical storage is never returned as a call result. The exceptional edge
 exists only when the effective contract can throw; otherwise `exceptionalCompletion` is empty and
 `thrownError` has no legal use. The call inputs are available after `preparation`; `result` is
 visible only on the normal-completion edge and `thrownError` only on an existing exceptional edge.
 A value defined on one completion edge cannot be used on the other or after a non-joining exit.
 
-`ELB-CORE-007`: Abstract storage is eliminated before Core. Every Core `PhysicalPlace`, `Load`,
+`ELB-IRDY-007`: Abstract storage is eliminated before IRReady. Every IRReady `PhysicalStorage`, `Load`,
 `Store`, address-of/registered-direct reference input, and dereference result has a
-`CorePhysicalPlaceShape`; no Core operation can encode a property getter/setter as a physical
+`IRReadyPhysicalStorageShape`; no IRReady operation can encode a property getter/setter as a physical
 address or materialize a temporary to satisfy a physical-domain mode. The closed physical-storage producers are a
 stored root/field or vector projection,
-`CoreBuiltinPhysicalProjection` with its checked application,
-`CoreRegisteredPhysicalProjection` with its validated application,
-initialization/allocation storage, and one of the `CoreDereference` alternatives. Generic
+`IRReadyBuiltinPhysicalProjection` with its checked application,
+`IRReadyRegisteredPhysicalProjection` with its validated application,
+initialization/allocation storage, and one of the `IRReadyDereference` alternatives. Generic
 `Primitive` cannot manufacture physical storage. Each `LookupSubtypeWitness` in the semantic witness key
-becomes exactly one Core `LookupWitness` and remains one operation through initial IR lowering.
+becomes exactly one IRReady `LookupWitness` and remains one operation through initial IR lowering.
 
-`CoreBuiltinPhysicalProjection.runtimeOperands` has exactly the two-role domain of `inputShapes`
+`IRReadyBuiltinPhysicalProjection.runtimeOperands` has exactly the two-role domain of `inputShapes`
 and `evaluationOrder`; each value has its stored shape and is the result of the corresponding
 elaborated operand. Its identity, operation, output proof, and control proof are byte-identical to
 the typed application. `output.storage.path` is
-`BuiltinElement(output.inputStorage.path, identity)`. This is the only Core producer for that path
-alternative; `CorePhysicalPlace` cannot reconstruct a dynamic index from its path. The closed Core
-physical-place provenance relation resolves the base `CoreValueId` to exactly
-`output.inputStorage`; matching only its `CorePhysicalPlaceShape` is insufficient. Neither the node
+`BuiltinElement(output.inputStorage.path, identity)`. This is the only IRReady producer for that path
+alternative; `IRReadyPhysicalStorage` cannot reconstruct a dynamic index from its path. The closed IRReady
+physical-storage provenance relation resolves the base `IRReadyValueId` to exactly
+`output.inputStorage`; matching only its `IRReadyPhysicalStorageShape` is insufficient. Neither the node
 nor any transitive static proof field contains `NodeId<Typed>`, `TypedExpr`, or an index-recovery
 recipe.
 
-`CoreRegisteredPhysicalProjection.runtimeOperands` has exactly the domain of `inputShapes` and
+`IRReadyRegisteredPhysicalProjection.runtimeOperands` has exactly the domain of `inputShapes` and
 `evaluationOrder`; each value has the stored shape and is the result of the corresponding bound
-operand plan from `ELB-PLC-002`. Its identity, registration, output proof, and control proof are
+operand plan from `ELB-STO-002`. Its identity, registration, output proof, and control proof are
 byte-identical to the typed application. `output.storage.path` is
-`RegisteredPhysicalProjection(identity)`. This is the only Core producer for that path alternative;
-an `IRLookup`, data opcode, or reconstructed resource path cannot substitute for it.
+`RegisteredPhysicalProjection(identity)`. This is the only IRReady producer for that path alternative;
+an `IRLookupWitnessMethod`, registered data opcode, or reconstructed resource path cannot
+substitute for it.
 
-`ELB-CORE-008`: `SpecializeWitness(generic, specialization, inputs)` consumes a
-`GenericInterfaceWitness` value. `inputs` contains exactly the runtime generic variables and
-constraint slots of that generic witness's binder in canonical order, with the same Core shape law
+`ELB-IRDY-008`: `SpecializeWitness(generic, specialization, inputs)` consumes a
+`GenericSubtypeWitness` value. `inputs` contains exactly the runtime generic variables and
+constraint slots of that generic witness's binder in canonical order, with the same IRReady shape law
 as call inputs. Its witness operands are materialized from the specialization evidence plus the
 stage-frozen resolution sidecar; the semantic spine alone is not treated as an SSA operand list.
 The result classifier is the total concrete specialization of the generic classifier.
 
-`ELB-CORE-009`: `CorePhysicalPlace(valueType, storage)` has
-`RuntimeCoreValueShape(valueType, PhysicalPlace(shape))`, where `shape` is the exact projection of
+`ELB-IRDY-009`: `IRReadyPhysicalStorage(valueType, storage)` has
+`IRReadyRuntimeValueShape(valueType, PhysicalStorage(shape))`, where `shape` is the exact projection of
 `storage`'s access, mutability, address space, lifetime, alias, and source provenance. A
-`CoreAddressOfPhysicalStorage` operand has that shape for the stored
+`IRReadyAddressOfPhysicalStorage` operand has that shape for the stored
 `DirectStorageHandleProof.storage`. Every reference producer result uses its stored
-`ReferenceHandleValueShape` to form
-`RuntimeCoreValueShape(result.type, ReferenceHandleValue(result.handle))`, preserving the non-type
+`PointerLikeValueShape` to form
+`IRReadyRuntimeValueShape(result.type, PointerLikeValue(result.handle))`, preserving the non-type
 provenance fields. A direct/registered producer projects that shape from its admitted handle proof;
 an accessor producer takes it directly from `proof.result`.
-`CoreAccessorReferenceResult` consumes the exact handle-shaped normal result of the call named by
-`proof.normalResult`. The proof's subject/signature equal that Core call, its contract is replayed
-against the exact `CoreCapturedSourceBinding` values and call-operand projections, and its
+`IRReadyAccessorReferenceResult` consumes the exact handle-shaped normal result of the call named by
+`proof.normalResult`. The proof's subject/signature equal that IRReady call, its contract is replayed
+against the exact `IRReadyCapturedSourceBinding` values and call-operand projections, and its
 derivation yields `proof.result`. `callResultType` and `resultEquality` prove that same result type.
 No transitive field contains an AST node or typed captured source. The
 wrapper produces the identical
 handle-shaped value without a second runtime evaluation or a same-type reclassification.
 Registered direct/transform operands and
 results equal their application's endpoints. For a direct application,
-`storageProof.storage = storage`, `operandType = storage.valueType`, the separate place operand is
+`storageProof.storage = storage`, `operandType = storage.valueType`, the separate storage operand is
 that storage, and the output is the stored handle proof. For a transform, the separate handle
 operand has `application.input` and the result has `application.output` exactly.
-`CoreDereference` has one handle-shaped operand and one physical-place result equal to its
+`IRReadyDereference` has one handle-shaped operand and one physical-storage result equal to its
 `DereferencedStorageProof.output`; builtin and registered alternatives are never interchangeable.
-The proof's `identity` and `DereferencedReference(identity)` path are preserved in Core, while the
-executable handle is the alternative's `CoreValueId`. For a registered alternative,
-`application.identity = application.output.identity`; Core validation rejects a proof or
+The proof's `identity` and `DereferencedReference(identity)` path are preserved in IRReady, while the
+executable handle is the alternative's `IRReadyValueId`. For a registered alternative,
+`application.identity = application.output.identity`; IRReady validation rejects a proof or
 application copied from another dereference even when both endpoint shapes are equal.
-Projecting the typed registered application to `CoreRegisteredDereferenceApplication` removes
+Projecting the typed registered application to `IRReadyRegisteredDereferenceApplication` removes
 `input.operand`, the site assignment, selection state, semantic-use edges, and origins only after
 validation; it retains
 the byte-identical identity, registration, `input.handle`, output proof, and control proof. Thus no
-transitive static dereference field contains the typed handle node; the Core operand is its only
+transitive static dereference field contains the typed handle node; the IRReady operand is its only
 executable authority.
 
 ## Frontend IR contract
 
 `FrontendIRFragment` separates symbol declarations from definitions. Lowering is a pure query over
-Core AST and imported semantic interfaces. Fragments are merged by declaring every stable symbol in
+`IRReadyAST` and imported semantic interfaces. Fragments are merged by declaring every stable symbol in
 canonical order first, then attaching definitions; mutual recursion and generated forward
 references therefore never depend on fragment completion order.
 
 ```text
-IRSymbolKind = FunctionSymbol | TypeSymbol | GlobalSymbol | ConformanceSymbol
+IRSymbolKind = FunctionSymbol | TypeSymbol | GlobalSymbol | WitnessTableSymbol
 
 IRSymbolOwner =
-    DeclarationSymbolOwner(CanonicalDeclRef)
-  | ConformanceSymbolOwner(ConformanceId)
+    DeclSymbolOwner(DeclRef)
+  | WitnessTableSymbolOwner(WitnessTableId)
   | SynthesizedSymbolOwner(SynthesizedSemanticId)
   | ExportedSymbolOwner(ExportedId)
 
 IRSymbolRole =
     PrimarySymbol
-  | WitnessRuntimeEntrySymbol(WitnessRuntimeEntryKey)
+  | WitnessRuntimeEntrySymbol(RuntimeInterfaceRequirementKey)
   | RegisteredSymbolRole(stableName: QualifiedName, inputs: CanonicalArguments)
 
 IRSymbolDiscriminator =
     FunctionSymbolSignature(CallableSignatureId)
   | TypeSymbolType(TypeId)
   | GlobalSymbolType(TypeId)
-  | ConformanceSymbolIdentity(ConformanceId)
+  | WitnessTableSymbolIdentity(WitnessTableId)
 
 IRSymbolKey = {
     owner: IRSymbolOwner,
@@ -1931,7 +1954,7 @@ IRSymbolId = ContentId<IRSymbolKey>
 
 IRPhysicalStorageShape = {
     valueType: TypeId,
-    access: AccessMode,
+    access: StorageAccessMode,
     mutability: Mutability,
     addressSpace: PhysicalStorageAddressSpace,
     lifetime: LifetimeId,
@@ -1957,14 +1980,15 @@ abiFormalStorageMutability(mode) =
 
 IRValueShape =
     RuntimeValueShape(TypeId)
-  | ReferenceHandleIRValueShape(shape: ReferenceHandleValueShape)
+  | PointerLikeIRValueShape(shape: PointerLikeValueShape)
   | PhysicalStorageValueShape(shape: IRPhysicalStorageShape)
   | TemporaryStorageValueShape(shape: IRTemporaryStorageShape)
   | InitializationTargetShape(target: InitializationTargetSlot)
   | GenericMetadataShape(variable: CanonicalBoundVariable,
                          sort: GenericParameterSort)
-  | InterfaceWitnessShape(classifier: InterfaceWitnessClassifier)
-  | WitnessEntryShape(key: SomeWitnessEntryKey)
+  | SubtypeWitnessValueShape
+  | InterfaceRequirementKeyValueShape(key: IRInterfaceRequirementKeyValue)
+  | WitnessEntryShape(key: SomeInterfaceRequirementKey)
   | OtherConstraintEvidenceShape(kind: ConstraintKind)
   | ErrorValueShape(type: TypeId, error: ErrorId)
 
@@ -1975,7 +1999,7 @@ FunctionAbiInputRole =
   | GenericAbiInput(variable: CanonicalBoundVariable)
   | WitnessAbiInput(slot: CanonicalConstraintSlot)
 
-AbiReferenceHandleAddressSpaceSelection = {
+AbiPointerLikeAddressSpaceSelection = {
     formal: AddressSpace,
     requirement: AddressSpaceRequirement,
     proof: AddressSpaceAdmissionProof
@@ -1988,7 +2012,7 @@ AbiPhysicalStorageAddressSpaceSelection = {
 }
 
 AbiAddressSpaceSelection =
-    ReferenceHandleAddressSpaceSelection(AbiReferenceHandleAddressSpaceSelection)
+    PointerLikeAddressSpaceSelection(AbiPointerLikeAddressSpaceSelection)
   | PhysicalStorageAddressSpaceSelection(AbiPhysicalStorageAddressSpaceSelection)
 
 FunctionAbiContext = {
@@ -1997,7 +2021,7 @@ FunctionAbiContext = {
 }
 
 AbiPhysicalStorageInputContract = {
-    mode: PassingMode,
+    mode: ParamPassingMode,
     parameterLocation: ParameterPhysicalLocationRequirement,
     formalEntry: PhysicalFormalEntryProofId,
     formalRequirement: PhysicalStorageRequirement,
@@ -2006,70 +2030,70 @@ AbiPhysicalStorageInputContract = {
     formalProof: PhysicalStorageProof
 }
 
-AbiReferenceHandleMutabilityPolicy =
+AbiPointerLikeMutabilityPolicy =
     AccessDerivedHandleMutability
   | DeclaredHandleMutability(Mutability)
 
 accessDerivedHandleMutability(ReadAccess) = UnknownMutability
 accessDerivedHandleMutability(ReadWriteAccess) = Mutable
 
-AbiReferenceHandleLifetimePolicy =
+AbiPointerLikeLifetimePolicy =
     FormalActivationHandleLifetime
   | DeclaredHandleLifetime(LifetimeId)
 
-AbiReferenceHandleAliasPolicy =
+AbiPointerLikeAliasPolicy =
     ConservativeUnknownHandleAlias
   | DeclaredHandleAlias(AliasProvenance)
 
-AbiReferenceHandleSourceProvenancePolicy =
+AbiPointerLikeSourceProvenancePolicy =
     ConservativeUnknownHandleSourceProvenance
   | DeclaredHandleSourceProvenance(PhysicalStorageSourceProvenance)
 
 abiFormalHandleSourceProvenance(ConservativeUnknownHandleSourceProvenance) = {}
 abiFormalHandleSourceProvenance(DeclaredHandleSourceProvenance(facts)) = facts
 
-AbiReferenceHandleInputContract = {
+AbiPointerLikeInputContract = {
     valueType: TypeId,
-    typeProjection: ReferenceHandleTypeProjection,
-    kind: ReferenceHandleKind,
+    typeProjection: PointerLikeTypeProjection,
+    kind: PointerLikeKind,
     referent: TypeId,
     addressSpace: AddressSpaceRequirement,
-    access: AccessMode,
-    mutability: AbiReferenceHandleMutabilityPolicy,
-    lifetime: AbiReferenceHandleLifetimePolicy,
-    alias: AbiReferenceHandleAliasPolicy,
-    sourceProvenance: AbiReferenceHandleSourceProvenancePolicy
+    access: StorageAccessMode,
+    mutability: AbiPointerLikeMutabilityPolicy,
+    lifetime: AbiPointerLikeLifetimePolicy,
+    alias: AbiPointerLikeAliasPolicy,
+    sourceProvenance: AbiPointerLikeSourceProvenancePolicy
 }
 
-AbiFixedReferenceHandleResultContract = {
-    formalShape: ReferenceHandleValueShape
+AbiFixedPointerLikeResultContract = {
+    formalShape: PointerLikeValueShape
 }
 
-AbiAccessorReferenceHandleResultContract = {
+AbiAccessorPointerLikeResultContract = {
     resultType: TypeId,
     contract: AccessorReferenceResultContractId
 }
 
-AbiRegisteredReferenceHandleResultContract = {
+AbiRegisteredPointerLikeResultContract = {
     resultType: TypeId,
     registration: ReferenceOperationRegistration,
     staticInputs: CanonicalArguments,
     environment: StandardEnvironmentId
 }
 
-AbiReferenceHandleResultContract =
-    FixedReferenceHandleResult(AbiFixedReferenceHandleResultContract)
-  | AccessorReferenceHandleResult(AbiAccessorReferenceHandleResultContract)
-  | RegisteredReferenceHandleResult(AbiRegisteredReferenceHandleResultContract)
+AbiPointerLikeResultContract =
+    FixedPointerLikeResult(AbiFixedPointerLikeResultContract)
+  | AccessorPointerLikeResult(AbiAccessorPointerLikeResultContract)
+  | RegisteredPointerLikeResult(AbiRegisteredPointerLikeResultContract)
 
 FunctionAbiInputShape =
-    RuntimeAbiInput(type: TypeId, mode: PassingMode)
-  | ReferenceHandleAbiInput(contract: AbiReferenceHandleInputContract,
-                            mode: PassingMode)
+    RuntimeAbiInput(type: TypeId, mode: ParamPassingMode)
+  | PointerLikeAbiInput(contract: AbiPointerLikeInputContract,
+                            mode: ParamPassingMode)
   | PhysicalStorageAbiInput(contract: AbiPhysicalStorageInputContract)
   | InitializationTargetAbiInputShape(target: InitializationTargetSlot)
   | GenericMetadataAbiInput(sort: GenericParameterSort)
-  | InterfaceWitnessAbiInput(target: InterfaceSubtypeTarget)
+  | SubtypeWitnessAbiInput(target: SubtypeWitnessTarget)
   | OtherConstraintEvidenceAbiInput(kind: ConstraintKind)
 
 FunctionAbiInput = {
@@ -2081,7 +2105,7 @@ FunctionAbiResultRole = NormalAbiResult | ErrorAbiResult
 
 FunctionAbiResultShape =
     RuntimeAbiResult(type: TypeId)
-  | ReferenceHandleAbiResult(contract: AbiReferenceHandleResultContract)
+  | PointerLikeAbiResult(contract: AbiPointerLikeResultContract)
 
 FunctionAbiResult = {
     ordinal: UInt32,
@@ -2116,7 +2140,7 @@ PhysicalStorageAddressSpaceEqualityProof = {
     right: PhysicalStorageAddressSpace
 }
 
-AbiReferenceHandleAddressSpaceBindingProof = {
+AbiPointerLikeAddressSpaceBindingProof = {
     role: FunctionAbiInputRole,
     formal: AddressSpace,
     actual: AddressSpace,
@@ -2137,7 +2161,7 @@ AbiPhysicalStorageAddressSpaceBindingProof = {
 }
 
 AbiAddressSpaceBindingProof =
-    ReferenceHandleAddressSpaceBinding(AbiReferenceHandleAddressSpaceBindingProof)
+    PointerLikeAddressSpaceBinding(AbiPointerLikeAddressSpaceBindingProof)
   | PhysicalStorageAddressSpaceBinding(AbiPhysicalStorageAddressSpaceBindingProof)
 
 AbiAliasViewProof =
@@ -2149,24 +2173,24 @@ AbiMutabilityViewProof =
   | ReadOnlyViewOfMutable
   | ForgetMutabilityToUnknown(actual: Mutability)
 
-AbiReferenceHandleSourceProvenanceViewProof = {
+AbiPointerLikeSourceProvenanceViewProof = {
     actual: PhysicalStorageSourceProvenance,
     formal: PhysicalStorageSourceProvenance,
     inclusion: CanonicalSetInclusionProof<PhysicalStorageSourceFact>
 }
 
-AbiReferenceHandleInputAdmissionProof = {
-    contract: AbiReferenceHandleInputContract,
-    actual: ReferenceHandleValueShape,
-    instantiatedFormal: ReferenceHandleValueShape,
+AbiPointerLikeInputAdmissionProof = {
+    contract: AbiPointerLikeInputContract,
+    actual: PointerLikeValueShape,
+    instantiatedFormal: PointerLikeValueShape,
     typeEquality: TypeEqualityProofId,
     referentEquality: TypeEqualityProofId,
-    addressSpaceBinding: AbiReferenceHandleAddressSpaceBindingProof,
+    addressSpaceBinding: AbiPointerLikeAddressSpaceBindingProof,
     accessProof: AccessProvisionProof,
     lifetimeProof: OutlivesProof,
     mutabilityView: AbiMutabilityViewProof,
     aliasView: AbiAliasViewProof,
-    sourceProvenanceView: AbiReferenceHandleSourceProvenanceViewProof
+    sourceProvenanceView: AbiPointerLikeSourceProvenanceViewProof
 }
 
 AbiPhysicalStorageInputAdmissionProof = {
@@ -2174,7 +2198,7 @@ AbiPhysicalStorageInputAdmissionProof = {
     actualStorage: PhysicalStorageRef,
     actual: IRPhysicalStorageShape,
     instantiatedFormal: IRPhysicalStorageShape,
-    mode: PassingMode,
+    mode: ParamPassingMode,
     identity: PhysicalStorageIdentityProof,
     addressSpaceBinding: AbiPhysicalStorageAddressSpaceBindingProof,
     accessProof: AccessProvisionProof,
@@ -2185,12 +2209,12 @@ AbiPhysicalStorageInputAdmissionProof = {
 }
 
 AbiInputAdmissionProof =
-    RuntimeInputAdmission(type: TypeId, mode: PassingMode)
-  | ReferenceHandleInputAdmission(AbiReferenceHandleInputAdmissionProof)
+    RuntimeInputAdmission(type: TypeId, mode: ParamPassingMode)
+  | PointerLikeInputAdmission(AbiPointerLikeInputAdmissionProof)
   | PhysicalStorageInputAdmission(AbiPhysicalStorageInputAdmissionProof)
   | InitializationTargetInputAdmission(InitializationTargetSlot)
   | GenericMetadataInputAdmission(variable: CanonicalBoundVariable)
-  | InterfaceWitnessInputAdmission(InterfaceSubtypeTarget)
+  | SubtypeWitnessInputAdmission(SubtypeWitnessTarget)
   | OtherConstraintEvidenceInputAdmission(ConstraintKind)
 
 AbiCallOperandProjection = {
@@ -2205,22 +2229,22 @@ AbiCapturedSourceBinding = {
 }
 
 AbiFixedReferenceResultInstantiation = {
-    contract: AbiFixedReferenceHandleResultContract,
-    result: ReferenceHandleValueShape
+    contract: AbiFixedPointerLikeResultContract,
+    result: PointerLikeValueShape
 }
 
 AbiAccessorReferenceResultInstantiation = {
-    contract: AbiAccessorReferenceHandleResultContract,
+    contract: AbiAccessorPointerLikeResultContract,
     invocationIdentity: AccessorInvocationIdentity,
     sources: CanonicallyOrderedMap<AccessorProvenanceSourceRole,
                                    AbiCapturedSourceBinding>,
     derivation: AccessorReferenceResultDerivation,
-    result: ReferenceHandleValueShape
+    result: PointerLikeValueShape
 }
 
 AbiRegisteredReferenceResultInstantiation = {
-    contract: AbiRegisteredReferenceHandleResultContract,
-    result: ReferenceHandleValueShape,
+    contract: AbiRegisteredPointerLikeResultContract,
+    result: PointerLikeValueShape,
     derivation: RegisteredReferenceResultDerivation
 }
 
@@ -2253,25 +2277,25 @@ AbiCallInstantiationId = ContentId<AbiCallInstantiation>
 
 AbiResultContractProof =
     RuntimeResultContractProof(type: TypeId)
-  | FixedReferenceResultContractProof(AbiFixedReferenceHandleResultContract)
+  | FixedReferenceResultContractProof(AbiFixedPointerLikeResultContract)
   | AccessorReferenceResultContractProof(
-        contract: AbiAccessorReferenceHandleResultContract,
+        contract: AbiAccessorPointerLikeResultContract,
         derivation: AccessorReferenceResultDerivation)
   | RegisteredReferenceResultContractProof(
-        contract: AbiRegisteredReferenceHandleResultContract,
+        contract: AbiRegisteredPointerLikeResultContract,
         derivation: RegisteredReferenceResultDerivation)
 
-instantiateAbiReferenceHandleInput(
-    contract: AbiReferenceHandleInputContract,
+instantiateAbiPointerLikeInput(
+    contract: AbiPointerLikeInputContract,
     role: FunctionAbiInputRole,
     call: AbiCallInstantiation)
-    -> ReferenceHandleValueShape
+    -> PointerLikeValueShape
 
-formalAbiReferenceHandleInput(
-    contract: AbiReferenceHandleInputContract,
+formalAbiPointerLikeInput(
+    contract: AbiPointerLikeInputContract,
     role: FunctionAbiInputRole,
     context: FunctionAbiContext)
-    -> ReferenceHandleValueShape
+    -> PointerLikeValueShape
 
 admitAbiInput(actual: IRValueShape,
               role: FunctionAbiInputRole,
@@ -2285,43 +2309,43 @@ proveAbiDefinitionResult(actual: IRValueShape,
                          formalInputs: NodeMap<FunctionAbiInputRole, IRValueId>)
     -> Option<AbiResultContractProof>
 
-IRFunctionDeclarationShape = {
+IRFunctionDeclShape = {
     signature: CallableSignatureId,
     resultAuthority: CallableResultAuthorityId,
     contract: EffectiveCallableContractId,
     abi: FunctionAbiMap
 }
 
-IRTypeDeclarationShape = {
+IRTypeDeclShape = {
     type: TypeId,
-    definition: ContentId<SemanticValue>
+    definition: ContentId<Val>
 }
 
-IRGlobalDeclarationShape = {
+IRGlobalDeclShape = {
     type: TypeId,
     mutability: Mutability,
     addressSpace: AddressSpace
 }
 
-IRConformanceDeclarationShape = {
-    definition: ValidatedConformanceRef,
-    classifier: ConformanceClassifier,
-    metadataEntries: CanonicallyOrderedSet<SomeWitnessEntryKey>,
-    runtimeSlots: CanonicallyOrderedMap<WitnessRuntimeEntryKey, UInt32>
+IRWitnessTableDeclShape = {
+    definition: ValidatedWitnessTableRef,
+    form: WitnessTableForm,
+    metadataEntries: CanonicallyOrderedSet<SomeInterfaceRequirementKey>,
+    runtimeSlots: CanonicallyOrderedMap<RuntimeInterfaceRequirementKey, UInt32>
 }
 
-IRDeclarationShape =
-    FunctionDeclarationShape(IRFunctionDeclarationShape)
-  | TypeDeclarationShape(IRTypeDeclarationShape)
-  | GlobalDeclarationShape(IRGlobalDeclarationShape)
-  | ConformanceDeclarationShape(IRConformanceDeclarationShape)
+IRDeclShape =
+    FunctionDeclShape(IRFunctionDeclShape)
+  | TypeDeclShape(IRTypeDeclShape)
+  | GlobalDeclShape(IRGlobalDeclShape)
+  | WitnessTableDeclShape(IRWitnessTableDeclShape)
 
-IRDeclarationShapeId = ContentId<IRDeclarationShape>
+IRDeclShapeId = ContentId<IRDeclShape>
 
-IRSymbolDeclaration = {
+IRSymbolDecl = {
     symbol: IRSymbolId,
     key: IRSymbolKey,
-    shape: IRDeclarationShape,
+    shape: IRDeclShape,
     origin: Origin
 }
 
@@ -2331,7 +2355,7 @@ IRSymbolLinkage =
 
 IRSymbolRef = {
     symbol: IRSymbolId,
-    expectedShape: IRDeclarationShapeId,
+    expectedShape: IRDeclShapeId,
     linkage: IRSymbolLinkage
 }
 
@@ -2342,10 +2366,10 @@ IRStaticData<T> = {
 
 IRCapabilityUseRequirement =
     IRDirectCapabilityRequirement(CapabilityRequirement)
-  | IRLocalCallableCapabilityRequirement(CanonicalDeclRef)
+  | IRLocalCallableCapabilityRequirement(DeclRef)
   | IRImportedCallableCapabilityRequirement(CapabilityRequirement)
-  | IRWitnessEntryCapabilityRequirement(witness: InterfaceSubtypeWitnessId,
-                                        entry: WitnessRuntimeEntryKey)
+  | IRWitnessEntryCapabilityRequirement(witness: SubtypeWitnessId,
+                                        entry: RuntimeInterfaceRequirementKey)
 
 IRCapabilityUse = {
     key: CapabilityUseKey,
@@ -2373,58 +2397,60 @@ IRCapabilitySelectionProjectionProof = {
     rule: IRCapabilitySelectionProjectionRule
 }
 
-IRCallSemanticMetadata = {
+CallCapabilitySemanticMetadata = {
     capabilities: IRCapabilitySelection,
     projection: IRCapabilitySelectionProjectionProof
 }
 
 ProjectCapabilitySelectionToIR(selection: CapabilitySelection)
-    -> CheckResult<IRCallSemanticMetadata>
+    -> CheckResult<CallCapabilitySemanticMetadata>
 
-IRReferenceHandleShape = ReferenceHandleValueShape
+IRPointerLikeShape = PointerLikeValueShape
 
 IRReferenceEndpointShape =
-    IRReferenceHandleEndpoint(IRReferenceHandleShape)
+    IRPointerLikeEndpoint(IRPointerLikeShape)
   | IRPhysicalStorageEndpoint(IRPhysicalStorageShape)
 
-IRRegisteredReferenceApplicationSite =
+RegisteredReferenceInstApplicationSite =
     DirectReferenceProducerSite
   | AccessorResultTransformSite
   | ReferenceDereferenceSite
 
-IRRegisteredReferenceApplication = {
+RegisteredReferenceInstApplication = {
     registration: ReferenceOperationRegistration,
-    site: IRRegisteredReferenceApplicationSite,
+    site: RegisteredReferenceInstApplicationSite,
     input: IRReferenceEndpointShape,
     output: IRReferenceEndpointShape,
     control: ReferenceDataOperationControlShape
 }
 
-IRAddressOfDescriptor = {
+AddressOfInstSemanticPlan = {
     input: IRPhysicalStorageShape,
-    output: IRReferenceHandleShape,
+    output: IRPointerLikeShape,
     proof: DirectStorageHandleProof
 }
 
 IRCallableContractSubjectEvidence =
     DirectIRContractSubject(
-        declaration: CanonicalDeclRef,
+        declaration: DeclRef,
         target: IRSymbolRef)
   | WitnessIRContractSubject(
-        witness: InterfaceSubtypeWitnessId,
-        entry: WitnessRuntimeEntryKey,
+        witness: SubtypeWitnessId,
+        entry: RuntimeInterfaceRequirementKey,
         witnessOperand: IRValueId,
         resolutions: WitnessResolutionStamp)
   | DynamicIRContractSubject(owner: TypeId, slot: DynamicDispatchKey)
-  | ClosureIRContractSubject(invoke: CanonicalDeclRef, target: IRSymbolRef)
-  | BuiltinIRContractSubject(rule: RuleId, operands: CanonicalArguments)
+  | LambdaIRContractSubject(invoke: DeclRef, target: IRSymbolRef)
+  | BuiltinIRContractSubject(rule: RuleId,
+                             registration: StandardEnvironmentRuleId,
+                             operands: CanonicalArguments)
 
 RegisteredReferenceResultDerivation = {
     registration: ReferenceOperationRegistration,
     environment: StandardEnvironmentId,
     staticInputs: CanonicalArguments,
     runtimeInputs: NodeList<IRValueId>,
-    result: ReferenceHandleValueShape
+    result: PointerLikeValueShape
 }
 
 IRCallNormalResultIdentity = {
@@ -2445,22 +2471,22 @@ LoweredAccessorReferenceResultCertificate = {
     sources: CanonicallyOrderedMap<AccessorProvenanceSourceRole,
                                    AbiCapturedSourceBinding>,
     derivation: AccessorReferenceResultDerivation,
-    result: ReferenceHandleValueShape
+    result: PointerLikeValueShape
 }
 
-IRDereferenceDescriptor = {
+DereferenceInstSemanticPlan = {
     identity: DereferenceApplicationIdentity,
-    input: IRReferenceHandleShape,
+    input: IRPointerLikeShape,
     resultProof: DereferencedStorageProof,
     output: IRPhysicalStorageShape
 }
 
-IRRegisteredDereferenceApplication = {
-    operation: IRRegisteredReferenceApplication,
-    projection: IRDereferenceDescriptor
+RegisteredDereferenceInstApplication = {
+    operation: RegisteredReferenceInstApplication,
+    projection: DereferenceInstSemanticPlan
 }
 
-IRBuiltinPhysicalProjectionDescriptor = {
+BuiltinPhysicalProjectionInstSemanticPlan = {
     identity: BuiltinPhysicalProjectionIdentity,
     operation: BuiltinPhysicalProjectionOperation,
     inputShapes:
@@ -2471,7 +2497,7 @@ IRBuiltinPhysicalProjectionDescriptor = {
     control: BuiltinPhysicalProjectionControlProof
 }
 
-IRRegisteredPhysicalProjectionDescriptor = {
+RegisteredPhysicalProjectionInstSemanticPlan = {
     identity: RegisteredPhysicalProjectionIdentity,
     registration: RegisteredDataOperationRegistration,
     inputShapes:
@@ -2482,45 +2508,45 @@ IRRegisteredPhysicalProjectionDescriptor = {
     control: RegisteredPhysicalProjectionControlProof
 }
 
-IRReferenceOperation =
-    AddressOfOperation(descriptor: IRStaticData<IRAddressOfDescriptor>)
-  | AccessorReferenceResultOperation(
-        certificate: IRStaticData<LoweredAccessorReferenceResultCertificate>)
-  | RegisteredReferenceProducerOperation(
-        application: IRStaticData<IRRegisteredReferenceApplication>)
-  | ReferenceDereferenceOperation(
-        descriptor: IRStaticData<IRDereferenceDescriptor>)
-  | PointerDereferenceOperation(
-        descriptor: IRStaticData<IRDereferenceDescriptor>)
-  | RegisteredReferenceDereferenceOperation(
-        application: IRStaticData<IRRegisteredDereferenceApplication>)
+ReferenceInstSemanticPlan =
+    AddressOfInstPlan(descriptor: IRStaticData<AddressOfInstSemanticPlan>)
+  | AccessorReferenceResultInstPlan(
+        certificate: LoweredAccessorReferenceResultCertificate)
+  | RegisteredReferenceProducerInstPlan(
+        application: IRStaticData<RegisteredReferenceInstApplication>)
+  | ReferenceDereferenceInstPlan(
+        descriptor: IRStaticData<DereferenceInstSemanticPlan>)
+  | PointerDereferenceInstPlan(
+        descriptor: IRStaticData<DereferenceInstSemanticPlan>)
+  | RegisteredReferenceDereferenceInstPlan(
+        application: IRStaticData<RegisteredDereferenceInstApplication>)
 
-IRPhysicalStorageOperation =
-    BuiltinPhysicalProjectionStorageOperation(
-        descriptor: IRStaticData<IRBuiltinPhysicalProjectionDescriptor>)
-  | RegisteredPhysicalProjectionOperation(
-        descriptor: IRStaticData<IRRegisteredPhysicalProjectionDescriptor>)
+PhysicalStorageInstSemanticPlan =
+    BuiltinPhysicalProjectionInstPlan(
+        descriptor: IRStaticData<BuiltinPhysicalProjectionInstSemanticPlan>)
+  | RegisteredPhysicalProjectionInstPlan(
+        descriptor: IRStaticData<RegisteredPhysicalProjectionInstSemanticPlan>)
 
-IRTemporaryInitializationDescriptor = {
+TemporaryInitializationInstSemanticPlan = {
     storage: IRTemporaryStorageShape,
     application: TemporaryInitializationPlanApplicationAt<Published>,
     effects: EffectSet
 }
 
-IRTemporaryDestructionDescriptor = {
+TemporaryDestructionInstSemanticPlan = {
     storage: IRTemporaryStorageShape,
     plan: DestructionPlanAt<Published>,
     effects: EffectSet,
     nonThrowing: NonThrowingDestructionProof
 }
 
-IRAccessOperation =
-    MaterializeTemporaryOperation(
+StorageAccessInstSemanticPlan =
+    MaterializeTemporaryInstPlan(
         descriptor: IRStaticData<IRTemporaryStorageShape>)
-  | InitializeTemporaryOperation(
-        descriptor: IRStaticData<IRTemporaryInitializationDescriptor>)
-  | DestroyTemporaryOperation(
-        descriptor: IRStaticData<IRTemporaryDestructionDescriptor>)
+  | InitializeTemporaryInstPlan(
+        descriptor: IRStaticData<TemporaryInitializationInstSemanticPlan>)
+  | DestroyTemporaryInstPlan(
+        descriptor: IRStaticData<TemporaryDestructionInstSemanticPlan>)
 
 IRBlockKey = {
     definition: IRSymbolId,
@@ -2538,87 +2564,101 @@ IRInstId = ContentId<IRInstKey>
 
 IRValueKey =
     BlockParameterValue(block: IRBlockId, ordinal: UInt32, shape: IRValueShape)
-  | InstructionResultValue(instruction: IRInstId, ordinal: UInt32,
+  | IRInstResultValue(instruction: IRInstId, ordinal: UInt32,
                            shape: IRValueShape)
 
 IRValueId = ContentId<IRValueKey>
 
-IRBlockParameter = {
+IRValueOperand =
+    LocalIRValue(IRValueId)
+  | SymbolIRValue(IRSymbolRef)
+
+IRInstOperand =
+    ValueOperand(IRValueOperand)
+  | BlockOperand(IRBlockId)
+
+IRParam = {
     value: IRValueId,
     shape: IRValueShape
 }
 
 IRSuccessor = {
     block: IRBlockId,
-    arguments: NodeList<IRValueId>
+    arguments: NodeList<IRValueOperand>
 }
 
-CallDispatchPrefixLayout =
-    NoDispatchPrefix
-  | WitnessDispatchPrefix(shape: InterfaceWitnessClassifier)
+IRInterfaceRequirementKeyValue =
+    SubtypeWitnessRequirementKey(key: SubtypeWitnessLookupKey)
+  | GeneralInterfaceRequirementKey(key: SomeInterfaceRequirementKey)
 
-IROperation =
-    DataOperation(opcode: StandardEnvironmentRuleId, immediates: CanonicalArguments)
-  | InitializationOperation(instruction: IRInitializationInstruction)
-  | AccessOperation(instruction: IRAccessOperation)
-  | PhysicalStorageOperation(instruction: IRPhysicalStorageOperation)
-  | ReferenceOperation(instruction: IRReferenceOperation)
-  | DirectCallOperation(target: IRSymbolRef, abi: FunctionAbiMapId,
-                        instantiation: IRStaticData<AbiCallInstantiation>,
-                        semantics: IRStaticData<IRCallSemanticMetadata>)
-  | WitnessTableReferenceOperation(table: IRSymbolRef)
-  | SpecializeWitnessOperation(specialization: CanonicalSpecializationSpine)
-  | LookupWitnessOperation(key: SubtypeWitnessLookupKey)
-  | LookupWitnessEntryOperation(key: SomeWitnessEntryKey)
-  | ExtractExistentialWitnessOperation(interface: InterfaceInstanceKey)
-  | SelectDerivativeOperation(mode: DifferentiationMode,
-                               provider: IRDerivativeProviderDescriptor,
-                               signature: DerivativeSignatureMapId,
-                               layout: IRDerivativeSelectionOperandLayout)
-  | StopGradientOperation(boundary: StopGradientBoundaryId)
-  | WitnessCallOperation(entry: WitnessRuntimeEntryKey, abi: FunctionAbiMapId,
-                         instantiation: IRStaticData<AbiCallInstantiation>,
-                         semantics: IRStaticData<IRCallSemanticMetadata>)
-  | DynamicCallOperation(owner: TypeId, slot: DynamicDispatchKey,
-                         abi: FunctionAbiMapId,
-                         instantiation: IRStaticData<AbiCallInstantiation>,
-                         semantics: IRStaticData<IRCallSemanticMetadata>)
-  | ClosureCallOperation(invoke: IRSymbolRef, abi: FunctionAbiMapId,
-                         instantiation: IRStaticData<AbiCallInstantiation>,
-                         semantics: IRStaticData<IRCallSemanticMetadata>)
-  | PrimitiveCallOperation(rule: RuleId, registration: StandardEnvironmentRuleId,
-                            staticInputs: CanonicalArguments, abi: FunctionAbiMapId,
-                            instantiation: IRStaticData<AbiCallInstantiation>,
-                            semantics: IRStaticData<IRCallSemanticMetadata>)
-  | BranchOperation
-  | ConditionalBranchOperation
-  | SwitchOperation(cases: CanonicallyOrderedMap<ConstValue, UInt32>,
-                    defaultSuccessor: UInt32)
-  | ReturnOperation
-  | ThrowOperation
-  | UnreachableOperation
-  | IRErrorOperation(ErrorId)
+CallInstSemanticMetadata = {
+    abi: FunctionAbiMapId,
+    instantiation: AbiCallInstantiation,
+    capabilities: CallCapabilitySemanticMetadata
+}
 
-IRInstruction = {
+RegisteredDataInstSemanticPlan = {
+    registration: RegisteredDataOperationRegistration,
+    immediates: CanonicalArguments
+}
+
+ExistentialWitnessExtractionInstSemanticPlan = {
+    interface: InterfaceInstanceKey,
+    result: SubtypeWitnessForm
+}
+
+DetachDerivativeInstSemanticPlan = {
+    boundary: DetachDerivativeBoundaryId
+}
+
+IRInstSemanticMetadata = {
+    registeredData: Option<RegisteredDataInstSemanticPlan>,
+    initialization: Option<InitializationInstSemanticPlan>,
+    storageAccess: Option<StorageAccessInstSemanticPlan>,
+    physicalStorage: Option<PhysicalStorageInstSemanticPlan>,
+    reference: Option<ReferenceInstSemanticPlan>,
+    call: Option<CallInstSemanticMetadata>,
+    specialization: Option<CanonicalSpecializationSpine>,
+    existentialWitnessExtraction:
+        Option<ExistentialWitnessExtractionInstSemanticPlan>,
+    derivativeSelection: Option<DerivativeSelectionInstSemanticPlan>,
+    detachDerivative: Option<DetachDerivativeInstSemanticPlan>,
+    recoveryError: Option<ErrorId>
+}
+
+IRInstSemanticMetadataEntry = {
+    instruction: IRInstId,
+    metadata: IRInstSemanticMetadata
+}
+
+IROp = generated codebase opcode discriminator
+
+registeredIROp(registration: StandardEnvironmentRuleId) -> IROp
+selectedIROp(plan: ReferenceInstSemanticPlan | PhysicalStorageInstSemanticPlan |
+                    StorageAccessInstSemanticPlan | InitializationInstSemanticPlan)
+    -> IROp
+
+IRInstRecord = {
     id: IRInstId,
     key: IRInstKey,
-    operation: IROperation,
-    operands: NodeList<IRValueId>,
-    results: NodeList<IRValueShape>,
-    successors: NodeList<IRSuccessor>
+    op: IROp,
+    operands: NodeList<IRInstOperand>,
+    results: NodeList<IRValueShape>
 }
 
 IRBlock = {
     id: IRBlockId,
     key: IRBlockKey,
-    parameters: NodeList<IRBlockParameter>,
-    instructions: NonEmpty<IRInstruction>
+    parameters: NodeList<IRParam>,
+    instructions: NonEmpty<IRInstRecord>
 }
 
 IRControlFlowGraph = {
     entry: IRBlockId,
     blocks: NodeMap<IRBlockId, IRBlock>,
-    blockOrder: NodeList<IRBlockId>
+    blockOrder: NodeList<IRBlockId>,
+    semanticMetadata:
+        NodeMap<IRInstId, IRInstSemanticMetadataEntry>
 }
 
 IRFunctionDefinitionBody = {
@@ -2630,30 +2670,30 @@ IRGlobalDefinitionBody = {
     initializer: IRControlFlowGraph
 }
 
-IRConformanceDefinitionBody = {
-    definition: ValidatedConformanceRef,
+IRWitnessTableDefinitionBody = {
+    definition: ValidatedWitnessTableRef,
     metadataEntries:
-        CanonicallyOrderedMap<SomeWitnessEntryKey, ContentId<SemanticValue>>,
+        CanonicallyOrderedMap<SomeInterfaceRequirementKey, ContentId<Val>>,
     runtimeEntries:
-        CanonicallyOrderedMap<WitnessRuntimeEntryKey, IRSymbolRef>
+        CanonicallyOrderedMap<RuntimeInterfaceRequirementKey, IRSymbolRef>
 }
 
 IRDefinitionBody =
     FunctionDefinitionBody(IRFunctionDefinitionBody)
   | GlobalDefinitionBody(IRGlobalDefinitionBody)
-  | ConformanceDefinitionBody(IRConformanceDefinitionBody)
+  | WitnessTableDefinitionBody(IRWitnessTableDefinitionBody)
 
 IRDefinition = {
     symbol: IRSymbolId,
-    declaredShape: IRDeclarationShapeId,
+    declaredShape: IRDeclShapeId,
     body: IRDefinitionBody
 }
 
 IRDependencyKey =
     TypeDependency(TypeId)
   | ContractDependency(EffectiveCallableContractId)
-  | DeclarationDependency(CanonicalDeclRef)
-  | ConformanceDependency(ValidatedConformanceRef)
+  | DeclDependency(DeclRef)
+  | WitnessTableDependency(ValidatedWitnessTableRef)
   | InitializationPlanDependency(InitializationPlanId)
   | LanguageRuleSetDependency(LanguageRuleSetId)
   | ModuleDependency(ModuleInterfaceContentId)
@@ -2666,7 +2706,7 @@ IRDependency = {
 
 FrontendIRFragment = {
     owner: DeclId,
-    declarations: CanonicallyOrderedMap<IRSymbolId, IRSymbolDeclaration>,
+    declarations: CanonicallyOrderedMap<IRSymbolId, IRSymbolDecl>,
     definitions: CanonicallyOrderedMap<IRSymbolId, IRDefinition>,
     references: CanonicallyOrderedSet<IRSymbolRef>,
     sourceMap: NodeMap<IRInstId, Origin>,
@@ -2674,23 +2714,65 @@ FrontendIRFragment = {
 }
 ```
 
-Chapter 15 defines `IRInitializationInstruction`, its closed operation alternatives, and its
-semantic-role-to-operand layout. It is embedded here so initialization participates in the same SSA,
-dependency, and result-shape validation as every other frontend-IR instruction. The IR sum contains
-only successful executable alternatives; recovered initialization follows `IR-005` instead.
+`IROp` is the same generated opcode discriminator used by the codebase. It has no fields: an
+instruction's type, ABI map, capability proof, witness key, initialization plan, or derivative
+provider is never payload inside an `IROp`. A standard-environment registration resolves to an
+actual generated opcode through `registeredIROp`; `selectedIROp` applies the corresponding
+registered lowering rule to a storage, reference, or initialization plan. These functions select an
+opcode and do not manufacture a new `IR...` operation class.
 
-`IR-VAL-001`: A Core ordinary runtime rvalue lowers to `RuntimeValueShape(type)`. A Core
-`ReferenceHandleValue(handle)` lowers to
-`ReferenceHandleIRValueShape(ReferenceHandleValueShape(type, handle))`, and a Core
-`PhysicalPlace(CorePhysicalPlaceShape)` lowers to
+Write `V(x)` for `ValueOperand(x)` and `B(x)` for `BlockOperand(x)`. The existing generated
+instructions used directly by this frontend subset have these exact operand sequences:
+
+| generated instruction              | operands, in order                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| `IRCall`                           | `V(callee), V(argument)*`                                                     |
+| `IRSpecialize`                     | `V(base), V(genericOrWitnessArgument)*`                                       |
+| `IRLookupWitnessMethod`            | `V(witnessTable), V(requirementKey)`                                          |
+| `IRExtractExistentialWitnessTable` | `V(existential)`                                                              |
+| `IRForwardDifferentiate`           | `V(base)`                                                                     |
+| `IRBackwardDifferentiate`          | `V(applyFunction), V(contextType), V(backwardPropagateFunction)`              |
+| `IRDetachDerivative`               | `V(value)`                                                                    |
+| `IRUnconditionalBranch`            | `B(target), V(targetArgument)*`                                               |
+| `IRConditionalBranch`              | `V(condition), B(trueBlock), B(falseBlock)`                                   |
+| `IRSwitch`                         | `V(condition), B(breakLabel), B(defaultLabel), (V(caseValue), B(caseLabel))*` |
+| `IRReturn`                         | zero operands for a void return, otherwise `V(value)`                         |
+| `IRThrow`                          | `V(error)`                                                                    |
+| `IRUnreachable`                    | no operands                                                                   |
+| `IRPoison`                         | no operands; diagnostic/tooling recovery only                                 |
+
+Other actual opcodes admitted to frontend IR are selected by a registered schema that declares
+their operands, results, and effects. Chapter 15 defines `InitializationInstSemanticPlan`; chapter
+16 defines `DerivativeSelectionInstSemanticPlan`. They are sidecar plans, not opcode alternatives.
+Every instruction has exactly one entry in `IRControlFlowGraph.semanticMetadata`, including the
+all-`None` entry. The map key and `entry.instruction` both equal the instruction ID. Validation
+checks every present facet against `record.op`: `call` requires `IRCall`, `specialization` requires
+`IRSpecialize`, existential extraction requires `IRExtractExistentialWitnessTable`, derivative and
+detach facets require their exact generated opcodes, and every registered/storage/reference/
+initialization facet must select that same opcode. Orthogonal facets may coexist only when the
+emission recipe requires them; for example, a constructor call has both `initialization` and `call`
+metadata on one `IRCall`, and a reference-accessor call has both `reference` and `call` metadata on
+its producing `IRCall`. `recoveryError` requires `IRPoison`; control-flow instructions have the
+all-`None` entry. No semantic fact is reconstructed from the opcode alone.
+
+`successors(record)` is a derived view, never stored authority. `IRUnconditionalBranch` contributes
+its target and remaining value operands as block arguments; `IRConditionalBranch` contributes its
+true and false targets with no block arguments; `IRSwitch` contributes its default and case labels
+in operand order, while `breakLabel` is its structured reconvergence target rather than a direct
+edge. Other instructions contribute no successors.
+
+`IR-VAL-001`: A IRReady ordinary runtime rvalue lowers to `RuntimeValueShape(type)`. A IRReady
+`PointerLikeValue(handle)` lowers to
+`PointerLikeIRValueShape(PointerLikeValueShape(type, handle))`, and a IRReady
+`PhysicalStorage(IRReadyPhysicalStorageShape)` lowers to
 `PhysicalStorageValueShape(IRPhysicalStorageShape)` with the outer runtime type as `valueType` and
 identical access, mutability, physical address space, lifetime, alias, and source provenance.
 Physical parameter forwarding therefore remains symbolic; only first-class handle formation
-consumes a separate `ConcreteAddressSpaceProjectionProof`. Generic metadata, interface
-witnesses, witness entries, and other constraint evidence lower respectively to
-`GenericMetadataShape(variable, variable.sort)`, `InterfaceWitnessShape`, `WitnessEntryShape`, and
+consumes a separate `ConcreteAddressSpaceProjectionProof`. Generic metadata, subtype witnesses,
+witness entries, and other constraint evidence lower respectively to
+`GenericMetadataShape(variable, variable.sort)`, `SubtypeWitnessValueShape`, `WitnessEntryShape`, and
 `OtherConstraintEvidenceShape(slot.kind)`. The enclosing ABI/input role retains the complete
-variable or constraint-slot key. A Core value cannot be reclassified among ordinary runtime data,
+variable or constraint-slot key. A IRReady value cannot be reclassified among ordinary runtime data,
 reference-handle provenance, physical storage, metadata, or evidence (or between evidence kinds)
 merely because a target ABI uses the same machine representation.
 
@@ -2703,8 +2785,9 @@ key, stored ID, and key agree; every block key names the containing definition, 
 equals its index in `blockOrder`. An instruction's ID/key agree and its ordinal equals its index in
 its block. A block-parameter or instruction-result value ID contains the exact producer, ordinal,
 and shape found at that producer. A definition map key equals `definition.symbol`, and a
-requirement map key equals `requirement.key`. No identity depends on allocation, pointer, worker,
-or hash-map iteration order.
+requirement map key equals `requirement.key`. The semantic-metadata map is a duplicate-free
+bijection onto the graph's instructions, and every map key equals its entry's `instruction`. No
+identity depends on allocation, pointer, worker, or hash-map iteration order.
 
 An `IRStaticData<T>` value satisfies `id = ContentId(value)`. Its schema is the closed type `T` at
 the use site; it is immutable, canonically serializable data and cannot contain an AST node,
@@ -2724,13 +2807,13 @@ shapes are complete and therefore have no separate `IRDefinition`.
 `IR-RES-002`: A function body stores `ContentId(declaration.functionShape.abi)` and every block key
 names that function symbol. Its entry block parameters, in ordinal order, are exactly the ABI
 inputs after this shape projection: runtime input becomes `RuntimeValueShape(type)`, a
-`ReferenceHandleAbiInput(contract, _)` becomes
-`ReferenceHandleIRValueShape(formalAbiReferenceHandleInput(contract, role, abi.context))`, a
+`PointerLikeAbiInput(contract, _)` becomes
+`PointerLikeIRValueShape(formalAbiPointerLikeInput(contract, role, abi.context))`, a
 `PhysicalStorageAbiInput(contract)` becomes
 `PhysicalStorageValueShape(contract.formalShape)`, generic input becomes
 `GenericMetadataShape(role.variable, shape.sort)`, an initialization target becomes
-`InitializationTargetShape(shape.target)`, and an interface-witness input becomes
-`InterfaceWitnessShape(ConcreteInterfaceWitness(shape.target))`, and other constraint evidence becomes
+`InitializationTargetShape(shape.target)`, and an subtype-witness input becomes
+`SubtypeWitnessValueShape(ConcreteSubtypeWitness(shape.target))`, and other constraint evidence becomes
 `OtherConstraintEvidenceShape(shape.kind)`. The `WitnessAbiInput(slot)` role retains the canonical
 constraint slot independently of the endpoint-shaped value. A global initializer has no entry
 parameters and every normal
@@ -2739,47 +2822,52 @@ return supplies one runtime value of the declared global type. A conformance bod
 wrong declaration.
 
 `IR-SSA-001`: `blockOrder` is a duplicate-free bijection onto `blocks`, starts with `entry`, and is
-the deterministic structured-lowering order. Every block ends in exactly one control operation;
-ordinary/data/storage/reference/call operations have no successors, `BranchOperation` has one,
-`ConditionalBranchOperation` has two, and return/throw/unreachable have none. A switch has a
-nonempty successor list; every case/default index is in range and every successor is selected by a
-case or the default. Successor argument count and shapes equal the destination block parameters.
-Every operand resolves in the same definition and is dominated by its block parameter or producing
-instruction; same-block instruction uses are strictly after the producer. Instruction results,
-block parameters, and symbol references occupy separate ID domains and cannot be interchanged.
+the deterministic structured-lowering order. Every block ends in exactly one of
+`IRUnconditionalBranch`, `IRConditionalBranch`, `IRSwitch`, `IRReturn`, `IRThrow`, or
+`IRUnreachable`, and no earlier instruction in the block is a terminator. Operand kinds and counts
+are exactly those in the table above. The derived successor argument count and shapes equal the
+destination block parameters; consequently the targets of `IRConditionalBranch` and the direct
+default/case targets of `IRSwitch` have no parameters supplied by that edge. Every
+`LocalIRValue` resolves in the same definition and is dominated by its block parameter or producing
+instruction; same-block uses are strictly after the producer. Every `SymbolIRValue` resolves under
+`IR-RES-001`, and every `BlockOperand` names a block in the same graph. Instruction results, block
+parameters, symbol refs, and block operands occupy distinct domains and cannot be interchanged.
 
-`IR-SSA-002`: The standard-environment schema for a `DataOperation` or primitive rule declares its
-operand roles, result shapes, immediate schema, effects, and whether it is valid in frontend IR.
-An `InitializationOperation` instead uses chapter 15's closed alternative and validated operand
-layout; its plan ID resolves the exact endpoint mappings, operation-qualified orders, target,
-entry/required-subobject/exit proof, allocation ownership, transfer, and all-exit cleanup contract.
-Every physical-storage operand/result uses `PhysicalStorageValueShape` and retains its exact value
-type, access, mutability, address space, lifetime, alias, and source provenance.
-Call operations use the referenced `FunctionAbiMap`, their stored `AbiCallInstantiation`, and one
-`IRCallSemanticMetadata` value satisfying `IR-CALL-002`; no other operation may carry call-semantic
-metadata.
-`instantiation.abi` equals the operation's ABI ID, its activation and address-space bindings
-validate under `IR-ABI-003`, and direct, dynamic, closure, and primitive call operands are ordered
-by ABI ordinal. Each operand must produce a successful `admitAbiInput` proof for its role and formal
-shape under that exact call instantiation. A witness call has
-`WitnessDispatchPrefix(concreteClassifier)` at operand zero followed by those same ABI inputs at
-indices `1 + ordinal`. Instruction result ordinal and shape equal the corresponding
-`instantiation.results` entry; a formal result contract is never used as if it were a concrete SSA
-shape. Return and throw operands instead require a successful `proveAbiDefinitionResult` for the
-containing function's normal and error result contracts and formal entry inputs. This validates the
-body against its reusable declaration contract without importing a caller invocation lifetime.
-`IRErrorOperation` is accepted only under
-`IR-005` and its result shapes retain the originating `ErrorId`.
+`IR-SSA-002`: A registered frontend-IR schema declares one actual `IROp`, its operand roles, result
+shapes, immediate schema, effects, and whether that opcode is valid at this stage. Its semantic
+metadata stores the resolved registration and proof plan, and `registeredIROp(registration.rule)`
+must equal `record.op`. Storage, reference, and initialization metadata instead use
+`selectedIROp(plan) = record.op`; their schemas validate the exact endpoint mappings,
+operation-qualified orders, target and source proofs, allocation ownership, transfer, and cleanup
+facts. Every physical-storage operand/result uses `PhysicalStorageValueShape` and retains its exact
+value type, access, mutability, address space, lifetime, alias, and source provenance.
 
-`IR-REF-001`: Every `IRReferenceOperation` has no successors. Address-of has exactly one
+An `IRCall` has one `call` metadata facet and no non-call instruction may have one. Operand zero is
+the callable value; ABI inputs occupy indices `1 + ordinal` for direct, witness, dynamic, lambda,
+and registered-primitive dispatch alike. `call.abi = call.instantiation.abi`; activation and
+address-space bindings validate under `IR-ABI-003`, and each ABI operand has the successful
+`admitAbiInput` proof for its named role and formal shape under that exact instantiation. Witness
+dispatch first produces the callable with `IRLookupWitnessMethod`; neither the witness table nor a
+requirement key is an extra dispatch prefix of `IRCall`. Instruction result ordinal and shape equal
+the corresponding `instantiation.results` entry; a formal result contract is never used as if it
+were a concrete SSA shape. Return and throw operands instead require a successful
+`proveAbiDefinitionResult` for the containing function's normal and error result contracts and
+formal entry inputs. This validates the body against its reusable declaration contract without
+importing a caller invocation lifetime. `IRPoison` is accepted only under `IR-005`, has
+`recoveryError = Some(error)`, and its result shapes retain that `ErrorId`.
+
+`IR-REF-001`: Every instruction with `metadata.reference = Some(plan)` has no successors.
+`AddressOfInstPlan` has exactly one
 `PhysicalStorageValueShape(descriptor.input)` operand and one
-`ReferenceHandleIRValueShape(descriptor.output)` result; `descriptor.proof.storage` projects to the
+`PointerLikeIRValueShape(descriptor.output)` result; `descriptor.proof.storage` projects to the
 input, `descriptor.proof.handle` projects to the output, and its access, mutability, lifetime,
 concrete address-space projection, alias, and source-provenance relations all validate.
-`AccessorReferenceResultOperation` has one
-`ReferenceHandleIRValueShape(certificate.result)` operand and one result of that identical shape.
+`AccessorReferenceResultInstPlan` occurs only as an orthogonal facet on the producing `IRCall`.
+Its certificate identifies one existing
+`PointerLikeIRValueShape(certificate.result)` call result; it emits no wrapper instruction and adds
+no operand or result. Consequently `selectedIROp(AccessorReferenceResultInstPlan(_)) = IRCall`.
 Builtin reference/pointer dereference has one
-`ReferenceHandleIRValueShape(descriptor.input)` operand and one
+`PointerLikeIRValueShape(descriptor.input)` operand and one
 `PhysicalStorageValueShape(descriptor.output)` result;
 `descriptor.output.addressSpace = ConcretePhysicalAddressSpace(descriptor.input.handle.addressSpace)`
 and its source provenance is the proof-preserving projection of the handle. A registered producer has one physical input
@@ -2791,12 +2879,12 @@ same endpoints and the exact result proof. Operand/result counts or endpoint sha
 from either static descriptor are invalid IR.
 
 `IR-REF-002`: Projecting a checked registered application first constructs its closed stage-free
-Core application, then projects that value to `IRRegisteredReferenceApplication`. The Core
+IRReady application, then projects that value to `RegisteredReferenceInstApplication`. The IRReady
 boundary removes typed node IDs, diagnostic origins, semantic-use edges, and selection proofs only
 after those facts have been validated and consumed. It preserves the
 exact registration/environment/static inputs, operation site, runtime endpoint shapes, and
-unary/nonthrowing control shape. For direct and transform producers, the separate Core place/handle
-operand equals the checked `input.operand` elaboration and the Core application's stored endpoint
+unary/nonthrowing control shape. For direct and transform producers, the separate IRReady storage/handle
+operand equals the checked `input.operand` elaboration and the IRReady application's stored endpoint
 proofs equal the checked input/output; an equal-shaped replacement is not that projection. The
 resulting `IRStaticData` contains no AST reference. Address-of
 and builtin dereference descriptors similarly retain the complete handle and physical-storage
@@ -2804,9 +2892,9 @@ shapes needed to replay their endpoint equations. A dereference descriptor addit
 the stage-free physical-projection identity and complete `DereferencedStorageProof`; its executable
 handle remains the instruction operand, not a path payload. A registered dereference packages that
 descriptor with the projected registered operation rather than erasing either proof. The Typed-to-
-Core boundary has already projected an `AccessorReferenceResultCertificate` to the stage-free
-`CoreAccessorReferenceResultProof`, after validating its exact typed call, subject, signature,
-referent, result shape, source set, and instantiation proof. IR lowering projects that Core proof
+IRReady boundary has already projected an `AccessorReferenceResultCertificate` to the stage-free
+`IRReadyAccessorReferenceResultProof`, after validating its exact typed call, subject, signature,
+referent, result shape, source set, and instantiation proof. IR lowering projects that IRReady proof
 together with the already emitted call to `LoweredAccessorReferenceResultCertificate`: the exact producer instruction
 and normal-result ordinal, the producer's `AbiCallInstantiationId`, stage-free callable-subject
 evidence, declaration-stable accessor-role-to-producer-operand bindings and pack projections, the
@@ -2816,21 +2904,23 @@ source expressions, origins, semantic-use
 edges, and stage-specific resolution sidecars are removed. The projection contains no AST reference
 and is replayable using only the frozen IR graph and semantic/standard-environment dependencies.
 
-`IR-REF-003`: Generic `DataOperation` never produces `PhysicalStorageValueShape`. The closed IR
-producers of that shape are storage declarations/projections, initialization or allocation storage,
-`PhysicalStorageOperation.BuiltinPhysicalProjectionStorageOperation`,
-`PhysicalStorageOperation.RegisteredPhysicalProjectionOperation`, and the three dereference
-alternatives. A registered
+`IR-REF-003`: A generic registered-data plan never produces `PhysicalStorageValueShape`. The closed
+frontend-IR producers of that shape are storage declarations/projections, initialization or
+allocation storage, instructions carrying
+`PhysicalStorageInstSemanticPlan.BuiltinPhysicalProjectionInstPlan` or
+`PhysicalStorageInstSemanticPlan.RegisteredPhysicalProjectionInstPlan`, and the three dereference
+plans. A registered
 physical projection's descriptor validates all input shapes and its exact output against the
-`RegisteredPhysicalProjectionResultProof` from `TYP-PLC-003`/`TYP-PLC-010`; sharing a target opcode with an
+`RegisteredPhysicalProjectionResultProof` from `TYP-STO-003`/`TYP-STO-010`; sharing a target opcode with an
 ordinary data operation cannot bypass this alternative.
 
-`IR-PLC-001`: Initial lowering maps each `CoreRegisteredPhysicalProjection` one-to-one to
-`RegisteredPhysicalProjectionOperation`. The instruction operands are the Core
+`IR-STO-001`: Initial lowering maps each `IRReadyRegisteredPhysicalProjection` to an instruction
+carrying `RegisteredPhysicalProjectionInstPlan`; its actual opcode is
+`registeredIROp(descriptor.registration.rule)`. The instruction operands are the IRReady
 `runtimeOperands[role]` lowered in `evaluationOrder`; the descriptor's `inputShapes` has exactly
 that role domain, and each operand shape equals its named entry. Descriptor identity, registration
 (including `StandardEnvironmentId` and static inputs), evaluation order, result proof, and control
-proof are copied from Core. `resultProof.identity = descriptor.identity`,
+proof are copied from IRReady. `resultProof.identity = descriptor.identity`,
 `resultProof.registration = descriptor.registration`, and its storage path is
 `RegisteredPhysicalProjection(identity)`. Projecting that storage yields exactly
 `descriptor.output`, the instruction's sole `PhysicalStorageValueShape` result. The result proof's
@@ -2838,12 +2928,13 @@ type equality and access/mutability/lifetime/address-space/alias/source-provenan
 descriptor's named runtime endpoints and registered schema without an AST node or ambient target
 lookup. A later use-specific `PhysicalStorageProof` is not serialized as part of the producer.
 
-`IR-PLC-002`: Initial lowering maps each `CoreBuiltinPhysicalProjection` one-to-one to
-`BuiltinPhysicalProjectionStorageOperation`. Its two instruction operands are the Core base and
+`IR-STO-002`: Initial lowering maps each `IRReadyBuiltinPhysicalProjection` to an instruction
+carrying `BuiltinPhysicalProjectionInstPlan`; the plan's registered lowering rule selects its actual
+opcode. Its two instruction operands are the IRReady base and
 index values lowered in the stored evaluation order, and the descriptor's `inputShapes` has exactly
 those two roles with their exact shapes. Identity, operation, order, result proof, and control proof
-are copied from Core. `resultProof.identity = descriptor.identity`, its input storage is the
-physical storage obtained from the base operand by the closed IR physical-place provenance
+are copied from IRReady. `resultProof.identity = descriptor.identity`, its input storage is the
+physical storage obtained from the base operand by the closed IR physical-storage provenance
 relation, not merely an equal `IRPhysicalStorageShape`, and its path is
 `BuiltinElement(resultProof.inputStorage.path, descriptor.identity)`. Projecting the result storage
 yields exactly `descriptor.output`, the instruction's sole `PhysicalStorageValueShape` result.
@@ -2852,32 +2943,34 @@ origin, or reconstructed index. The descriptor and every transitive `IRStaticDat
 stage-free. A generic data operation or registered physical projection cannot
 substitute for this producer.
 
-`IR-REF-004`: Initial lowering maps `CoreAddressOfPhysicalStorage` one-to-one to
-`AddressOfOperation`, `CoreAccessorReferenceResult` to `AccessorReferenceResultOperation`, and
+`IR-REF-004`: Initial lowering maps `IRReadyAddressOfPhysicalStorage` one-to-one to
+`AddressOfInstPlan`, attaches `AccessorReferenceResultInstPlan` to the exact `IRCall` that produced
+an `IRReadyAccessorReferenceResult`, and maps
 registered direct and handle-transform producers to
-`RegisteredReferenceProducerOperation` with their distinct site, builtin reference/pointer
+`RegisteredReferenceProducerInstPlan` with their distinct site, builtin reference/pointer
 dereferences to the corresponding distinct IR alternative, and registered dereference to
-`RegisteredReferenceDereferenceOperation`. Every dereference descriptor copies the Core proof's
+`RegisteredReferenceDereferenceInstPlan`. Each plan selects an existing generated or registered
+`IROp`; none of these plan names is an opcode. Every dereference descriptor copies the IRReady proof's
 identity and complete proof; its output path is `DereferencedReference(identity)`, its input shape
 is the projection of that proof's handle, and its output shape is the projection of the proof's
 storage. The registered alternative additionally requires
 `application.operation.input/output` to equal the projection descriptor's endpoints and packages
-the exact stage-free `CoreRegisteredDereferenceApplication` registration, input/output proof, and
+the exact stage-free `IRReadyRegisteredDereferenceApplication` registration, input/output proof, and
 control shape rather than reconstructing them. Lowering does not fuse adjacent
 accessor-call, transform, or dereference instructions, and it never reconstructs a registration,
 endpoint, or stable identity from a runtime type or `IRInstId`.
 
-`IR-REF-005`: For `AccessorReferenceResultOperation(certificate)`, let `c = certificate.value`.
-`c.normalResult.role = NormalAbiResult`; its producer resolves to a call operation whose stored
-instantiation has `id = c.normalResult.instantiation`, and its ABI maps `NormalAbiResult` to
-`c.normalResult.ordinal`. The operation's sole operand is exactly
-`InstructionResultValue(c.normalResult.producer, c.normalResult.ordinal,
-ReferenceHandleIRValueShape(c.result))`; it cannot be a block parameter, copy, sibling call result,
-or arbitrary equal-shaped value. The wrapper's one result has that identical shape.
+`IR-REF-005`: For an `IRCall` record `r` carrying
+`AccessorReferenceResultInstPlan(certificate)`, let `c = certificate`.
+`c.normalResult.role = NormalAbiResult`, `c.normalResult.producer = r.id`, and the call metadata
+instantiation has `ContentId(instantiation) = c.normalResult.instantiation`. Its ABI maps
+`NormalAbiResult` to `c.normalResult.ordinal`, and result ordinal `c.normalResult.ordinal` is exactly
+`PointerLikeIRValueShape(c.result)`. The certificate cannot name a block parameter, copy, sibling
+call, another result ordinal, or arbitrary equal-shaped value. No wrapper result exists.
 
 The producer ABI signature equals `c.signature`, and `c.subject` is byte-identical to the
 producer instantiation's subject evidence. A witness subject repeats the exact
-`InterfaceSubtypeWitnessId`, runtime-entry key, witness SSA operand, and frozen resolution evidence;
+`SubtypeWitnessId`, runtime-entry key, witness SSA operand, and frozen resolution evidence;
 matching only the selected method symbol is insufficient. The producer's instantiated normal
 result is `AccessorReferenceResultInstantiation(i)` with `i.contract.contract = c.contract`,
 `i.invocationIdentity = c.invocationIdentity`, `i.sources = c.sources`,
@@ -2893,41 +2986,41 @@ Resolving `c.contract` yields `c.signature`, its declared referent, and the five
 Replaying those rules against the exact captured SSA values and projections in `c.sources` yields
 the address space, mutability, lifetime, alias, and source provenance recorded in `c.derivation`, and combining them
 with the contract's result type, kind, referent, and access yields exactly `c.result`. No validation
-step consults a typed AST node. The wrapper therefore preserves a proof-carrying result already
-created by the call; it never creates provenance by reclassification.
+step consults a typed AST node. The certificate sidecar therefore authenticates a proof-carrying
+result already created by the call; it never creates provenance by reclassification.
 For `FreshAccessorAlias`,
 `c.derivation.alias.invocationIdentity = Some(c.invocationIdentity)`, and replay derives the exact
 `AccessorInvocationAliasRegion(c.invocationIdentity)`. For every other alias rule the field is
 `None`. An IR producer ID is never
 used as a replacement seed, so moving or deduplicating instructions cannot change alias identity.
 
-`IR-TMP-001`: `MaterializeTemporaryOperation(d)` has no operands and one
+`IR-TMP-001`: An instruction carrying `MaterializeTemporaryInstPlan(d)` has no operands and one
 `TemporaryStorageValueShape(d)` result representing raw plan-owned storage. Its nominal
 `TemporaryStorageIdentity` is copied from the authenticated application site and its alias is
-exactly `ExactAliasRoot(temporaryStorageAliasRoot(d.identity))`; no Core/IR instruction identity or
+exactly `ExactAliasRoot(temporaryStorageAliasRoot(d.identity))`; no IRReady/IR instruction identity or
 raw `StableSemanticId` may replace it.
-`InitializeTemporaryOperation(i)` is the normal-checkpoint marker for the exact chapter 15
+An instruction carrying `InitializeTemporaryInstPlan(i)` is the normal-checkpoint marker for the exact chapter 15
 application in `i.application`: it has that temporary as its sole operand and no result, and is
-dominated by the complete lowered initialization operations. Every exceptional exit before the
+dominated by the complete lowered initialization-recipe instructions. Every exceptional exit before the
 marker executes the application's stored cleanup and cannot reach outer destruction. Before the
 marker, the raw temporary value may be used only as that initialization plan's target or
 exceptional-cleanup storage; the marker must dominate whole-object write-back and destruction.
 `i.effects` is copied from the published initialization plan rather than reconstructed from the
-value type. `DestroyTemporaryOperation(d)` consumes one
+value type. An instruction carrying `DestroyTemporaryInstPlan(d)` consumes one
 `TemporaryStorageValueShape(d.storage)`; `d.plan`, `d.effects`, and `d.nonThrowing` are the exact
-stage-free projection of `CoreDestroyTemporary`. These operations support only named
+stage-free projection of `IRReadyDestroyTemporary`. These operations support only named
 abstract-domain `OutMode`/`InOutMode` preparation and cleanup. They cannot produce
 `PhysicalStorageValueShape` and cannot occur in a `ConstRefMode` or `RefMode` call-slot plan.
 
 `IR-PHY-001`: Lowering a physical-domain call operand preserves one
-`PhysicalStorageValueShape(actual)` from the selected Core physical-place value through the call.
+`PhysicalStorageValueShape(actual)` from the selected IRReady physical-storage value through the call.
 The corresponding `PhysicalStorageInputAdmission` is at the same ABI role and has
 `admission.mode` byte-identical to the signature mode. Its identity proof, access proof, lifetime
 proof, address-space binding, source-provenance proof, mutability view, and alias view replay the
-exact stage-free `CorePhysicalParameterInputProof`, which was validated as the projection of the
+exact stage-free `IRReadyPhysicalParameterInputProof`, which was validated as the projection of the
 selected `PhysicalParameterBindingProofAt<Published>` before stage-specific source syntax was
-erased. `admission.actualStorage` is that Core proof's complete endpoint and projects to
-`admission.actual`, so the source proof and nominal place path are not reconstructed from an IR
+erased. `admission.actualStorage` is that IRReady proof's complete endpoint and projects to
+`admission.actual`, so the source proof and nominal storage path are not reconstructed from an IR
 shape. Its `PhysicalStorageSourceAdmissionProof.provenanceProof` is the byte-identical generic
 `PhysicalSourceProvenanceAdmissionProof` selected at checking time.
 For `ConstRefMode`, the admitted view has `ReadAccess` and does not claim immutable underlying
@@ -2935,9 +3028,9 @@ storage; for `RefMode`, it has `ReadWriteAccess` and mutable storage. No runtime
 handle, or temporary-storage result can satisfy this admission merely by sharing a `TypeId` or
 machine representation.
 
-`IR-PHY-002`: An accessor-produced physical argument retains distinct call,
-`AccessorReferenceResultOperation`, optional registered handle transform, and dereference
-instructions. The physical call operand is exactly the dereference instruction's
+`IR-PHY-002`: An accessor-produced physical argument retains a distinct `IRCall` carrying
+`AccessorReferenceResultInstPlan`, followed by the optional registered handle transform and the
+dereference instruction. The physical call operand is exactly the dereference instruction's
 `PhysicalStorageValueShape` result, whose descriptor retains the authenticated
 `DereferenceApplicationIdentity`, handle input, and `DereferencedStorageProof`. A direct physical
 argument instead retains its existing physical producer. Initial lowering may not fuse either path,
@@ -2945,134 +3038,153 @@ substitute an equal-shaped producer, insert a load, or reconstruct the endpoint 
 type. Thus both paths have the same physical ABI admission without erasing how the endpoint was
 proved.
 
-`IR-CALL-001`: Lowering preserves the Core call alternative exactly. `DirectCall` and
-`ClosureCall` resolve their `ResolvedDeclRef.target` values to function symbol refs and consume
-their frozen witness-resolution sidecars when materializing specialization evidence;
-`WitnessCall` lowers
-its witness value as operand zero and retains the runtime entry key;
-dynamic calls retain owner and slot; primitive calls retain both their language rule and registered
-standard operation. The operation's ABI map has the Core contract signature, and
-`FunctionAbiMap.resultAuthority` is byte-identical to the Core contract authority and resolves to
+`IR-CALL-001`: Every IRReady `DirectCall`, `WitnessCall`, `DynamicCall`, `LambdaCall`, and
+`PrimitiveCall` emits exactly one `IRCall` after explicitly materializing its callee. Direct and
+lambda callees are the resolved function symbol or an `IRSpecialize` result. A witness callee is the
+result of `IRLookupWitnessMethod(witnessTable, requirementKey)`. Dynamic dispatch emits its
+registered callable-selection instruction first, and a primitive call obtains the registered
+callable value named by its rule; each result is then operand zero of `IRCall`. No dispatch kind is
+encoded by a distinct call opcode, and the witness table or dynamic receiver is not substituted for
+the selected callable.
+
+The call's ABI inputs follow the callee at indices `1 + ordinal`. Its metadata ABI map has the
+IRReady contract signature, and
+`FunctionAbiMap.resultAuthority` is byte-identical to the IRReady contract authority and resolves to
 the same callable anchor; the call-local result instantiation must select the ABI result
-alternative derived from that authority kind. Core receiver,
+alternative derived from that authority kind. IRReady receiver,
 initialization-target, parameter, residual-generic, and witness inputs are projected by ABI input
 role and emitted by
 ordinal. Lowering constructs exactly one call-local `AbiCallInstantiation`: its activation binds the
-Core contract's `callerInvocationLifetime`, its address-space substitution is the selected call
+IRReady contract's `callerInvocationLifetime`, its address-space substitution is the selected call
 specialization, its input admissions are the exact role-keyed proofs for the emitted operands, its
-`aliasCompatibility` is byte-identical to the Core call contract, its subject evidence is the
-stage-free projection of the Core dispatch, and its result entries are the
-exact projection of `ElaboratedCallAt.resultProvenance`. The operation's
-`instantiation.id` is `ContentId(instantiation.value)` and `instantiation.value.abi` is the
-operation's ABI ID. A Core reference-handle operand remains a reference-handle operand, and every
-Core operand for a mode whose domain is `PhysicalOperand(_)` remains physical storage with the
+`aliasCompatibility` is byte-identical to the IRReady call contract, its subject evidence is the
+stage-free projection of the IRReady dispatch, and its result entries are the
+exact projection of `ElaboratedCallAt.resultProvenance`. The sidecar's
+call-instantiation identity is `ContentId(metadata.call.instantiation)`, and
+`metadata.call.instantiation.abi = metadata.call.abi`. The instantiation's `subject` retains whether callee
+materialization was direct, witness, dynamic, lambda, or builtin and validates operand zero against
+the exact materialized value. A IRReady reference-handle operand remains a reference-handle operand, and every
+IRReady operand for a mode whose domain is `PhysicalOperand(_)` remains physical storage with the
 mode's exact access and location requirement; lowering may apply only the named `admitAbiInput`
 view, not
 reclassify an ordinary runtime value with the same `TypeId`. ABI result alternatives likewise
-constrain the call-local instantiation, whose concrete result entries determine the Core/IR result
-category and complete handle shape. Lowering cannot turn a
-witness/dynamic/closure call into a direct call merely because one current target is known.
+constrain the call-local instantiation, whose concrete result entries determine the IRReady/IR result
+category and complete handle shape. Lowering cannot turn a witness/dynamic/lambda call into a direct
+subject merely because one current target is known.
 
-`IR-CALL-002`: Every call operation's `semantics` is the unique result of
-`ProjectCapabilitySelectionToIR(CoreCallContract.capabilitySelection)`. Projection preserves the
+`IR-CALL-002`: Every `IRCall` metadata entry's `call.capabilities` is the unique result of
+`ProjectCapabilitySelectionToIR(IRReadyCallContract.capabilitySelection)`. Projection preserves the
 region, every `CapabilityUseId`, use key/reason, and requirement, plus the concrete alternative's
 exact source IDs, operational subjects, combined requirement, and availability proof. A direct or
 imported requirement is copied unchanged. A local-call requirement projects its
-`ResolvedDeclRefAt<Published>` to `CanonicalDeclRef`; a witness-entry requirement projects its
-`WitnessCallRef<Published>` to `(InterfaceSubtypeWitnessId, WitnessRuntimeEntryKey)`. In both latter
+`ResolvedDeclRefAt<Published>` to `DeclRef`; a witness-entry requirement projects its
+`SubtypeWitnessRef<Published>` to `(SubtypeWitnessId, RuntimeInterfaceRequirementKey)`. In both latter
 cases `useWitnessDependencies` has exactly that use ID and its complete
 `WitnessResolutionStamp`; it has no other keys. These published stamps contribute their exact
-`ConformanceDependency` entries to the fragment before the stage-specific wrappers are erased.
+`WitnessTableDependency` entries to the fragment before the stage-specific wrappers are erased.
 `concreteSourceWitnessDependencies` has exactly the selected concrete source-ID domain and stores
 the minimal stamp required by each source subject and its specialization/static inputs, including
 an empty stamp when no witness definition is needed.
-Each concrete declaration subject contributes its exact `DeclarationDependency`; a registered
+Each concrete declaration subject contributes its exact `DeclDependency`; a registered
 subject contributes its exact `StandardRuleDependency`; and a language-rule subject contributes
 its exact `LanguageRuleSetDependency`. Their source stamps add any nested conformance dependencies.
 Every projected use-map key equals `ContentId(use.key)`, and the concrete alternative independently
 revalidates `CAP-SEL-003` using the projected region, source set, combined requirement, and proof.
 
 The projection proof satisfies
-`source = ContentId(CoreCallContract.capabilitySelection)` and
-`projected = ContentId(semantics.value.capabilities)`. Replacing each projected local/witness
+`source = ContentId(IRReadyCallContract.capabilitySelection)` and
+`projected = ContentId(call.capabilities.capabilities)`. Replacing each projected local/witness
 requirement with the dependency stamp under its same key reconstructs byte-for-byte the published
-source selection, so Core-to-IR projection is one-to-one. The metadata is immutable semantic/static
+source selection, so IRReady-to-IR projection is one-to-one. The metadata is immutable semantic/static
 metadata: it is not a runtime operand or result, is excluded from `FunctionAbiMap` and
 `AbiCallInstantiation`, and does not change executable dispatch or code shape. Lowering cannot
-reconstruct it from `CoreCallContract.effective`, a flattened capability formula, or target
+reconstruct it from `IRReadyCallContract.effective`, a flattened capability set, or target
 annotations; cannot collapse zero, one, and multiple concrete sources to an optional formula; and
 cannot exchange an ordinary use for an equal concrete requirement. An invalid projection is a
 lowering failure, not permission to omit the metadata.
 
-`IR-WIT-001`: `WitnessTableReferenceOperation` has no operands, returns the declaration's
-`InterfaceWitnessShape` obtained by mapping its concrete or generic conformance classifier to the
-corresponding interface-witness classifier, and retains the exact definition dependency. A generic
-conformance declaration therefore also materializes a generic witness value when referenced; it is
-not only a symbol-definition container. Specialization consumes a `GenericInterfaceWitness` as
-operand zero followed by the values from `CoreWitnessOperation.SpecializeWitness.inputs`, ordered
-by the canonical binder's generic and constraint roles, and returns
-`InterfaceWitnessShape(ConcreteInterfaceWitness(substitutedTarget))`.
+`IR-WIT-001`: `IRWitnessTable` is the existing global witness-table declaration/value, represented
+by an `IRSymbolRef` whose declaration shape and definition body carry the validated table entries.
+Referencing it does not emit a zero-operand instruction. `IRSpecialize` has no specialization payload
+hidden in `IROp`; it consumes the generic witness-table value as operand zero followed by the values
+from `IRReadyWitnessOperation.SpecializeWitness.inputs`, ordered by the canonical binder's generic
+and constraint roles. The validated `CanonicalSpecializationSpine` is stored only as
+`metadata.specialization = Some(spine)`, while the emitted instruction consists only of the opcode
+and operands. Its result has
+`SubtypeWitnessValueShape(ConcreteSubtypeWitness(substitutedTarget))`.
 
 `IR-WIT-002`: Lowering `LookupSubtypeWitness(base, key)` emits exactly one
-`LookupWitnessOperation(key)` with the lowering of `base` as its sole operand and the key-derived
-concrete `InterfaceWitnessShape` as its sole result. An N-key semantic lookup spine produces N operations in
-the same order. Initial lowering cannot flatten, reassociate, or replace that spine with endpoint
-types; later optimization may fold a lookup against a statically known table.
+`IRLookupWitnessMethod` (`lookupWitness`) with exactly two operands, in order: the lowering of
+`base`, followed by the canonical IR value whose shape is
+`InterfaceRequirementKeyValueShape(SubtypeWitnessRequirementKey(key))`. The operation returns the
+key-derived concrete `SubtypeWitnessValueShape` as its sole result. The requirement key is an operand,
+not static data hidden in `IROp`. An N-key semantic lookup spine produces N operations in the same
+order. Initial lowering cannot flatten, reassociate, or replace that spine with endpoint types;
+later optimization may fold a lookup against a statically known table.
 
-`IR-WIT-003`: `ExtractExistentialWitnessOperation` consumes the existential package value and
-returns the requested interface-witness shape. `WitnessCallOperation` consumes an interface-witness
-value as operand zero followed by the callable ABI operands. Neither operation stores an
-`IRSymbolRef` as a substitute for a runtime witness value.
+`IR-WIT-003`: `IRExtractExistentialWitnessTable` has no interface payload hidden in `IROp`; it
+consumes exactly one existential-package operand and returns the requested subtype-witness shape.
+The validated interface selection is stored only in
+`metadata.existentialWitnessExtraction` and is reflected by the result shape. Calling an extracted
+requirement emits `IRLookupWitnessMethod` to produce a callable and then `IRCall` with that callable
+as operand zero. Neither instruction stores an `IRSymbolRef` as a substitute for a runtime witness
+value.
 
-`IR-WIT-004`: `LookupWitnessEntryOperation(key)` consumes one concrete interface-witness value and
-returns exactly `WitnessEntryShape(key)`. The dependent shape resolves the key's requirement kind:
+`IR-WIT-004`: Lowering a general requirement lookup emits `IRLookupWitnessMethod`
+(`lookupWitness`) with exactly two operands, in order: one concrete subtype-witness value and the
+canonical IR value whose shape is
+`InterfaceRequirementKeyValueShape(GeneralInterfaceRequirementKey(key))`. It returns exactly
+`WitnessEntryShape(key)`. The dependent shape resolves the key's requirement kind:
 associated types/values are metadata values, callable/constructor/accessor entries are callable
-metadata, and nested conformances contain an interface witness. Consumers must use the matching
+metadata, and nested conformances contain a subtype witness. Consumers must use the matching
 kind-indexed projection; a property/subscript bundle cannot be treated as one callable slot. A
-fused `WitnessCallOperation` is permitted only for a `WitnessRuntimeEntryKey` and still consumes the
-same table value and exact requirement/accessor key.
+callable result is invoked only by a following `IRCall`. A fused witness-call opcode is forbidden:
+the table and exact requirement/accessor key remain visible on `IRLookupWitnessMethod`.
 
 `IR-CON-001`: A conformance declaration's `definition` and its definition body carry the same
-validated definition reference; its `classifier` equals that definition's concrete or generic
-conformance classifier and maps to the table reference's witness classifier. The
+validated definition reference; its `form` equals the definition's `WitnessTableForm` and the table
+reference's provider-table form. The
 declaration's metadata key set equals the complete active all-kind entry set of that definition;
 each metadata payload resolves to the canonical kind-correct lowering of the satisfaction at the
 same key. `runtimeEntries` keys equal `runtimeSlots` keys, and slot values are a bijection onto
-`0 .. runtimeSlots.count-1` in canonical `WitnessRuntimeEntryKey` order. Each runtime symbol ref
+`0 .. runtimeSlots.count-1` in canonical `RuntimeInterfaceRequirementKey` order. Each runtime symbol ref
 resolves a function shape with the signature required by that projected entry. No metadata entry is
 identified by a runtime slot.
 
 `IR-FRG-001`: `references` is exactly the canonical set of symbol references reachable from every
-instruction and definition payload. `sourceMap` has exactly one entry for every instruction ID and
+instruction operand, semantic-metadata entry, and definition payload. `sourceMap` has exactly one entry for every instruction ID and
 no other key. Every requirement map key equals `IRDependency.key`; requirements are the exact
 direct semantic/module/standard-rule inputs read by lowering, with nonempty canonically merged
 origins. A local reference's module equals the fragment owner's module; an imported reference and
 module dependency name the same immutable interface revision used for resolution.
 Serialization follows map canonical order plus `blockOrder`, block parameter order, instruction
-order, operand order, result order, and successor order, making round trips and parallel lowering
-byte-identical.
+order, operand order, result order, and semantic-metadata field order. Successor order is derived
+from terminator operand order, so round trips and parallel lowering are byte-identical without a
+second stored CFG authority.
 
 `IR-DEP-001`: `IRDependencyKey` is the closed sum shown above: `TypeDependency`,
-`ContractDependency`, `DeclarationDependency`, `ConformanceDependency`,
+`ContractDependency`, `DeclDependency`, `WitnessTableDependency`,
 `InitializationPlanDependency`, `LanguageRuleSetDependency`, `ModuleDependency`, or
 `StandardRuleDependency`.
 `origins` is nonempty. Each subject resolves in the same semantic/module/standard environment used
 by the fragment's lowering query; a requirement retained only from an unselected branch is invalid.
-An `InitializationOperation` contributes exactly one `InitializationPlanDependency` for its stored
-published plan ID, and no non-initialization instruction contributes one merely because it shares a
-result type. The dependency resolves an applicable winner in the `Selected` result returned by
-`ResolveInitialization`; a recovered initialization plan cannot satisfy it. A tooling
-`IRErrorOperation` produced from recovery contributes no initialization-plan dependency.
+Every instruction whose semantic metadata has `initialization = Some(plan)` contributes
+`InitializationPlanDependency(plan.plan)`; the fragment's canonical requirement map merges repeated
+contributions from a multi-instruction emission recipe. No instruction contributes that dependency
+merely because it shares a result type. The dependency resolves an applicable winner in the
+`Selected` result returned by `ResolveInitialization`; a recovered initialization plan cannot
+satisfy it. A tooling `IRPoison` produced from recovery contributes no initialization-plan
+dependency.
 When a fragment is produced inside `SynthesisConstruction`, these IR requirements do not add new
 `SemanticDependency` alternatives: type, contract, initialization-plan, language-rule-set,
 module-interface, and standard-rule requirements are backed by the exact producing
 `QueryDependency(QueryKey)`; declaration requirements are backed by the exact
-`DeclarationDependency(CanonicalDeclRef)`; and conformance requirements are backed by
-`ConformanceDependency(ValidatedConformanceRef)`. The
+`DeclDependency(DeclRef)`; and conformance requirements are backed by
+`WitnessTableDependency(ValidatedWitnessTableRef)`. The
 synthesis validator resolves each
 query result/direct-input selector and requires it to equal the IR dependency subject; unrelated
 declaration/synthesis dependencies cannot justify an IR requirement.
-Call-semantic metadata contributes exactly the conformance dependencies in its use/source witness
+`IRCall` semantic metadata contributes exactly the conformance dependencies in its use/source witness
 stamps, one declaration dependency per concrete declaration subject, one standard-rule dependency
 per registered subject, and one language-rule-set dependency per language-rule subject.
 Deleting a source or stamp cannot leave its dependency as dead justification, and deleting a
@@ -3087,22 +3199,23 @@ lowered by one documented ABI-independent mapping; later target ABI passes may t
 `IR-002`: Generic parameters, witness parameters, and all-kind witness-entry keys are emitted from
 keyed binders/maps in canonical order. Expanded source parameters use `ParameterKey(source,
 expansionPath)` in the logical-to-IR map. Semantic/metadata entries are addressed by
-`SomeWitnessEntryKey` (the existential form of `WitnessEntryKey<K>`), never dictionary or
+`SomeInterfaceRequirementKey` (the existential form of `InterfaceRequirementKeyOf<K>`), never dictionary or
 declaration position. Only callable, constructor, and property/subscript accessor ABI slots use the
-`WitnessRuntimeEntryKey` projection.
+`RuntimeInterfaceRequirementKey` projection.
 
 `IR-003`: Type lowering consumes canonical `Type` values. It cannot query declaration parents to
-reconstruct `Self`, parameter direction, or generic substitutions omitted from a type.
+reconstruct a receiver type, parameter direction, or generic substitutions omitted from a type.
 
 `IR-004`: A conformance lowers in two steps: allocate the IR witness-table identity, then emit each
 all-kind keyed entry. Recursive references use the allocated identity; associated type/value and
-nested-conformance metadata retain `SomeWitnessEntryKey`, while runtime callable slots retain the
-derived `WitnessRuntimeEntryKey`. Missing entries are a Core validation error, not a null IR
+nested-conformance metadata retain `SomeInterfaceRequirementKey`, while runtime callable slots retain the
+derived `RuntimeInterfaceRequirementKey`. Missing entries are a IRReady validation error, not a null IR
 operand.
 
-`IR-005`: Lowering a recovered Core error, including chapter 15's
-`RecoveryCoreInitialization(error)`, produces a typed `IRError` placeholder only in
-diagnostic/tooling mode. It is not wrapped in `InitializationOperation` and contributes no
+`IR-005`: Lowering a recovered IRReady error, including chapter 15's
+`RecoveryInitializationStep(error)`, produces a typed recovery placeholder only in
+diagnostic/tooling mode. It emits the existing `IRPoison` opcode with
+`metadata.recoveryError = Some(error)` and contributes no
 `InitializationPlanDependency`. A module containing such placeholders is not publishable as
 successful code generation.
 
@@ -3111,10 +3224,10 @@ successful code generation.
 The logical function type remains richer than a target ABI type:
 
 ```text
-lowerLogicalFunctionType(CallableSignature, EffectiveCallableContract) = {
+lowerLogicalFuncType(CallableSignature, EffectiveCallableContract) = {
     optional explicit initialization target from CallablePurpose,
     optional explicit receiver parameter from ReceiverSlot,
-    ordinary parameters lowered according to PassingMode and semantic value shape,
+    ordinary parameters lowered according to ParamPassingMode and semantic value shape,
     explicit generic/witness parameters where not specialized,
     proof-carrying logical result and error shapes,
     effect/capability decorations from EffectiveCallableContract
@@ -3125,7 +3238,7 @@ The lowering records the `FunctionAbiMap` defined above. Calls consume the same 
 
 `IR-ABI-001`: Resolving `FunctionAbiMap.signature` yields one receiver role exactly when the
 signature has a receiver, one initialization-target role exactly when its purpose is
-`InitializerCallable`, and one parameter role for every `ParameterSlot.key`.
+`ConstructorCallable`, and one parameter role for every `ParameterSlot.key`.
 `FunctionAbiMap.resultAuthority` is copied byte-for-byte from the callable header; resolving it
 yields that declaration/registered anchor and the same signature. A map builder never takes an
 authority override and never infers one from `results`.
@@ -3161,13 +3274,13 @@ and `Mutable` for `RefMode`, exactly `abiFormalStorageMutability(contract.mode)`
 The access axis does not change the storage domain: both modes receive a physical formal root and
 both callers supply `PhysicalStorageValueShape`. The constref body may load/project/pass its
 read-only physical view but cannot store through it or upgrade it to `RefMode`; the ref body retains
-read/write access. A physical mode encoded as `RuntimeAbiInput`, `ReferenceHandleAbiInput`, or
+read/write access. A physical mode encoded as `RuntimeAbiInput`, `PointerLikeAbiInput`, or
 temporary storage is invalid even if target ABI lowering later uses the same machine pointer
 representation. Conversely, `InMode`, `OutMode`, and `InOutMode` never become physical modes merely
 because one actual happens to be stored in memory.
 
-An abstract-domain formal whose structural value type is `ReferenceType` or `PointerType` uses
-`ReferenceHandleAbiInput(contract, mode)`. The contract's value type, type projection, handle kind,
+An abstract-domain formal whose structural value type is `ExplicitRefType` or `PtrType` uses
+`PointerLikeAbiInput(contract, mode)`. The contract's value type, type projection, handle kind,
 referent, address-space requirement, and access are derived from that structural type. A reference
 type's declared lifetime selects `DeclaredHandleLifetime`; a pointer without an explicit semantic
 lifetime selects `FormalActivationHandleLifetime`. In the absence of an explicit checked
@@ -3178,9 +3291,9 @@ set; it is not permission for the callee body to infer facts from the referent t
 or caller operand. Instantiation computes
 `accessDerivedHandleMutability(ReadAccess) = UnknownMutability`, never `Immutable`, and
 `accessDerivedHandleMutability(ReadWriteAccess) = Mutable`; access and underlying mutability remain
-orthogonal. `formalAbiReferenceHandleInput` gives the formal handle exactly
+orthogonal. `formalAbiPointerLikeInput` gives the formal handle exactly
 `abiFormalHandleSourceProvenance(contract.sourceProvenance)`, and
-`instantiateAbiReferenceHandleInput` substitutes every canonical argument in those facts under the
+`instantiateAbiPointerLikeInput` substitutes every canonical argument in those facts under the
 call specialization without adding facts. Only a language/standard rule recorded in the checked
 formal may select a `DeclaredHandleMutability`, `DeclaredHandleLifetime`, `DeclaredHandleAlias`, or
 `DeclaredHandleSourceProvenance`; every declared source fact retains its exact registered rule,
@@ -3188,7 +3301,7 @@ static inputs, and the standard environment selected by the callable's effective
 policy endpoints must agree with the type projection. The declared-source alternative is canonical
 only for a nonempty fact set; an empty set uses
 `ConservativeUnknownHandleSourceProvenance`. The ABI contract never stores a call-produced
-`ReferenceHandleProof`, and body entry
+`PointerLikeProof`, and body entry
 cannot replace the formal policy with provenance observed at one caller.
 
 Other abstract-domain runtime values use `RuntimeAbiInput(type, mode)`. All alternatives repeat the
@@ -3196,19 +3309,19 @@ exact mode and logical type from the signature. The initialization target repeat
 target slot.
 Residual generic variables and required constraint evidence contribute their keyed roles; a closed
 specialization contributes neither. A `Conforms` slot has
-`InterfaceWitnessAbiInput(targetOf(slot))`; other evidence uses
+`SubtypeWitnessAbiInput(targetOf(slot))`; other evidence uses
 `OtherConstraintEvidenceAbiInput(slot.kind)`. Input ordinals are a bijection onto
 `0 .. inputs.count-1` in initialization-target, receiver, parameter-slot, residual-generic, then
 canonical-constraint order.
 
 `IR-ABI-002`: The result map always has `NormalAbiResult` at ordinal zero and has
-`ErrorAbiResult` at ordinal one exactly when the error type is not `NeverType`. The checked callable
+`ErrorAbiResult` at ordinal one exactly when the error type is not `BottomType`. The checked callable
 result authority in `FunctionAbiMap.resultAuthority`, not the result type's machine representation,
 chooses the closed alternative.
 An ordinary authority gives `RuntimeAbiResult(type)`. A fixed reference authority gives
-`FixedReferenceHandleResult` with its complete reusable formal shape. A ref-accessor authority gives
-`AccessorReferenceHandleResult` naming the exact `AccessorReferenceResultContractId`, signature,
-and result type. A registered authority gives `RegisteredReferenceHandleResult` with the exact
+`FixedPointerLikeResult` with its complete reusable formal shape. A ref-accessor authority gives
+`AccessorPointerLikeResult` naming the exact `AccessorReferenceResultContractId`, signature,
+and result type. A registered authority gives `RegisteredPointerLikeResult` with the exact
 registration, static inputs, semantic environment, and result type. No result contract contains a
 caller SSA value or caller invocation lifetime, and physical storage is not a function-result
 alternative.
@@ -3218,7 +3331,7 @@ contract using `proveAbiDefinitionResult` and the function's formal entry inputs
 require their exact formal shape; accessor contracts replay their five rules over the named formal
 receiver/parameter sources; registered contracts replay the registered rule. A bare runtime value
 cannot satisfy any reference-handle contract. The effective contract in
-`IRFunctionDeclarationShape` names the same signature, and the ABI map contains that signature,
+`IRFunctionDeclShape` names the same signature, and the ABI map contains that signature,
 result authority, context, inputs, and results with the declaration shape's byte-identical
 `resultAuthority`. Target ABI lowering may erase or indirect logical values only while preserving
 this mapping explicitly.
@@ -3226,7 +3339,7 @@ this mapping explicitly.
 `IR-ABI-003`: Every call constructs one `AbiCallInstantiation`. Its `abi` is the referenced map;
 `activation.signature` is that map's signature, `activation.formalActivation` is exactly
 `abi.context.activationLifetime`, and `activation.callerInvocationExtent` is the originating
-`CoreCallContract.callerInvocationLifetime`. `ActivationBindingProof` records the permitted
+`IRReadyCallContract.callerInvocationLifetime`. `ActivationBindingProof` records the permitted
 substitution from the reusable activation variable to this one invocation extent; it is never
 cached in the declaration map or shared merely because two callers have the same lexical scope.
 
@@ -3253,10 +3366,10 @@ callee body.
 
 Physical storage admission requires `mode = contract.mode`, a physical operand whose endpoint is
 the exact projection of `actualStorage` from the selected call-slot binding, and an identity proof
-whose type endpoints equal that binding. The originating access plan's `rankingConversion` is
-exactly `Some(ConsumedWithoutAccessConversion(PhysicalParameterIdentityPassingRule))`;
+whose type endpoints equal that binding. The originating access plan's `rankingCoercion` is
+exactly `Some(ConsumedWithoutStorageCoercion(PhysicalParameterIdentityPassingRule))`;
 `sourceAdaptationRank` therefore yields
-`ConversionFreeAccessRank(PhysicalParameterIdentityPassingRule)`, whose comparison rank is
+`CoercionFreeStorageAccessCost(PhysicalParameterIdentityPassingRule)`, whose comparison rank is
 `zeroRank`. Admission validates the complete instantiated physical requirement: access,
 activation or declared lifetime, address-space predicate, and source-provenance predicate. Its
 `sourceProof.storage` is exactly `actualStorage`,
@@ -3266,7 +3379,7 @@ reconstruct, strengthen, or substitute source facts from the operand type or add
 mutability view permits mutable underlying storage to satisfy `ConstRefMode` without declaring the
 storage immutable; the admitted access remains read-only. `RefMode` requires the read/write and
 mutable view. The proof stores both actual and instantiated formal shapes and preserves the actual
-alias for call-alias checking. Neither an abstract place, ordinary runtime value, reference handle,
+alias for call-alias checking. Neither an abstract storage, ordinary runtime value, reference handle,
 nor temporary can satisfy a physical input, regardless of equal `TypeId` or layout.
 `aliasCompatibility` is then revalidated against the admitted operands' preserved alias
 provenances, mode-specific access claims, and bound caller invocation extent. Only two overlapping
@@ -3279,7 +3392,7 @@ and every entry repeats its formal contract. A runtime contract instantiates to 
 runtime type. A fixed reference contract applies the call's activation/address substitution to its
 formal shape. An accessor contract records the exact captured source-role-to-call-operand
 projections, replays its five component derivations, and produces one concrete
-`ReferenceHandleValueShape`. For a fresh alias rule, the instantiation and its IR derivation retain
+`PointerLikeValueShape`. For a fresh alias rule, the instantiation and its IR derivation retain
 the identical stage-free `AccessorInvocationIdentity`; no call instruction identity is substituted.
 A registered contract stores and validates the registered derivation
 over the exact runtime operands. The instruction result at each ABI ordinal has precisely that
@@ -3288,7 +3401,7 @@ instantiated shape.
 Call-result construction cannot attach handle provenance to ordinary data or use the reusable
 formal contract as a concrete SSA value. Conversely, definition `return`/`throw` validation uses
 `proveAbiDefinitionResult`, not a call-local instantiation. Any intentional result conversion is an
-explicit Core/IR operation before the boundary; subsequent copies and block arguments preserve the
+explicit IRReady/IR operation before the boundary; subsequent copies and block arguments preserve the
 complete instantiated shape.
 
 This removes the current split where some paths inspect `FuncType` mode wrappers while others
@@ -3296,7 +3409,7 @@ iterate `ParamDecl` modifiers.
 
 ## Lowering unit tests
 
-Every Core node lowering test constructs canonical types and a five-to-ten-node Core fragment
+Every IRReady node lowering test constructs canonical types and a five-to-ten-node IRReady fragment
 directly. It supplies fakes for imported symbols and layout-independent builtin operations. Tests
 assert:
 
@@ -3310,14 +3423,14 @@ assert:
 - rejection of getter-only properties, wrong-access reference accessors, nonidentity conversions,
   rvalues, and temporary-backed physical arguments;
 - preservation and replay of overlapping constref-read proofs and versioned ref/constref alias
-  decisions from overload selection through Core and call-local ABI admission;
+  decisions from overload selection through IRReady and call-local ABI admission;
 - abstract `OutMode`/`InOutMode` temporary initialization, write-back, and destruction cleanup on
   every selected exit, nominal site-derived temporary identity/alias preservation, and rejection of
   that storage as a physical-mode operand;
 - accessor-result descriptors tied to the exact producer call rather than an equal-typed value;
 - registered physical projections preserve environment/static inputs, executable base/index order,
   intrinsic output derivations, and their distinct IR storage-operation alternative;
-- callable result authority is byte-identical across header, typed/elaborated/Core call,
+- callable result authority is byte-identical across header, typed/elaborated/IRReady call,
   `FunctionAbiMap`, declaration shape, and call instantiation;
 - fresh accessor aliases replay one stage-free `AccessorInvocationIdentity` rather than a typed or
   IR producer ID;

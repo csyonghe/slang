@@ -14,26 +14,26 @@ state, and cycle detection in one byte on each declaration.
 
 ```text
 IncludeRequestKey = {
-    includingDocument: SourceDocumentId,
+    includingFile: SourceFileId,
     spelling: Utf8String,
-    searchConfiguration: ContentId<SemanticValue>
+    searchConfiguration: ContentId<SchemaValue>
 }
 
-IncludeResolution = Found(SourceDocumentId) | NotFound
+IncludeResolution = Found(SourceFileId) | NotFound
 
 SourceGraph = {
     documents:
-        CanonicallyOrderedMap<SourceDocumentId, SourceSnapshotId>,
+        CanonicallyOrderedMap<SourceFileId, SourceFileSnapshotId>,
     includeResolution:
         CanonicallyOrderedMap<IncludeRequestKey, IncludeResolution>,
-    externalMacroEnvironment: ContentId<SemanticValue>
+    externalMacroEnvironment: ContentId<SchemaValue>
 }
 
 FrontendOptions = {
     lex: LexOptions,
-    preprocessing: PpOptions,
+    preprocessing: PreprocessorDesc,
     syntaxFeatures: SyntaxFeatureSet,
-    parsing: ParseOptions,
+    parsing: ParserOptions,
     semanticOptions: CanonicalArguments
 }
 
@@ -45,8 +45,8 @@ QueryKind = {
 
 QueryKindDescriptor = {
     kind: QueryKind,
-    keySchema: ContentId<SemanticValue>,
-    resultSchema: ContentId<SemanticValue>
+    keySchema: ContentId<SchemaValue>,
+    resultSchema: ContentId<SchemaValue>
 }
 
 QueryKindRegistry = {
@@ -129,8 +129,8 @@ Query functions receive only immutable inputs and a `QueryContext`:
 ```text
 QueryContext = {
     request<K, V>(key: K) -> Need<V>,
-    source(id: SourceSnapshotId) -> SourceSnapshot,
-    standardEnvironment(id: StandardEnvironmentId) -> SemanticValue,
+    source(id: SourceFileSnapshotId) -> SourceFileSnapshot,
+    standardEnvironment(id: StandardEnvironmentId) -> SchemaValue,
     options() -> FrontendOptions,
     cancellation() -> CancellationToken
 }
@@ -183,18 +183,18 @@ The first implementation must expose at least these independently callable query
 | Family                                                            | Representative output                                                                |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `ParseFile`                                                       | `LosslessCST`                                                                        |
-| `BuildSurfaceAst`                                                 | `SurfaceFile`                                                                        |
-| `BuildFragmentScopes`                                             | `ScopedFile + FragmentScopeGraph`                                                    |
-| `FreezeDeclarationIndex`                                          | `FrozenDeclarationIndex` (including `FrozenScopeGraph`)                              |
+| `BuildSurfaceAST`                                                 | `ASTSnapshot<Surface>`                                                               |
+| `BuildFragmentScopes`                                             | `(ASTSnapshot<Scoped>, FragmentScopeGraph)`                                          |
+| `FreezeDeclIndex`                                                 | `FrozenDeclIndex` (including `FrozenScopeGraph`)                                     |
 | `ClassifyModifiers`                                               | `CheckedModifierSet`                                                                 |
-| `BindDeclarationHeader`                                           | `DeclHeader`                                                                         |
+| `BindDeclHeader`                                                  | `DeclHeader`                                                                         |
 | `LookupName` / `LookupMember`                                     | `LookupResult`                                                                       |
-| `DeclareNominalIdentity` / `BuildNominalDefinition`               | `DeclId` / `NominalDefinition`                                                       |
+| `DeclareNominalIdentity` / `BuildNominalDefinition`               | `DeclId` / `NodeRef<Typed, Decl>`                                                    |
 | `ExpandTypeAlias` / `CanonicalizeStructuralType`                  | `TypeId`                                                                             |
-| `FunctionSignature`                                               | `CallableSignature`                                                                  |
+| `BuildCallableSignature`                                          | `CallableSignature`                                                                  |
 | `InferGenericArguments`                                           | `GenericSolution`                                                                    |
 | `PlanCoercion`                                                    | `ConversionResult`                                                                   |
-| `ResolveCall`                                                     | `OverloadResult`                                                                     |
+| `ResolveOverload`                                                 | `OverloadResult`                                                                     |
 | `CheckExpression(node, ExpressionCheckContextId)`                 | `TypedExpr`                                                                          |
 | `AssignSemanticOperationSite` / `ValidateSemanticOperationSite`   | `SemanticOperationSiteAssignment` / `Unit`                                           |
 | `AssignPhysicalProjectionSite` / `ValidatePhysicalProjectionSite` | compatibility aliases of the semantic-operation-site queries                         |
@@ -205,32 +205,32 @@ The first implementation must expose at least these independently callable query
 | `ResolveReferenceSyntaxPolicy`                                    | `Result<ReferenceSyntaxPolicy, ReferenceSyntaxPolicyFailure>`                        |
 | `ValidateReferenceAccessorInvocationAt<S>`                        | `ReferenceAccessorInvocationResultAt<S>`                                             |
 | `InstantiateAccessorReferenceResultAt<S>`                         | `Result<AccessorReferenceResultCertificate, AccessorReferenceResultContractFailure>` |
-| `AdmitAccessorHandle`                                             | `Result<AccessorHandleAdmissionProof, ReferenceHandleValidationFailure>`             |
+| `AdmitAccessorHandle`                                             | `Result<AccessorHandleAdmissionProof, PointerLikeValidationFailure>`                 |
 | `PlanStorageAccessAt<S>`                                          | `StorageAccessResultAt<S>`                                                           |
 | `PublishPhysicalProjectionSemanticResults`                        | `PhysicalProjectionSemanticResultSnapshotId`                                         |
-| `ResolveCallableResultAuthorityAt<S>`                             | `CallableResultAuthorityId`                                                          |
+| `ResolveOverloadableResultAuthorityAt<S>`                         | `CallableResultAuthorityId`                                                          |
 | `BuildTypedCall` / `BuildSelectedSurfaceTypedCallAt<S>`           | `TypedCallAt<S>`                                                                     |
-| `CheckStatement(node, StatementCheckContextId)`                   | `TypedStmt`                                                                          |
+| `CheckStatement(node, StatementCheckContextId)`                   | `NodeRef<Typed, Stmt>`                                                               |
 | `BuildInitializationModel` / `ResolveInitialization`              | `InitializationModel` / `InitializationResult`                                       |
 | `ComputeFacets`                                                   | `FacetSet`                                                                           |
-| `DeclareConformanceIdentity`                                      | `ConformanceId`                                                                      |
+| `DeclareWitnessTableIdentity`                                     | `WitnessTableId`                                                                     |
 | `FindConformance`                                                 | `ConformanceSearchResult`                                                            |
-| `BuildRequirementMap`                                             | `ProvisionalRequirementEvidenceMap`                                                  |
-| `ValidateConformanceEffects`                                      | `EffectValidatedRequirementEvidenceMap`                                              |
-| `ValidateConformanceCapabilities`                                 | `CapabilityValidatedRequirementEvidenceMap`                                          |
-| `CombineRequirementMapValidation`                                 | `FullyValidatedConstructionRequirementEvidenceMap`                                   |
-| `BuildConformanceDefinition`                                      | `ConformanceDefinitionPublication`                                                   |
+| `BuildRequirementDictionary`                                      | `ProvisionalRequirementDictionary`                                                   |
+| `ValidateConformanceEffects`                                      | `EffectValidatedRequirementDictionary`                                               |
+| `ValidateConformanceCapabilities`                                 | `CapabilityValidatedRequirementDictionary`                                           |
+| `CombineRequirementDictionaryValidation`                          | `FullyValidatedConstructionRequirementDictionary`                                    |
+| `BuildWitnessTableDefinition`                                     | `WitnessTableDefinitionPublication`                                                  |
 | `InferEffects`                                                    | `InferredEffectContract`                                                             |
 | `ValidateDeclaredEffects`                                         | `EffectValidation`                                                                   |
-| `InferCapabilities`                                               | `InferredCapabilityContract`                                                         |
+| `InferCapabilities`                                               | `InferredCapabilityRequirements`                                                     |
 | `ComputeConcreteAvailability` / `ResolveConcreteAvailability`     | `Option<ConcreteAvailability>` / `Option<ResolvedConcreteAvailability>`              |
 | `SelectCapabilitiesAt<S>`                                         | `CapabilitySelectionAt<S>`                                                           |
-| `ComputeVisibility`                                               | `Visibility`                                                                         |
+| `ComputeDeclaredVisibility`                                       | `CheckResult<DeclVisibilityFact>`                                                    |
 | `BuildDifferentialInfo` / `BuildCallableDifferentialShape`        | `DifferentialInfoResult` / `CallableDifferentialShapeResult`                         |
 | `ResolveDerivativeProvider` / `CheckDifferentiation`              | `DerivativeProviderResult` / `DifferentiationCheckResult`                            |
-| `ElaborateDecl`                                                   | `ElaboratedDecl`                                                                     |
-| `LowerElaboratedDeclToCore`                                       | `CoreDecl`                                                                           |
-| `DeclareIRSymbol`                                                 | `IRSymbolDeclaration`                                                                |
+| `ElaborateDecl`                                                   | `ElaboratedDeclAt<Published>`                                                        |
+| `BuildIRReadyDecl`                                                | `IRReadyDecl`                                                                        |
+| `DeclareIRSymbol`                                                 | `IRSymbolDecl`                                                                       |
 | `LowerIRDefinition`                                               | `IRDefinition`                                                                       |
 
 Small primitives such as argument mapping, candidate comparison, unification, capability
@@ -300,14 +300,14 @@ The initial policy assignment is normative:
 | facet-route closure                                                                                               | `Reject` for route cycles; `Blocked` is an ordinary result, not a cycle policy | compute class, interface, witness, and extension routes separately; never publish a shortened closure                                                   |
 | function/callable signature                                                                                       | `Reject`                                                                       | recursion passes through declaration or nominal identity, never an incomplete signature                                                                 |
 | `BuildInitializationModel`, `ResolveInitialization`                                                               | `Reject`                                                                       | models and selected nested plans are finite; recursive values cross nominal/callable identities rather than embedding an incomplete initialization plan |
-| `DeclareConformanceIdentity`                                                                                      | `NominalKnot`                                                                  | publish the identity independently of its requirement map                                                                                               |
-| conformance selection/definition                                                                                  | `Reject` unless a named productive witness rule applies                        | requirement edges may store conformance IDs without forcing their definitions                                                                           |
+| `DeclareWitnessTableIdentity`                                                                                     | `NominalKnot`                                                                  | publish the identity independently of its requirement dictionary                                                                                        |
+| conformance selection/witness-table definition                                                                    | `Reject` unless a named productive witness rule applies                        | requirement edges may store witness-table IDs without forcing their definitions                                                                         |
 | effect inference                                                                                                  | `LeastFixpoint`                                                                | monotonically union direct and callee effect atoms per finite generic-path partition                                                                    |
 | capability inference                                                                                              | `LeastFixpoint`                                                                | monotonically accumulate required alternatives                                                                                                          |
 | `BuildDifferentialInfo`, `BuildCallableDifferentialShape`, `TransformDerivativeSignature`, `CheckDifferentiation` | `Reject`                                                                       | canonical types/signatures and finite syntax are finite; recursion crosses nominal identities or witness IDs                                            |
-| derivative body activity                                                                                          | `LeastFixpoint`                                                                | finite per-place activity states monotonically join over the control-flow graph                                                                         |
+| derivative body activity                                                                                          | `LeastFixpoint`                                                                | finite per-storage activity states monotonically join over the control-flow graph                                                                       |
 | `ResolveDerivativeProvider`                                                                                       | `Reject` for proof cycles                                                      | recursive generated calls target separately declared derivative identities; the completed value retains every considered candidate and comparison proof |
-| `DeclareAggregateDifferentialIdentity`                                                                            | `NominalKnot`                                                                  | reserve synthesized differential type/conformance identities before definitions                                                                         |
+| `DeclareAggregateDifferentialIdentity`                                                                            | `NominalKnot`                                                                  | reserve synthesized differential-type and witness-table identities before definitions                                                                   |
 | `BuildAggregateDifferential`                                                                                      | `Reject` across definition edges                                               | recursive references use the declared identities, never incomplete plans                                                                                |
 | declared/effective effect validation                                                                              | `Reject`                                                                       | consumes stabilized inference; it is outside the inference SCC                                                                                          |
 | effective visibility                                                                                              | `GreatestFixpoint` over `Private < Internal < Public`                          | start at `Public` and monotonically meet referenced visibility                                                                                          |
@@ -320,7 +320,7 @@ termination argument to the rule manifest.
 
 ### Rejected cycles
 
-Type aliases, class-base or interface-refinement edges, default generic arguments that depend on
+Type aliases, class-base or base-interface edges, default generic arguments that depend on
 themselves, and constant values are finite definitions. A strongly connected component (SCC)
 containing a self-dependency
 in one of these query families produces one primary cycle diagnostic plus ordered edge notes.
@@ -384,7 +384,7 @@ During iteration a transfer function receives an explicit approximation view:
 ```text
 FixpointContext<L> = {
     current(member: QueryKey) -> L,
-    requestExternal(key: QueryKey) -> Need<SemanticValue>,
+    requestExternal(key: QueryKey) -> Need<SchemaValue>,
     reportDependency(key: QueryKey, role: DependencyRole) -> Unit
 }
 ```
@@ -488,8 +488,8 @@ performed through a separate durable identity and red-green validation, not by w
 
 ```text
 DurableSyntaxLineageKey = {
-    document: SourceDocumentId,
-    initialAnchor: ContentId<SemanticValue>,
+    file: SourceFileId,
+    initialAnchor: ContentId<SchemaValue>,
     initialRolePath: NodeList<FieldName>,
     initialOccurrence: UInt32
 }
@@ -497,11 +497,11 @@ DurableSyntaxLineageKey = {
 DurableSyntaxLineageId = ContentId<DurableSyntaxLineageKey>
 
 DurableSubjectIdentity =
-    SourceDocumentLineage(SourceDocumentId)
+    SourceFileLineage(SourceFileId)
   | SyntaxLineage(stage: Stage, lineage: DurableSyntaxLineageId,
-                  derivationRole: ContentId<SemanticValue>)
+                  derivationRole: ContentId<SchemaValue>)
   | CrossRevisionSemantic(StableSemanticId)
-  | SemanticContent(ContentId<SemanticValue>)
+  | SemanticContent(ContentId<SchemaValue>)
 
 DurableScalarArgument =
     DurableUnitArgument
@@ -511,7 +511,7 @@ DurableScalarArgument =
   | DurableBytesArgument(ByteString)
   | DurableTextArgument(Utf8String)
   | DurableEnumArgument(type: QualifiedName, variantTag: UInt32)
-  | DurableSemanticValueArgument(ContentId<SemanticValue>)
+  | DurableSchemaValueArgument(ContentId<SchemaValue>)
 
 DurableArgument =
     DurableScalar(DurableScalarArgument)
@@ -549,7 +549,7 @@ RevisionReuseContext = {
 }
 
 DirectInputSelector =
-    CurrentDocumentSnapshot(SourceDocumentId)
+    CurrentFileSnapshot(SourceFileId)
   | SourceGraphItem(role: FieldName, key: CanonicalArgument)
   | FrontendOptionField(FieldName)
   | LanguageRuleItem(CanonicalArgument)
@@ -560,7 +560,7 @@ DirectInputSelector =
   | SchemaItem(CanonicalArgument)
   | TargetEnvironmentItem(CanonicalArgument)
 
-InputObservation = Present(ContentId<SemanticValue>) | Absent
+InputObservation = Present(ContentId<SchemaValue>) | Absent
 
 InputObservationId = ContentId<InputObservation>
 
@@ -572,29 +572,29 @@ DirectInputStamp = {
 
 DependencyResultStamp = {
     dependency: DurableQueryIdentity,
-    result: ContentId<SemanticValue>
+    result: ContentId<SchemaValue>
 }
 
 CachedQueryEntry = {
     durableIdentity: DurableQueryIdentity,
     executionKey: QueryKey,
-    result: ContentId<SemanticValue>,
+    result: ContentId<SchemaValue>,
     directInputs: CanonicallyOrderedSet<DirectInputStamp>,
     dependencyResults: CanonicallyOrderedSet<DependencyResultStamp>,
-    implementation: ContentId<SemanticValue>,
+    implementation: ContentId<SchemaValue>,
     durability: SourceLocal | ModuleInterface | StandardEnvironment | Target
 }
 ```
 
 Every query kind registers total `projectDurableSubject` and `projectDurableArguments` functions, or
 is explicitly non-reusable. `CrossRevisionSemantic` accepts only identity alternatives whose exact
-encoding excludes `RevisionId`, `SourceSnapshotId`, and `NodeId`; revision-local syntax and staged
+encoding excludes `RevisionId`, `SourceFileSnapshotId`, and `NodeId`; revision-local syntax and staged
 AST subjects must use `SyntaxLineage`. A syntax-to-AST transform inherits the matched CST lineage and
 adds its stage plus exact derivation role. Thus a new snapshot-local `NodeId` can find a prior cache
 entry without pretending the two execution subjects are equal.
 
 The incremental parser constructs `SubjectLineageMap` from the explicit source change map. A match
-must remain in the same `SourceDocumentId`, preserve the registered semantic field-role path through
+must remain in the same `SourceFileId`, preserve the registered semantic field-role path through
 all surviving ancestors, and be one-to-one in both revisions. Repeated equal green subtrees are
 disambiguated by the nearest surviving ancestor role and occurrence. If those facts admit more than
 one prior node, the current assignment has `prior = None` and receives a new lineage; content hash or source
@@ -657,13 +657,13 @@ A query implementation test supplies an in-memory `QueryContext` whose dependenc
 
 ```text
 FakeContext {
-    FunctionSignature(f) -> success((int) -> float)
+    BuildCallableSignature(f) -> success((int) -> float)
     LookupName(scope, "f") -> success([f])
     PlanCoercion(int, int) -> identity
 }
 ```
 
-The test invokes `ResolveCall` directly and asserts the exact `OverloadResult`, requested dependency
+The test invokes `ResolveOverload` directly and asserts the exact `OverloadResult`, requested dependency
 keys, provenance rules, and diagnostics. Separate scheduler tests use artificial integer lattices
 and dependency graphs; they do not need Slang AST nodes.
 
@@ -697,9 +697,9 @@ total ordering:
 | `ModifiersChecked`       | `CheckedModifierSet`                                                    |
 | `ScopesWired`            | `ScopeGraphFragment`                                                    |
 | `SignatureChecked`       | bound header plus provisional signature facts                           |
-| `ReadyForReference`      | redeclaration group and exported `CanonicalDeclRef` identity            |
+| `ReadyForReference`      | redeclaration group and exported `DeclRef` identity                     |
 | `ReadyForLookup`         | class-base, interface-refinement, facet-route closure, and member index |
-| `ReadyForConformances`   | conformance identities and immutable keyed definitions                  |
+| `ReadyForConformances`   | witness-table identities and immutable keyed definitions                |
 | `TypesFullyResolved`     | canonical associated/member types                                       |
 | `AttributesChecked`      | checked attribute values                                                |
 | `DefinitionChecked`      | typed/elaborated body                                                   |

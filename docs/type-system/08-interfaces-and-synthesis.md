@@ -1,6 +1,6 @@
 # Interfaces, conformances, witnesses, and synthesis
 
-This chapter defines interface contracts as typed requirement sets and conformance as immutable,
+This chapter defines checked interface declarations as typed requirement sets and conformance as immutable,
 proof-carrying evidence. It is normative for requirement identity, requirement matching, associated
 type projection, defaults, conformance discovery, and synthesis. Existential representation and
 calls are elaborated in chapter 11, but the evidence they consume is defined here.
@@ -9,44 +9,44 @@ The central invariant is that a conformance is not a boolean. It is a typed grap
 how one particular type satisfies every requirement occurrence of one particular specialized
 interface. The graph is keyed by semantic identity, never by source or storage position.
 
-## Interface contracts and instances
+## Checked interface declarations and instances
 
-An interface declaration checks to an `InterfaceContract`. Using a generic interface with canonical
-arguments creates an `InterfaceInstance`:
+An interface declaration checks to an `InterfaceDecl<Typed>`. Using a generic interface with
+canonical arguments creates an `InterfaceInstanceKey`:
 
 `GenericConditionSet` is chapter 4's canonical-constraint-set alias; this chapter does not define a
 second condition representation.
 
 ```text
-SelfBinderRole = InterfaceSelfRole
+ThisTypeBinderRole = InterfaceThisRole
 
-SelfBinderId = {
+ThisTypeBinderId = {
     interface: DeclId,
-    role: SelfBinderRole
+    role: ThisTypeBinderRole
 }
 
-CanonicalRefinementClauseEncoding = {
+CanonicalInterfaceInheritanceClauseEncoding = {
     basePattern: InterfaceInstanceKey,
     conditions: GenericConditionSet
 }
 
-RefinementClauseId = {
+InterfaceInheritanceClauseId = {
     declaringInterface: DeclId,
-    encoding: CanonicalRefinementClauseEncoding,
+    encoding: CanonicalInterfaceInheritanceClauseEncoding,
     duplicateOrdinal: UInt32
 }
 
-InterfaceContract = {
+InterfaceDecl<Typed> = {
     declaration: DeclId,
     binder: CanonicalGenericBinder,
-    selfBinder: SelfBinderId,
+    thisTypeBinder: ThisTypeBinderId,
     directRequirements: NodeList<SomeRequirementDecl>,
-    refinements: NodeList<InterfaceRefinementClause>,
+    baseInterfaces: NodeList<InterfaceInheritanceClause>,
     origin: Origin
 }
 
-InterfaceRefinementClause = {
-    id: RefinementClauseId,
+InterfaceInheritanceClause = {
+    id: InterfaceInheritanceClauseId,
     basePattern: InterfaceInstanceKey,
     conditions: GenericConditionSet,
     origin: Origin
@@ -59,22 +59,23 @@ source spelling with unresolved, ill-kinded, or residual arguments produces an e
 cannot identify a successful conformance.
 
 `IFC-INS-001`: Specializations of one interface are distinct instances. `I<int>` and `I<float>` do
-not share requirement keys, conformance identities, or witness entries merely because their source
+not share requirement keys, witness-table identities, or witness entries merely because their source
 requirements have the same `DeclId`.
 
-`IFC-INS-002`: Within a requirement signature, `Self` is the bound
-`SelfType(interface, selfBinder)`. Instantiating a requirement for a candidate conformance replaces
-that `Self` with the conforming type and applies the interface and lexical substitutions exactly
+`IFC-INS-002`: Within a requirement signature, `This` is the bound
+`ThisType(interface, thisTypeBinder)`. Instantiating a requirement for a candidate conformance replaces
+that `This` with the conforming type and applies the interface and lexical substitutions exactly
 once.
 
-`IFC-INS-003`: Refinement clauses must denote well-formed interface instances. A cyclic refinement
-graph is rejected; interface identity does not make a refinement proof coinductive.
+`IFC-INS-003`: Interface-inheritance clauses must denote well-formed base-interface instances. A
+cyclic interface-inheritance graph is rejected; interface identity does not make a refinement
+proof coinductive.
 
-`IFC-INS-004`: `SelfBinderId` is the structural pair of the declaring interface's stable `DeclId`
-and the one fixed `InterfaceSelfRole`; it is never allocated from a snapshot counter. Copying or
-deserializing an interface therefore reconstructs the same bound `Self` identity.
+`IFC-INS-004`: `ThisTypeBinderId` is the structural pair of the declaring interface's stable `DeclId`
+and the one fixed `InterfaceThisRole`; it is never allocated from a snapshot counter. Copying or
+deserializing an interface therefore reconstructs the same bound `This` identity.
 
-`IFC-INS-005`: A refinement clause ID contains its declaring interface and full canonical
+`IFC-INS-005`: An interface-inheritance clause ID contains its declaring interface and full canonical
 base-pattern/condition encoding. `duplicateOrdinal` is assigned after grouping equal encodings and
 sorting their source token ranges, so byte-equivalent duplicate clauses remain distinct without
 depending on allocation or worker order. `basePattern` is an `InterfaceInstanceKey`; its canonical
@@ -94,10 +95,15 @@ RequirementKind =
   | PropertyKind
   | SubscriptKind
   | ConstructorKind
-  | NestedConformanceKind
+  | ConformanceRequirementKind
 
 SomeRequirementDecl = exists K: RequirementKind . RequirementDecl<K>
 SomeRequirementKey = exists K: RequirementKind . RequirementKey<K>
+
+SubtypeWitnessTarget = {
+    subtype: TypeId,
+    superInterface: InterfaceInstanceKey
+}
 
 AssociatedTypeConstraint = Constraint
 
@@ -107,68 +113,78 @@ AssociatedConstraintSlot = {
     kind: ConstraintKind
 }
 
-ConformanceDefinitionRevision = {
+WitnessTableDefinitionRevision = {
     snapshot: SemanticSnapshotId,
     definitionOrdinal: UInt32
 }
 
-ValidatedConformanceRef = {
-    identity: ConformanceId,
-    revision: ConformanceDefinitionRevision
+ValidatedWitnessTableRef = {
+    identity: WitnessTableId,
+    revision: WitnessTableDefinitionRevision
 }
 
-AccessorRole = Get | Set | Ref(access: AccessMode)
+AccessorRole = Getter | Setter | RefAccessor(access: StorageAccessMode)
 
-validAccessorRole(Get) = True
-validAccessorRole(Set) = True
-validAccessorRole(Ref(a)) = (a = ReadAccess or a = ReadWriteAccess)
+validAccessorRole(Getter) = True
+validAccessorRole(Setter) = True
+validAccessorRole(RefAccessor(a)) = (a = ReadAccess or a = ReadWriteAccess)
 
-WitnessRuntimeEntryKey =
-    CallableEntry(requirement: RequirementKey<CallableKind>)
-  | ConstructorEntry(requirement: RequirementKey<ConstructorKind>)
-  | PropertyAccessorEntry(requirement: RequirementKey<PropertyKind>,
+RuntimeInterfaceRequirementKey =
+    CallableEntry(requirement: InterfaceRequirementKeyOf<CallableKind>)
+  | ConstructorEntry(requirement: InterfaceRequirementKeyOf<ConstructorKind>)
+  | PropertyAccessorEntry(requirement: InterfaceRequirementKeyOf<PropertyKind>,
                           accessor: AccessorRole)
-  | SubscriptAccessorEntry(requirement: RequirementKey<SubscriptKind>,
+  | SubscriptAccessorEntry(requirement: InterfaceRequirementKeyOf<SubscriptKind>,
                            accessor: AccessorRole)
 
-WitnessEntryKey<K> = RequirementEntry(requirement: RequirementKey<K>)
-SomeWitnessEntryKey = exists K: RequirementKind . WitnessEntryKey<K>
-WitnessUseStage = Construction | Published
+InterfaceRequirementKey =
+    BaseInterfaceEntry(inheritance: RefinementStepKey)
+  | RequirementEntry(requirement: SomeRequirementKey)
 
-WitnessEntryPayloadAt<K, S: WitnessUseStage> = ConditionalSatisfactionAt<K, S>
+InterfaceRequirementKeyOf<K> = RequirementEntry(requirement: RequirementKey<K>)
+SomeInterfaceRequirementKey = InterfaceRequirementKey
 
-RequirementEvidenceMapAt<S: WitnessUseStage> =
+SubtypeWitnessLookupKey =
+    BaseInterfaceEntry(inheritance: RefinementStepKey)
+  | ConformanceRequirementEntry(
+        requirement: InterfaceRequirementKeyOf<ConformanceRequirementKind>)
+
+WitnessTableState = Construction | Published
+
+RequirementDictionaryEntryAt<K, S: WitnessTableState> = ConditionalRequirementWitnessAt<K, S>
+
+RequirementDictionaryAt<S: WitnessTableState> =
     DependentNodeMap<K: RequirementKind,
-                     WitnessEntryKey<K>,
-                     WitnessEntryPayloadAt<K, S>>
+                     InterfaceRequirementKeyOf<K>,
+                     RequirementDictionaryEntryAt<K, S>>
 
-WitnessEntryMap = RequirementEvidenceMapAt<Published>
+RequirementDictionary = RequirementDictionaryAt<Published>
 
-ProvisionalRequirementEvidenceMap =
-    RequirementEvidenceMapAt<Construction>
+ProvisionalRequirementDictionary =
+    RequirementDictionaryAt<Construction>
 
-EffectValidatedRequirementEvidenceMap =
-    ProvisionalRequirementEvidenceMap where no callable proof/plan contains
+EffectValidatedRequirementDictionary =
+    ProvisionalRequirementDictionary where no callable proof/plan contains
     PendingLocal(RequirementEffectCompatibilityObligation)
 
-CapabilityValidatedRequirementEvidenceMap =
-    ProvisionalRequirementEvidenceMap where no callable proof/plan contains
+CapabilityValidatedRequirementDictionary =
+    ProvisionalRequirementDictionary where no callable proof/plan contains
     PendingLocal(InferredCapabilityCompatibilityObligation)
 
-FullyValidatedConstructionRequirementEvidenceMap =
-    ProvisionalRequirementEvidenceMap where neither pending-check form occurs
+FullyValidatedConstructionRequirementDictionary =
+    ProvisionalRequirementDictionary where neither pending-check form occurs
 
 ConformanceConstructionScope =
     ConformanceQuery(query: QueryKey)
   | SynthesisConstruction(group: SynthesisKey)
 
-OperationalConformanceRef = {
-    identity: ConformanceId,
+OperationalWitnessTableRef = {
+    identity: WitnessTableId,
     scope: ConformanceConstructionScope
 }
 
-WitnessCallRef<S: WitnessUseStage> = {
-    witness: InterfaceSubtypeWitnessId,
+SubtypeWitnessRef<S: WitnessTableState> = {
+    witness: SubtypeWitnessId,
     resolutions: WitnessResolutionSetAt<S>
 }
 
@@ -185,7 +201,7 @@ RequirementContract<PropertyKind> =
 RequirementContract<SubscriptKind> =
     NodeMap<AccessorRole, CallableRequirementContract>
 RequirementContract<ConstructorKind> = CallableRequirementContract
-RequirementContract<NestedConformanceKind> = NoCallableContract
+RequirementContract<ConformanceRequirementKind> = NoCallableContract
 
 RequirementDecl<K> = {
     declaration: DeclId,
@@ -218,7 +234,7 @@ RequirementSignature<PropertyKind> = {
 }
 
 RequirementSignature<SubscriptKind> = {
-    indices: NodeList<ParameterType>,
+    indices: NodeList<FuncTypeParamInfo>,
     indexSlots: NodeList<ParameterSlot>,
     valueType: TypeId,
     receiver: ReceiverSlot,
@@ -227,34 +243,34 @@ RequirementSignature<SubscriptKind> = {
 
 RequirementSignature<ConstructorKind> = CallableSignature
 
-RequirementSignature<NestedConformanceKind> = {
+RequirementSignature<ConformanceRequirementKind> = {
     subject: TypeId,
     interface: InterfaceInstanceKey
 }
 
-DirectWitnessAt<AssociatedTypeKind, S: WitnessUseStage> =
+RequirementWitnessPayloadAt<AssociatedTypeKind, S: WitnessTableState> =
     TypeWitness(type: TypeId,
                 constraints: NodeMap<AssociatedConstraintSlot, ConstraintEvidence>)
 
-DirectWitnessAt<AssociatedValueKind, S: WitnessUseStage> =
-    ValueWitness(value: CanonicalDeclRef | ConstValue, typeProof: TypeEqualityProof)
+RequirementWitnessPayloadAt<AssociatedValueKind, S: WitnessTableState> =
+    ValueWitness(value: DeclRef | ConstValue, typeProof: TypeEqualityProof)
 
-DirectWitnessAt<CallableKind, S: WitnessUseStage> =
-    CallableWitness(declaration: CanonicalDeclRef, signature: CallableSignature)
+RequirementWitnessPayloadAt<CallableKind, S: WitnessTableState> =
+    CallableWitness(declaration: DeclRef, signature: CallableSignature)
 
-DirectWitnessAt<PropertyKind, S: WitnessUseStage> =
-    PropertyWitness(accessors: NodeMap<AccessorRole, DirectWitnessAt<CallableKind, S>>)
+RequirementWitnessPayloadAt<PropertyKind, S: WitnessTableState> =
+    PropertyWitness(accessors: NodeMap<AccessorRole, RequirementWitnessPayloadAt<CallableKind, S>>)
 
-DirectWitnessAt<SubscriptKind, S: WitnessUseStage> =
-    SubscriptWitness(accessors: NodeMap<AccessorRole, DirectWitnessAt<CallableKind, S>>)
+RequirementWitnessPayloadAt<SubscriptKind, S: WitnessTableState> =
+    SubscriptWitness(accessors: NodeMap<AccessorRole, RequirementWitnessPayloadAt<CallableKind, S>>)
 
-DirectWitnessAt<ConstructorKind, S: WitnessUseStage> =
-    ConstructorWitness(declaration: CanonicalDeclRef, signature: CallableSignature)
+RequirementWitnessPayloadAt<ConstructorKind, S: WitnessTableState> =
+    ConstructorWitness(declaration: DeclRef, signature: CallableSignature)
 
-DirectWitnessAt<NestedConformanceKind, S: WitnessUseStage> =
-    NestedWitness(witness: WitnessCallRef<S>)
+RequirementWitnessPayloadAt<ConformanceRequirementKind, S: WitnessTableState> =
+    NestedWitness(witness: SubtypeWitnessRef<S>)
 
-DirectWitness<K> = DirectWitnessAt<K, Published>
+RequirementWitnessPayload<K> = RequirementWitnessPayloadAt<K, Published>
 
 CanonicalFieldEquality<T> = {
     left: T,
@@ -283,8 +299,8 @@ AdapterTargetRole =
 
 AdapterInputCategory =
     AdapterRValue
-  | AdapterPhysicalPlace(requirement: PhysicalStorageRequirement)
-  | AdapterAbstractPlace(access: AccessMode, mutability: Mutability)
+  | AdapterPhysicalStorage(requirement: PhysicalStorageRequirement)
+  | AdapterAbstractStorage(access: StorageAccessMode, mutability: Mutability)
 
 AdapterSourceEndpoint = {
     role: AdapterSourceRole,
@@ -295,18 +311,18 @@ AdapterSourceEndpoint = {
 AdapterTargetEndpoint = {
     role: AdapterTargetRole,
     type: TypeId,
-    mode: PassingMode
+    mode: ParamPassingMode
 }
 
-AccessPlanBindingAt<S: WitnessUseStage> = {
+StorageAccessPlanBindingAt<S: WitnessTableState> = {
     source: AdapterSourceEndpoint,
     target: AdapterTargetEndpoint,
     invocationLifetime: LifetimeId,
-    input: AccessOperandId,
-    plan: AccessPlan<S>
+    input: StorageAccessOperandId,
+    plan: StorageAccessPlan<S>
 }
 
-AccessPlanBinding = AccessPlanBindingAt<Published>
+StorageAccessPlanBinding = StorageAccessPlanBindingAt<Published>
 
 ReceiverCorrespondence =
     AbsentToAbsent
@@ -332,7 +348,7 @@ ParameterCorrespondence = {
 }
 
 IndexParameterEndpoint = {
-    parameters: NodeList<ParameterType>,
+    parameters: NodeList<FuncTypeParamInfo>,
     slots: NodeList<ParameterSlot>
 }
 
@@ -344,7 +360,7 @@ IndexParameterCorrespondence = {
 
 IndexParameterEqualityProof = {
     correspondence: IndexParameterCorrespondence,
-    parameters: NodeMap<ParameterKey, ParameterTypeEqualityProof>
+    parameters: NodeMap<ParameterKey, FuncTypeParamInfoEqualityProof>
 }
 
 ReceiverEqualityProof =
@@ -352,30 +368,30 @@ ReceiverEqualityProof =
   | BothPresent(required: ReceiverSlot,
                 implementation: ReceiverSlot,
                 selfType: TypeEqualityProof,
-                mode: CanonicalFieldEquality<PassingMode>,
+                mode: CanonicalFieldEquality<ParamPassingMode>,
                 differentialParticipation:
                     CanonicalFieldEquality<DifferentialParticipation>,
                 isolation: CanonicalFieldEquality<ReceiverIsolation>)
 
-ParameterTypeEqualityProof = {
+FuncTypeParamInfoEqualityProof = {
     requiredKey: ParameterKey,
     implementationKey: ParameterKey,
     requiredOrdinal: UInt32,
     implementationOrdinal: UInt32,
     valueType: TypeEqualityProof,
-    mode: CanonicalFieldEquality<PassingMode>,
+    mode: CanonicalFieldEquality<ParamPassingMode>,
     differentialParticipation: CanonicalFieldEquality<DifferentialParticipation>,
     labelIdentity: ConditionalFieldEquality<ParameterLabelIdentity>,
     attributes: CanonicalFieldEquality<ParameterAttributeSet>
 }
 
-FunctionTypeEqualityProof = {
+FuncTypeEqualityProof = {
     required: CallableSignatureId,
     implementation: CallableSignatureId,
     correspondence: ParameterCorrespondence,
     binder: CanonicalFieldEquality<Option<CanonicalGenericBinder>>,
     receiver: ReceiverEqualityProof,
-    parameters: NodeMap<ParameterKey, ParameterTypeEqualityProof>,
+    parameters: NodeMap<ParameterKey, FuncTypeParamInfoEqualityProof>,
     result: TypeEqualityProof,
     resultDifferentialParticipation: CanonicalFieldEquality<DifferentialParticipation>,
     error: TypeEqualityProof,
@@ -384,21 +400,21 @@ FunctionTypeEqualityProof = {
     callingConvention: CanonicalFieldEquality<CallingConvention>
 }
 
-RequirementCompatibilityProofAt<AssociatedTypeKind, S: WitnessUseStage> =
+RequirementCompatibilityProofAt<AssociatedTypeKind, S: WitnessTableState> =
     AssociatedTypeProof(kind: KindEqualityProof,
                         constraints: NodeMap<AssociatedConstraintSlot, ConstraintEvidence>)
 
-RequirementCompatibilityProofAt<AssociatedValueKind, S: WitnessUseStage> =
+RequirementCompatibilityProofAt<AssociatedValueKind, S: WitnessTableState> =
     AssociatedValueProof(type: TypeEqualityProof, constant: Option<ConstantValueProof>)
 
 CallableImplementationSubject =
-    SourceCallable(declaration: CanonicalDeclRef, locality: Local | Imported)
+    SourceCallable(declaration: DeclRef, locality: Local | Imported)
   | SynthesizedCallable(declaration: SynthesizedDeclId)
   | BuiltinCallable(rule: RuleId, inputs: CanonicalArguments)
 
 InferredCapabilityCompatibilityObligation = {
-    conformance: ConformanceId,
-    entry: WitnessRuntimeEntryKey,
+    conformance: WitnessTableId,
+    entry: RuntimeInterfaceRequirementKey,
     requiredInferredCapabilities: CapabilityRequirement,
     implementation: CallableImplementationSubject,
     implementationInferredCapabilities: CapabilityRequirement,
@@ -409,7 +425,7 @@ InferredCapabilityCompatibilityObligation = {
 InferredCapabilityCompatibilityProof = {
     obligation: InferredCapabilityCompatibilityObligation,
     effectiveContract: EffectiveCallableContractId,
-    effectiveInferredCapabilities: CapabilityFormula,
+    effectiveInferredCapabilities: CapabilitySet,
     effectiveProof: CapabilityImplicationProof
 }
 
@@ -427,8 +443,8 @@ ConcreteAvailabilityCompatibilityProof = {
 }
 
 RequirementEffectCompatibilityObligation = {
-    conformance: ConformanceId,
-    entry: WitnessRuntimeEntryKey,
+    conformance: WitnessTableId,
+    entry: RuntimeInterfaceRequirementKey,
     requirementAllowance: EffectAllowance,
     implementation: CallableImplementationSubject,
     selectionEffects: EffectSet,
@@ -457,62 +473,62 @@ CallableContractSatisfactionProof = {
     concreteAvailability: ConcreteAvailabilityCompatibilityProof
 }
 
-RequirementCompatibilityProofAt<CallableKind, S: WitnessUseStage> =
-    CallableProof(signature: FunctionTypeEqualityProof,
+RequirementCompatibilityProofAt<CallableKind, S: WitnessTableState> =
+    CallableProof(signature: FuncTypeEqualityProof,
                   contract: CallableContractSatisfactionProof)
 
-RequirementCompatibilityProofAt<PropertyKind, S: WitnessUseStage> =
+RequirementCompatibilityProofAt<PropertyKind, S: WitnessTableState> =
     PropertyProof(valueType: TypeEqualityProof,
                   accessors: NodeMap<AccessorRole,
                                      RequirementCompatibilityProofAt<CallableKind, S>>)
 
-RequirementCompatibilityProofAt<SubscriptKind, S: WitnessUseStage> =
+RequirementCompatibilityProofAt<SubscriptKind, S: WitnessTableState> =
     SubscriptProof(indices: IndexParameterEqualityProof,
                    valueType: TypeEqualityProof,
                    accessors: NodeMap<AccessorRole,
                                       RequirementCompatibilityProofAt<CallableKind, S>>)
 
-RequirementCompatibilityProofAt<ConstructorKind, S: WitnessUseStage> =
-    ConstructorProof(signature: FunctionTypeEqualityProof,
+RequirementCompatibilityProofAt<ConstructorKind, S: WitnessTableState> =
+    ConstructorProof(signature: FuncTypeEqualityProof,
                      contract: CallableContractSatisfactionProof)
 
-ConformanceTargetProofAt<S: WitnessUseStage> = {
-    evidence: WitnessCallRef<S>,
-    actual: ConformanceTarget,
-    required: ConformanceTarget,
+SubtypeWitnessTargetProofAt<S: WitnessTableState> = {
+    evidence: SubtypeWitnessRef<S>,
+    actual: SubtypeWitnessTarget,
+    required: SubtypeWitnessTarget,
     conformingType: TypeEqualityProof,
     interface: CanonicalFieldEquality<InterfaceInstanceKey>
 }
 
-RequirementCompatibilityProofAt<NestedConformanceKind, S: WitnessUseStage> =
-    NestedProof(subject: TypeEqualityProof, target: ConformanceTargetProofAt<S>)
+RequirementCompatibilityProofAt<ConformanceRequirementKind, S: WitnessTableState> =
+    NestedProof(subject: TypeEqualityProof, target: SubtypeWitnessTargetProofAt<S>)
 
 RequirementCompatibilityProof<K> = RequirementCompatibilityProofAt<K, Published>
-ConformanceTargetProof = ConformanceTargetProofAt<Published>
+SubtypeWitnessTargetProof = SubtypeWitnessTargetProofAt<Published>
 
-ResultAdapterPlanAt<S: WitnessUseStage> = {
+ResultAdapterPlanAt<S: WitnessTableState> = {
     implementationResult: TypeId,
     requiredResult: TypeId,
     conversion: ConversionPlan<S>
 }
 
-ResidualErrorPlanAt<S: WitnessUseStage> =
-    NoResidualError(errorIsNever: TypeEqualityProof)
+ResidualErrorPlanAt<S: WitnessTableState> =
+    NoResidualError(errorIsBottom: TypeEqualityProof)
   | ConvertResidualError(conversion: ConversionPlan<S>)
 
-ErrorHandlerAdapterAt<S: WitnessUseStage> = {
-    handler: CanonicalDeclRef,
+ErrorHandlerAdapterAt<S: WitnessTableState> = {
+    handler: DeclRef,
     signature: CallableSignatureId,
-    errorArgument: AccessPlanBindingAt<S>,
+    errorArgument: StorageAccessPlanBindingAt<S>,
     normalResult: ResultAdapterPlanAt<S>,
     residualError: ResidualErrorPlanAt<S>,
     permission: RuleId
 }
 
-ErrorAdapterPlanAt<S: WitnessUseStage> = {
+ErrorAdapterPlanAt<S: WitnessTableState> = {
     implementationError: TypeId,
     requiredError: TypeId,
-    operation: ImplementationDoesNotThrow(errorIsNever: TypeEqualityProof)
+    operation: ImplementationDoesNotThrow(errorIsBottom: TypeEqualityProof)
              | PropagateExact(errorEquality: TypeEqualityProof)
              | ConvertAndPropagate(conversion: ConversionPlan<S>)
              | CatchWithHandler(ErrorHandlerAdapterAt<S>)
@@ -531,28 +547,28 @@ CallableContractAdapterProof = {
     concreteAvailability: ConcreteAvailabilityCompatibilityProof
 }
 
-RequirementAdapterPlanAt<CallableKind, S: WitnessUseStage> =
+RequirementAdapterPlanAt<CallableKind, S: WitnessTableState> =
     CallableAdapter(required: CallableSignatureId,
-                    implementation: CanonicalDeclRef,
+                    implementation: DeclRef,
                     implementationSignature: CallableSignatureId,
                     correspondence: ParameterCorrespondence,
-                    receiverAccess: Option<AccessPlanBindingAt<S>>,
+                    receiverAccess: Option<StorageAccessPlanBindingAt<S>>,
                     parameterAccessByImplementation:
-                        NodeMap<ParameterKey, AccessPlanBindingAt<S>>,
+                        NodeMap<ParameterKey, StorageAccessPlanBindingAt<S>>,
                     result: ResultAdapterPlanAt<S>,
                     error: ErrorAdapterPlanAt<S>,
                     contract: CallableContractAdapterProof)
 
-RequirementAdapterPlanAt<PropertyKind, S: WitnessUseStage> =
+RequirementAdapterPlanAt<PropertyKind, S: WitnessTableState> =
     PropertyAdapter(accessors:
         NodeMap<AccessorRole, RequirementAdapterPlanAt<CallableKind, S>>)
 
-RequirementAdapterPlanAt<SubscriptKind, S: WitnessUseStage> =
+RequirementAdapterPlanAt<SubscriptKind, S: WitnessTableState> =
     SubscriptAdapter(indices: IndexParameterCorrespondence,
                      accessors:
                          NodeMap<AccessorRole, RequirementAdapterPlanAt<CallableKind, S>>)
 
-RequirementAdapterPlanAt<ConstructorKind, S: WitnessUseStage> =
+RequirementAdapterPlanAt<ConstructorKind, S: WitnessTableState> =
     ConstructorAdapter(call: RequirementAdapterPlanAt<CallableKind, S>)
 
 RequirementAdapterPlan<K> = RequirementAdapterPlanAt<K, Published>
@@ -560,14 +576,14 @@ ResultAdapterPlan = ResultAdapterPlanAt<Published>
 ResidualErrorPlan = ResidualErrorPlanAt<Published>
 ErrorAdapterPlan = ErrorAdapterPlanAt<Published>
 
-DefaultUsePlan<K, S: WitnessUseStage> = {
+DefaultUsePlan<K, S: WitnessTableState> = {
     instantiated: InstantiatedDefault<K>,
-    selfConformance: WitnessCallRef<S>,
+    selfConformance: SubtypeWitnessRef<S>,
     output: DefaultOutputAt<K, S>,
     entryPointRequired: Bool
 }
 
-DefaultOutputAt<K, S: WitnessUseStage> = DirectWitnessAt<K, S>
+DefaultOutputAt<K, S: WitnessTableState> = RequirementWitnessPayloadAt<K, S>
                  | RequirementAdapterPlanAt<K, S>  when K is adapter-capable
 
 DefaultOutput<K> = DefaultOutputAt<K, Published>
@@ -579,9 +595,9 @@ BuiltinWitnessPlan<K> = {
     validator: StandardEnvironmentRuleId
 }
 
-BuiltinWitnessAt<K, S: WitnessUseStage> = {
+BuiltinWitnessAt<K, S: WitnessTableState> = {
     rule: RuleId,
-    payload: DirectWitnessAt<K, S>,
+    payload: RequirementWitnessPayloadAt<K, S>,
     proof: RequirementCompatibilityProofAt<K, S>
 }
 
@@ -612,7 +628,7 @@ OptionalUse<CallableKind> = PresenceTest | GuardedInvocation
 OptionalUse<PropertyKind> = PresenceTest | GuardedAccessor(AccessorRole)
 OptionalUse<SubscriptKind> = PresenceTest | GuardedAccessor(AccessorRole)
 OptionalUse<ConstructorKind> = PresenceTest | GuardedConstruction
-OptionalUse<NestedConformanceKind> = PresenceTest | GuardedConstraintUse
+OptionalUse<ConformanceRequirementKind> = PresenceTest | GuardedConstraintUse
 
 OptionalUseSet<K> = CanonicalFiniteSet<OptionalUse<K>>
 
@@ -624,8 +640,8 @@ RequirementDefault<K> = {
 }
 
 DefaultImplementation<K> =
-    Evidence(DirectWitness<K>)
-  | MemberBody(CanonicalDeclRef)       when K is a runtime member kind
+    Evidence(RequirementWitnessPayload<K>)
+  | MemberBody(DeclRef)       when K is a runtime member kind
   | StandardBuiltin(BuiltinWitnessPlan<K>)
 
 InstantiatedDefault<K> = {
@@ -654,8 +670,8 @@ owns `CapabilityImplicationProof`; their validators replay exact endpoints rathe
 the stored record. A `ConditionalFieldEquality` may exclude a field only when its registered
 language rule says that field does not participate in the current relation.
 
-`IFC-CALL-002`: `FunctionTypeEqualityProof` loads its two `CallableSignature` values and their
-chapter 4 `FunctionType` values. Its correspondence IDs must equal the proof endpoints. The binder
+`IFC-CALL-002`: `FuncTypeEqualityProof` loads its two `CallableSignature` values and their
+chapter 4 `FuncType` values. Its correspondence IDs must equal the proof endpoints. The binder
 proof compares alpha-normalized binders and constraints; the receiver proof covers both absence or
 every present receiver field; parameter proofs cover every expanded slot exactly once at the stored
 ordinals; result and error `TypeEqualityProof` endpoints equal the stored function fields; and
@@ -674,24 +690,24 @@ ordinary parameter must map once unless a distinct adapter rule explicitly consu
 receiver; every implementation input must have one source. Requirement and implementation
 `ParameterKey` values identify endpoints and are never compared for equality with one another.
 
-An `AccessPlanBinding` gives chapter 11's otherwise expression-local `AccessPlan` explicit adapter
+A `StorageAccessPlanBinding` gives chapter 11's otherwise expression-local `StorageAccessPlan` explicit adapter
 endpoints. Its source role denotes a formal thunk input, thrown error, or named synthesized value;
 its target resolves to the implementation receiver/parameter or handler parameter. The endpoint
 types and target mode must agree with the corresponding signature fields. `AdapterInputCategory`
 is intentionally pathless: a generated thunk input may promise an rvalue, physical storage meeting
-a complete requirement, or abstract getter/setter storage, but no concrete expression `PlaceRef`
+a complete requirement, or abstract getter/setter storage, but no concrete expression `StorageRef`
 exists until a call binds that thunk. Physical and abstract promises are disjoint; a generic
-"place" promise cannot later be interpreted as referenceable storage.
+"storage" promise cannot later be interpreted as referenceable storage.
 
-| Target mode       | Permitted `RuntimeArgument` and required completion                                                                                                                                                                                           |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `InMode`          | `ImmediateValue`; all conversions finish before the call                                                                                                                                                                                      |
-| `OutMode`         | `OutDestination`, or `TemporaryAddress` with initialization/write-back on normal return                                                                                                                                                       |
-| `InOutMode`       | writable abstract or physical destination under its explicit access/write-back plan; any permitted temporary has normal-return write-back and cleanup                                                                                         |
-| `ConstRefMode(r)` | `PhysicalPlaceArgument` from an `AdapterPhysicalPlace` whose `AdapterStorageObligation` is `instantiatePhysicalStorageRequirement(target.mode, lifetime)` with read access; no conversion, temporary, getter, write-back, or category erasure |
-| `RefMode(r)`      | `PhysicalPlaceArgument` whose `AdapterStorageObligation` is `instantiatePhysicalStorageRequirement(target.mode, lifetime)` with read-write access; no hidden copy/write-back                                                                  |
+| Target mode       | Permitted `RuntimeArgument` and required completion                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InMode`          | `ImmediateValue`; all conversions finish before the call                                                                                                                                                                                          |
+| `OutMode`         | `OutDestination`, or `TemporaryAddress` with initialization/write-back on normal return                                                                                                                                                           |
+| `InOutMode`       | writable abstract or physical destination under its explicit access/write-back plan; any permitted temporary has normal-return write-back and cleanup                                                                                             |
+| `ConstRefMode(r)` | `PhysicalStorageArgument` from an `AdapterPhysicalStorage` whose `AdapterStorageObligation` is `instantiatePhysicalStorageRequirement(target.mode, lifetime)` with read access; no conversion, temporary, getter, write-back, or category erasure |
+| `RefMode(r)`      | `PhysicalStorageArgument` whose `AdapterStorageObligation` is `instantiatePhysicalStorageRequirement(target.mode, lifetime)` with read-write access; no hidden copy/write-back                                                                    |
 
-`IFC-CALL-004`: Validating an `AccessPlanBinding` symbolically executes its chapter 11 preparation,
+`IFC-CALL-004`: Validating a `StorageAccessPlanBinding` symbolically executes its chapter 11 preparation,
 `PassArgument` terminal, and completion steps. A `YieldStorageRead` or `CompleteStorageWrite`
 terminal is invalid in an adapter call binding. `plan.operands[input]` must be an
 `AdapterInput(source.role, source.type, source.category)`; that named operand is the plan's only
@@ -699,42 +715,42 @@ entry for this formal source, and every preparation path starts from it. Every n
 `ConversionPlan` composes by its chapter 7 source/target fields; physical-location, temporary,
 alias, and
 lifetime IDs are balanced; the `PassArgument` payload obeys the table; and post-call conversions return
-to the original abstract source place under the declared completion condition. Receiver bindings
+to the original abstract source storage under the declared completion condition. Receiver bindings
 use the same law. Adapter validation also checks all bindings together under the exact registered
 alias/access-discipline policy; it does not infer exclusivity merely from a write operation. Every
 physical-storage obligation in the recipe originates at an
-`AdapterPhysicalPlace` endpoint with an equal or stronger requirement; constructing the bound
+`AdapterPhysicalStorage` endpoint with an equal or stronger requirement; constructing the bound
 thunk plan supplies a concrete `PhysicalStorageProof` for that obligation. An
-`AdapterAbstractPlace` may use getter/setter plans but can never discharge such an obligation or
+`AdapterAbstractStorage` may use getter/setter plans but can never discharge such an obligation or
 satisfy `ConstRefMode` or `RefMode`. For a target mode `RefMode(r)`, the exact obligation is
 `instantiatePhysicalStorageRequirement(target.mode, binding.invocationLifetime)`, including the
 mode's access and `r`'s minimum lifetime, address-space requirement, and source-provenance
 predicate. The source endpoint must provide that full requirement and
-the `PhysicalPlaceArgument` runtime argument must carry its proof; comparing only access or deferring
+the `PhysicalStorageArgument` runtime argument must carry its proof; comparing only access or deferring
 instantiation to thunk lowering is invalid. Every binding in one adapter uses the canonical
 invocation lifetime of that adapter's callable signature.
 
 For `ConstRefMode(r)`, validation applies
 `instantiatePhysicalStorageRequirement(target.mode, binding.invocationLifetime)` and requires
-`target.mode.access = ReadAccess`; access is a field of `PassingMode`, not of `r`. The source is an
-`AdapterPhysicalPlace` whose promise entails that instantiated
+`target.mode.access = ReadAccess`; access is a field of `ParamPassingMode`, not of `r`. The source is an
+`AdapterPhysicalStorage` whose promise entails that instantiated
 requirement, and the recipe may only project and pass that same physical location with a read-only
 admission proof. Its call-lifetime alias claim is a shared read, but its runtime category and ABI
 remain physical storage with `isPhysicalStorage = True`; it is never recategorized as an ordinary
-value or nonphysical storage view. An rvalue, abstract place,
-getter, property exposing only `Ref(ReadWriteAccess)`, nonidentity conversion, or temporary cannot
+value or nonphysical storage view. An rvalue, abstract storage,
+getter, property exposing only `RefAccessor(ReadWriteAccess)`, nonidentity conversion, or temporary cannot
 satisfy the binding. A separately written expression that already produces a validated physical
-place is judged on that resulting place rather than being treated as the original abstract
+storage is judged on that resulting storage rather than being treated as the original abstract
 property.
 
 `IFC-CALL-005`: A `ResultAdapterPlan` has conversion source equal to the implementation result and
 target equal to the required result. An `ErrorAdapterPlan` has the stored function error endpoints:
-`ImplementationDoesNotThrow` proves the implementation error is `Never`; `PropagateExact` proves
+`ImplementationDoesNotThrow` proves the implementation error is `BottomType`; `PropagateExact` proves
 the error types equal; and `ConvertAndPropagate` has conversion source/target equal to the two error
 types. `CatchWithHandler` is valid only under its named permission rule; the handler is a
 no-receiver callable with one mapped error parameter, `errorArgument` maps the thrown implementation
 error to that parameter, `normalResult` maps the handler result to the required result, and the
-handler's residual error is either `Never` or explicitly converted to the required error. Every
+handler's residual error is either `BottomType` or explicitly converted to the required error. Every
 handler/conversion effect and capability is included in the adapter contract.
 
 `IFC-CALL-006`: `CallableContractSatisfactionProof.required.signature` and
@@ -752,9 +768,9 @@ proofs have that exact region and requirements
 `totalConcreteAvailability(implementation.concreteAvailability, U)`, respectively. This admits a
 region-specific implementation only for the region in which it is actually available; the guarded
 satisfactions' coverage proof establishes compatibility over the requirement's complete availability
-domain. A source subject contains one `CanonicalDeclRef`, which is the sole owner of its
+domain. A source subject contains one `DeclRef`, which is the sole owner of its
 specialization frames and must equal the enclosing entry's direct witness declaration. Both
-inferred-capability obligation entry keys equal the enclosing `WitnessRuntimeEntryKey`. Local
+inferred-capability obligation entry keys equal the enclosing `RuntimeInterfaceRequirementKey`. Local
 inferred-capability checks are `PendingLocal`; imported checks may use their published effective
 ordinary contract. Concrete availability is fixed before body inference and its compatibility proof
 is validated immediately. Final witness evidence contains only validated inferred-capability checks
@@ -796,7 +812,7 @@ the synthesized adapter subject, so post-synthesis inference validates the actua
 rather than merely trusting the summary. The separate concrete-availability proof compares the
 requirement against `adapterSelection.concreteAvailability` immediately.
 
-`IFC-CALL-008`: A callable adapter's `implementation` `CanonicalDeclRef` is the sole specialization
+`IFC-CALL-008`: A callable adapter's `implementation` `DeclRef` is the sole specialization
 authority and resolves to `implementationSignature`. Its receiver and parameter bindings target
 every implementation input exactly once according to `ParameterCorrespondence`; result/error plans
 use those same signature endpoints; and its contract proof uses the required and implementation
@@ -804,21 +820,20 @@ contract endpoints. In an `Adaptable` match, the candidate declaration must equa
 implementation. A nested property, subscript, or constructor plan is validated by the same rule for
 each keyed callable entry.
 
-`IFC-CALL-009`: `ConformanceTargetProofAt<S>` resolves its stable witness through the complete
+`IFC-CALL-009`: `SubtypeWitnessTargetProofAt<S>` resolves its stable witness through the complete
 stage-appropriate `WitnessResolutionSetAt<S>`, derives the witness target, and checks that it equals
 `actual`. The stage parameter propagates through surrounding adapter/call plans without changing
-the witness ID. It then proves the actual and required conforming types equal and proves their
-interface instances
-canonically equal.
+the witness ID. It then proves `actual.subtype = required.subtype` with `conformingType` and proves
+`actual.superInterface = required.superInterface` with `interface`.
 `KindEqualityProof`, `ConstantValueProof`, and `RequirementSignatureEqualityProof<K>` obey
 `IFC-CALL-001`; they cannot be constructed with unequal endpoints.
 
 `IFC-CALL-010`: Each `IndexParameterEndpoint.slots` is a bijection onto its parameter ordinals.
 `IndexParameterEqualityProof` maps every required index key to one implementation index key and
-contains one `ParameterTypeEqualityProof` with those exact endpoint keys, ordinals, and fields.
+contains one `FuncTypeParamInfoEqualityProof` with those exact endpoint keys, ordinals, and fields.
 `SubscriptAdapter.indices` is the common restriction of every accessor callable adapter's
-`ParameterCorrespondence` to index parameters; getter, setter, `Ref(ReadAccess)`, and
-`Ref(ReadWriteAccess)` adapters cannot silently choose different index mappings. Property and
+`ParameterCorrespondence` to index parameters; getter, setter, `RefAccessor(ReadAccess)`, and
+`RefAccessor(ReadWriteAccess)` adapters cannot silently choose different index mappings. Property and
 subscript proof/plan accessor maps have exactly the roles required by their product signatures, and
 each `valueType` proof has the required and implementation product value types as endpoints.
 
@@ -832,16 +847,16 @@ stores the pathless `AdapterStorageObligation`, not a fabricated concrete
 `PhysicalParameterBindingProofAt<S>`; binding the generated thunk input must discharge that
 obligation with the concrete access/provenance proof and then construct the ordinary binding proof
 for that endpoint. It cannot repair an rvalue,
-getter-only abstract place, wrong address space, forbidden physical source provenance, or a
-`Ref(ReadWriteAccess)` property accessor by materializing storage or weakening the requirement.
+getter-only abstract storage, wrong address space, forbidden physical source provenance, or a
+`RefAccessor(ReadWriteAccess)` property accessor by materializing storage or weakening the requirement.
 
 An accessor map is keyed by `AccessorRole`; an implementation cannot satisfy a setter because it
-happened to occupy the second declaration slot. `WitnessRuntimeEntryKey` carries that role through
+happened to occupy the second declaration slot. `RuntimeInterfaceRequirementKey` carries that role through
 runtime dispatch and contract obligations. Callable signatures use chapter 4's explicit receiver
 and parameter modes. Dispatch selection is not part of a function type; it is evidence in a
 selected callable or elaborated call.
 
-`WitnessEntryMap` is the authoritative all-kind semantic map. Callable-dispatch keys are a derived
+`RequirementDictionary` is the authoritative all-kind semantic map. Callable-dispatch keys are a derived
 projection:
 
 ```text
@@ -855,7 +870,7 @@ runtimeProjection(RequirementEntry(k), signature) =
     []                                         otherwise
 ```
 
-`WIT-ENT-001`: A `WitnessEntryKey<K>` and its payload carry the same `K`; the enclosed
+`WIT-ENT-001`: A `InterfaceRequirementKeyOf<K>` and its payload carry the same `K`; the enclosed
 `RequirementKey<K>` equals the active slot against which every satisfaction/proof endpoint was
 validated. Every active slot has exactly one entry key before capability partitioning. Associated
 types, associated values, and nested conformances therefore remain explicit keyed metadata even
@@ -867,8 +882,8 @@ associated-value witness as compile-time/metadata evidence; a language feature n
 access declares a callable/property requirement or adds a new named projection rule rather than
 silently treating the associated value as a method.
 
-`WIT-ENT-003`: Serialization and IR metadata preserve `SomeWitnessEntryKey` for every kind. A
-backend may separately map projected `WitnessRuntimeEntryKey` values to callable ABI slots, but
+`WIT-ENT-003`: Serialization and IR metadata preserve `SomeInterfaceRequirementKey` for every kind. A
+backend may separately map projected `RuntimeInterfaceRequirementKey` values to callable ABI slots, but
 that compact map cannot replace or renumber the all-kind witness-entry map.
 
 `IFC-KIND-001`: Every requirement declaration has exactly one `RequirementKind`, and every match,
@@ -878,8 +893,8 @@ it from a union tag at IR generation is invalid.
 `IFC-KIND-002`: Property and subscript requirements are products of named accessor roles. A partial
 implementation is accepted only when every missing role is optional or has a valid default.
 
-`IFC-KIND-003`: A nested-conformance requirement produces an `InterfaceSubtypeWitnessId` with its
-stage-appropriate definition resolutions. A bare `ConformanceId`, conversion, or declaration
+`IFC-KIND-003`: A nested-conformance requirement produces an `SubtypeWitnessId` with its
+stage-appropriate definition resolutions. A bare `WitnessTableId`, conversion, or declaration
 reference cannot occupy that slot without constructing a kind-correct witness value through a
 named rule.
 
@@ -914,11 +929,11 @@ the product's `valueType` under the versioned accessor-role schema. Construction
 whose getter, setter, or reference-accessor signature disagrees with these shared fields, so
 matching never has to guess which duplicate is authoritative.
 
-`IFC-KIND-008`: `AccessorRole.Ref` is keyed by its complete access mode. The only source spellings
-in the initial language version are `constref` for `Ref(ReadAccess)` and `ref` for
-`Ref(ReadWriteAccess)`, as specified by `PAR-ACC-001`. Both keys may occur concurrently in one
+`IFC-KIND-008`: `AccessorRole.RefAccessor` is keyed by its complete access mode. The only source spellings
+in the initial language version are `constref` for `RefAccessor(ReadAccess)` and `ref` for
+`RefAccessor(ReadWriteAccess)`, as specified by `PAR-ACC-001`. Both keys may occur concurrently in one
 property or subscript signature, contract, direct witness, compatibility proof, adapter plan, and
-runtime witness-entry map. Satisfaction is exact by key: a mutable `ref` accessor does not satisfy
+runtime interface-requirement dictionary. Satisfaction is exact by key: a mutable `ref` accessor does not satisfy
 a required `constref` accessor, and a read-only accessor does not satisfy a required mutable one.
 Each reference accessor's `AccessorReferenceResultContract` has referent equal to the product's
 `valueType` and access exactly equal to its key; returning a bare value or a handle with the other
@@ -929,7 +944,7 @@ access index; they never select one role by source position or access-strength c
 keys are not compared for equality across declarations: requirement and implementation
 `ParameterKey` values are expected to differ. Pack-expansion paths make every mapped slot explicit.
 
-## Requirement identity under specialization and refinement
+## Requirement identity under specialization and base-interface inheritance
 
 A requirement declaration ID is not sufficient identity. An inherited requirement can be reached
 through different specializations and through multiple arms of a diamond. The semantic key retains
@@ -977,7 +992,7 @@ their kinds match and `CheckOverrideCompatibility` produces a proof for each nam
 inherited keys remain addressable for base-interface projection; their evidence may delegate to the
 override through that proof.
 
-`EnumerateRequirementSlots(I)` traverses direct requirements and refinement edges in canonical key
+`EnumerateRequirementSlots(I)` traverses direct requirements and base-interface edges in canonical key
 order, instantiates every slot, and preserves all path-distinct occurrences. Source order is retained
 as presentation metadata but does not define identity.
 
@@ -987,82 +1002,75 @@ Conformance identity is separate from its definition so mutually referencing dec
 synthesized artifacts can refer to a stable ID before a complete witness graph is frozen:
 
 ```text
-ConformanceTarget = {
-    conformingType: TypeId,
-    interface: InterfaceInstanceKey
-}
-
-ConformanceClassifier =
-    ConcreteConformance(target: ConformanceTarget)
-  | GenericConformance(binder: CanonicalGenericBinder,
-                       targetPattern: ConformanceTarget)
+WitnessTableForm =
+    ConcreteWitnessTableForm(target: SubtypeWitnessTarget)
+  | GenericWitnessTableForm(binder: CanonicalGenericBinder,
+                       targetPattern: SubtypeWitnessTarget)
 
 ConformanceProvider =
     Explicit(declaration: DeclId)
   | Builtin(rule: RuleId, inputs: CanonicalArguments)
   | Synthesized(output: SynthesizedSemanticId)
 
-ConformanceIdentityKey = {
-    classifier: ConformanceClassifier,
+WitnessTableIdentityKey = {
+    form: WitnessTableForm,
     provider: ConformanceProvider
 }
 
-ConformanceId = ContentId<ConformanceIdentityKey>
+WitnessTableId = ContentId<WitnessTableIdentityKey>
 
-ConformanceIdentity = {
-    id: ConformanceId,
-    key: ConformanceIdentityKey,
+WitnessTableIdentity = {
+    id: WitnessTableId,
+    key: WitnessTableIdentityKey,
     origin: Origin
 }
 
-ConformanceDefinition = {
-    identity: ConformanceId,
-    classifier: ConformanceClassifier,
-    revision: ConformanceDefinitionRevision,
-    requirements: RequirementEvidenceMap,
-    inherited: NodeMap<RefinementStepKey, ConformanceProjection>,
+WitnessTableDefinition = {
+    identity: WitnessTableId,
+    form: WitnessTableForm,
+    revision: WitnessTableDefinitionRevision,
+    requirements: RequirementDictionary,
+    inherited: NodeMap<RefinementStepKey, WitnessTableProjection>,
     contract: EffectiveConformanceContract,
-    dependencies: NodeList<ValidatedConformanceRef>
+    dependencies: NodeList<ValidatedWitnessTableRef>
 }
 
-ConformanceDefinitionPublication = {
-    definition: ConformanceDefinition,
-    definitionReference: ValidatedConformanceRef,
-    witness: WitnessCallRef<Published>
+WitnessTableDefinitionPublication = {
+    definition: WitnessTableDefinition,
+    definitionReference: ValidatedWitnessTableRef,
+    witness: SubtypeWitnessRef<Published>
 }
 
-RequirementEvidenceMap = WitnessEntryMap
+ConditionalRequirementWitnessAt<K, S: WitnessTableState> =
+    NodeList<GuardedRequirementWitnessAt<K, S>>
 
-ConditionalSatisfactionAt<K, S: WitnessUseStage> =
-    NodeList<GuardedSatisfactionAt<K, S>>
-
-GuardedSatisfactionAt<K, S: WitnessUseStage> = {
+GuardedRequirementWitnessAt<K, S: WitnessTableState> = {
     condition: BooleanCapabilityPredicate,
-    satisfaction: RequirementSatisfactionAt<K, S>
+    witness: RequirementWitnessAt<K, S>
 }
 
-ConditionalSatisfaction<K> = ConditionalSatisfactionAt<K, Published>
-GuardedSatisfaction<K> = GuardedSatisfactionAt<K, Published>
-ProvisionalConditionalSatisfaction<K> = ConditionalSatisfactionAt<K, Construction>
+ConditionalRequirementWitness<K> = ConditionalRequirementWitnessAt<K, Published>
+GuardedRequirementWitness<K> = GuardedRequirementWitnessAt<K, Published>
+ProvisionalConditionalRequirementWitness<K> = ConditionalRequirementWitnessAt<K, Construction>
 
-ConformanceProjectionAt<S: WitnessUseStage> = {
-    derived: WitnessCallRef<S>,
-    refinement: RefinementStepKey,
+WitnessTableProjectionAt<S: WitnessTableState> = {
+    derived: SubtypeWitnessRef<S>,
+    inheritance: RefinementStepKey,
     proof: InterfaceRefinementProof
 }
 
-projectedWitnessId(p: ConformanceProjectionAt<S>) =
+projectedWitnessId(p: WitnessTableProjectionAt<S>) =
     internWitness(LookupSubtypeWitness(
         base = p.derived.witness,
-        key = RefinementWitnessEntry(p.refinement)))
+        key = BaseInterfaceEntry(p.inheritance)))
 
-ProvisionalConformanceProjection = ConformanceProjectionAt<Construction>
-ConformanceProjection = ConformanceProjectionAt<Published>
+ProvisionalWitnessTableProjection = WitnessTableProjectionAt<Construction>
+WitnessTableProjection = WitnessTableProjectionAt<Published>
 
 EffectiveConformanceContract = {
     genericConditions: GenericConditionSet,
-    availability: CapabilityFormula,
-    visibility: Visibility,
+    availability: CapabilitySet,
+    visibility: DeclVisibility,
     semanticEnvironment: SemanticEnvironmentId
 }
 ```
@@ -1071,22 +1079,22 @@ EffectiveConformanceContract = {
 value must carry the same index. It may be implemented as one tagged map or one map per kind, but
 the generic schema and serializer validate the dependency.
 
-`ConformanceIdentity.id = ContentId(ConformanceIdentity.key)`. The ID is therefore derived from
-provider identity and its concrete or generic target classifier. The target alone is not an
+`WitnessTableIdentity.id = ContentId(WitnessTableIdentity.key)`. The ID is therefore derived from
+provider identity and its concrete or generic witness-table form. The target alone is not an
 ID because two reachable providers for the same pair must remain distinguishable until coherence
 selects one or diagnoses ambiguity.
 
-`IFC-CON-001`: Publishing a `ConformanceIdentity` publishes no positive proof that the target
+`IFC-CON-001`: Publishing a `WitnessTableIdentity` publishes no positive proof that the target
 conforms. A table-backed witness can discharge a constraint, pack an existential, or dispatch only
 after its required definition is validated. Bound parameters, specializations, keyed lookups, and
 existential extractions are positive witness values under their own chapter 14 constructors; they
-do not require manufacturing a new `ConformanceDefinition`.
+do not require manufacturing a new `WitnessTableDefinition`.
 
 `IFC-CON-002`: The identity/definition records form an immutable graph. Serialization permits
 forward and SCC references, but graph representability does not legalize circular reasoning.
 
-`IFC-CON-003`: A successful definition contains one kind-correct `WitnessEntryKey<K>` and payload
-for every active requirement slot and one base-conformance projection for every active refinement
+`IFC-CON-003`: A successful definition contains one kind-correct `InterfaceRequirementKeyOf<K>` and payload
+for every active requirement slot and one base-conformance projection for every active base-interface
 edge. It contains no recovery entry and no unresolved synthesis plan.
 
 `IFC-CON-004`: A successful definition contains no `PendingLocal` effect or capability check in
@@ -1096,51 +1104,51 @@ the provisional requirement map and validating its effective contracts are separ
 query products.
 
 `IFC-CON-005`: An explicit provider is identified by the canonical declaration's `DeclId` plus its
-`ConformanceClassifier`. A generic classifier contains the alpha-normalized binder and unspecialized
+`WitnessTableForm`. A generic form contains the alpha-normalized binder and unspecialized
 target pattern, so `S<T> : I<T>` has one provider/table identity; `S<float> : I<float>` is a
 `SpecializedWitnessTable` value and not a second provider. No specialization frame or evidence for
 the binder being defined enters provider identity. Bound generic evidence is represented directly
-by `BoundWitnessParameter`, never by a `ConformanceProvider`. A synthesized provider names the exact
+by `DeclaredSubtypeWitness`, never by a `ConformanceProvider`. A synthesized provider names the exact
 `SynthesizedSemanticId` output, not merely a group that may contain several conformances.
 
-`IFC-CON-006`: A `ValidatedConformanceRef` is constructible only while freezing a semantic snapshot
-that contains a successful, complete `ConformanceDefinition` at the stored identity and revision.
+`IFC-CON-006`: A `ValidatedWitnessTableRef` is constructible only while freezing a semantic snapshot
+that contains a successful, complete `WitnessTableDefinition` at the stored identity and revision.
 Resolution rechecks that the definition's `identity` and `revision` equal the reference. An
-allocated `ConformanceId`, a recovered definition, or a definition containing a pending contract
-check cannot be converted to this definition reference. The definition's `classifier` equals the
-identity key's classifier. A snapshot may freeze mutually
+allocated `WitnessTableId`, a recovered definition, or a definition containing a pending contract
+check cannot be converted to this definition reference. The definition's `form` equals the
+identity key's form. A snapshot may freeze mutually
 referencing definitions together after validating the whole SCC; this is why the revision names a
 frozen definition record rather than recursively hashing its referenced definitions. The snapshot
-assigns `definitionOrdinal` after canonical `ConformanceId` sorting, never task completion order.
-`ConformanceDefinitionPublication` requires its definition identity/revision to equal its
+assigns `definitionOrdinal` after canonical `WitnessTableId` sorting, never task completion order.
+`WitnessTableDefinitionPublication` requires its definition identity/revision to equal its
 `definitionReference` exactly. Its witness operation is `GenericWitnessTable(identity)` for a
-`GenericConformance` classifier and `WitnessTableValue(identity)` for a `ConcreteConformance`
+`GenericWitnessTableForm` form and `WitnessTable(identity)` for a `ConcreteWitnessTableForm`
 otherwise; its resolution set maps that identity to the same `definitionReference`.
 
-`IFC-CON-007`: `identityOf(ValidatedConformanceRef(id, revision)) = id`. The revision is an exact
+`IFC-CON-007`: `identityOf(ValidatedWitnessTableRef(id, revision)) = id`. The revision is an exact
 dependency stamp used to resolve and invalidate definition consumers; it is not a proof value and
-never enters `InterfaceSubtypeWitnessId`. Canonical type, symbol, specialization-frame,
+never enters `SubtypeWitnessId`. Canonical type, symbol, specialization-frame,
 exported-signature, and mangled identity use stable semantic IDs, because a new immutable snapshot
 of the same canonical provider is not a new language-level conformance. Serialization retains the
 revision in witness resolution sets for dependency checking but excludes it from wire-stable
 witness identity.
 
-`IFC-CON-008`: `BuildRequirementMap` returns `ProvisionalRequirementEvidenceMap`, whose default
+`IFC-CON-008`: `BuildRequirementDictionary` returns `ProvisionalRequirementDictionary`, whose default
 plans and witness uses are construction-stage and whose callable checks may be pending. Effect and
-capability validation return their named refinement maps without changing keys, guards, candidate
+capability validation return their named validated dictionaries without changing keys, guards, candidate
 identity, or non-contract evidence. Combining them requires byte-identical common input and yields
-`FullyValidatedConstructionRequirementEvidenceMap`. During atomic conformance freeze,
-`publishRequirementEvidenceMap` applies the `Construction -> Published` witness-reference rewrite
+`FullyValidatedConstructionRequirementDictionary`. During atomic conformance freeze,
+`publishRequirementDictionary` applies the `Construction -> Published` witness-reference rewrite
 to every payload, including nested direct witnesses/proofs, adapter conversions and access
 bindings, builtin witnesses, default-plan self references, and derived witnesses of inherited
-`ConformanceProjectionAt<Construction>`, and returns `RequirementEvidenceMap`; it changes no other
+`WitnessTableProjectionAt<Construction>`, and returns `RequirementDictionary`; it changes no other
 semantic field. A failed rewrite, pending check, error satisfaction, or uncovered guard prevents
 definition/reference publication.
 
 `IFC-CON-009`: A construction-stage projection's `derived` witness targets the conformance whose
-map contains it. Its `InterfaceRefinementProof.path` is exactly the singleton `[refinement]`; the
+dictionary contains it. Its `InterfaceRefinementProof.path` is exactly the singleton `[inheritance]`; the
 proof's derived/base endpoints equal that step's endpoints and the step starts at the interface
-target of `derived`. Thus it proves one declared refinement edge, not an unrelated multi-step route
+target of `derived`. Thus it proves one declared base-interface edge, not an unrelated multi-step route
 that merely contains the key. `projectedWitnessId` constructs exactly one
 `LookupSubtypeWitness` with that key. There is no
 independently selected base proof and no transitive-witness node. Publication rewrites only the
@@ -1158,18 +1166,18 @@ FindConformance(type, interface, semanticEnvironment, genericEvidence)
     -> ConformanceSearchResult
 
 ConformanceSearchResult =
-    Unique(WitnessCallRef<Published>)
+    Unique(SubtypeWitnessRef<Published>)
   | NotFound(ConformanceFailure)
   | Ambiguous(NonEmpty<ConformanceCandidate>)
-  | Recovered(ConformanceId, ErrorId)
+  | Recovered(WitnessTableId, ErrorId)
 
 ConformanceCandidateSource =
-    BoundWitnessCandidate(witness: WitnessCallRef<Published>)
-  | TableProviderCandidate(identity: ConformanceIdentity)
+    BoundWitnessCandidate(witness: SubtypeWitnessRef<Published>)
+  | TableProviderCandidate(identity: WitnessTableIdentity)
 
 ConformanceCandidate = {
     source: ConformanceCandidateSource,
-    target: ConformanceTarget,
+    target: SubtypeWitnessTarget,
     applicability: BooleanCapabilityPredicate,
     genericConditions: GenericConditionSet,
     semanticEnvironment: SemanticEnvironmentId,
@@ -1181,7 +1189,7 @@ ConformanceFailureReason =
     UnproductiveSearchGrowth
 
 ConformanceFailure = {
-    target: ConformanceTarget,
+    target: SubtypeWitnessTarget,
     reason: ConformanceFailureReason,
     considered: NodeList<ConformanceCandidate>,
     dependencyTrace: NodeList<DependencyEdge>,
@@ -1193,9 +1201,10 @@ The search considers these sources:
 
 1. evidence explicitly bound by the current generic context;
 2. explicit conformances declared on the type or in a reachable extension;
-3. projections of an already available conformance through interface refinement;
+3. projections of an already available conformance through base-interface inheritance;
 4. builtin conformance rules registered by the versioned standard environment; and
-5. named implicit-synthesis rules, such as the callable conformance of a checked lambda closure.
+5. named implicit-synthesis rules, such as the callable conformance of a checked lambda
+   environment.
 
 There is no general structural or name-only conformance inference. Adding one requires a named
 language rule and a distinct provider kind.
@@ -1226,7 +1235,7 @@ proof records both pattern matching and constraint implication. If neither provi
 specializes the other, they remain ambiguous.
 
 `IFC-FIND-007`: `Unique` contains a stable witness value plus all definition resolutions that value
-requires, not the identity allocated by `DeclareConformanceIdentity`. If a selected table provider's
+requires, not the identity allocated by `DeclareWitnessTableIdentity`. If a selected table provider's
 definition is still under construction, `FindConformance` is blocked on that definition or
 participates in proof-cycle analysis; it never reports the allocated identity as successful
 evidence. `Recovered` retains a bare identity only for diagnostic graph continuity and cannot
@@ -1234,13 +1243,13 @@ discharge a constraint.
 
 `IFC-FIND-008`: Every considered candidate's stored target equals the search target after its
 recorded generic conditions are solved, and its source is either a target-equal bound witness or a
-table provider whose classifier specializes to that target. Its applicability predicate belongs to
+table provider whose witness-table form specializes to that target. Its applicability predicate belongs to
 the query's capability universe and semantic environment. `Ambiguous` contains the maximal
 applicable candidates after source-key deduplication (`witness` ID or provider identity); `NotFound`
 retains all considered candidates and the dependency trace that rejected them.
 
 `IFC-FIND-009`: Evidence explicitly bound by the canonical generic context returns
-`BoundWitnessParameter(binder, slot)` directly. Selecting an unspecialized generic conformance
+`DeclaredSubtypeWitness(binder, slot)` directly. Selecting an unspecialized generic conformance
 returns `GenericWitnessTable(provider)`; applying arguments and keyed constraint witnesses returns
 `SpecializedWitnessTable`. Neither case manufactures a nongeneric frozen conformance reference for
 an abstract proof.
@@ -1260,9 +1269,9 @@ MatchRequirement(conformanceId, slot, capabilityRegion, candidateEnvironment)
     -> CheckResult<RequirementMatch<K>>
 
 RequirementMatch<K> =
-    Exact(payload: DirectWitnessAt<K, Construction>,
+    Exact(payload: RequirementWitnessPayloadAt<K, Construction>,
           proof: RequirementCompatibilityProofAt<K, Construction>)
-  | Adaptable(candidate: DirectWitnessAt<K, Construction>,
+  | Adaptable(candidate: RequirementWitnessPayloadAt<K, Construction>,
               plan: RequirementAdapterPlanAt<K, Construction>)
   | Defaulted(default: InstantiatedDefault<K>, plan: DefaultUsePlan<K, Construction>)
   | Builtin(rule: RuleId, plan: BuiltinWitnessPlan<K>)
@@ -1272,10 +1281,10 @@ RequirementMatch<K> =
   | Recovered(error: ErrorId, placeholder: RecoveryWitness<K>)
 
 RequirementCandidateIdentity =
-    DeclarationCandidate(declaration: CanonicalDeclRef)
-  | ExplicitMappingCandidate(owner: CanonicalDeclRef,
+    DeclCandidate(declaration: DeclRef)
+  | ExplicitMappingCandidate(owner: DeclRef,
                              requirement: SomeRequirementKey)
-  | InheritedCandidate(witness: InterfaceSubtypeWitnessId,
+  | InheritedCandidate(witness: SubtypeWitnessId,
                        requirement: SomeRequirementKey)
   | DefaultCandidate(requirement: SomeRequirementKey)
   | BuiltinCandidate(rule: RuleId, inputs: CanonicalArguments)
@@ -1286,9 +1295,9 @@ DefaultShadowPolicy =
 
 RequirementCandidate<K> = {
     identity: RequirementCandidateIdentity,
-    application: ExactApplication(payload: DirectWitnessAt<K, Construction>,
+    application: ExactApplication(payload: RequirementWitnessPayloadAt<K, Construction>,
                                   proof: RequirementCompatibilityProofAt<K, Construction>)
-               | AdapterApplication(payload: DirectWitnessAt<K, Construction>,
+               | AdapterApplication(payload: RequirementWitnessPayloadAt<K, Construction>,
                                     plan: RequirementAdapterPlanAt<K, Construction>)
                | DefaultApplication(default: InstantiatedDefault<K>,
                                     plan: DefaultUsePlan<K, Construction>)
@@ -1299,20 +1308,20 @@ RequirementCandidate<K> = {
 ```
 
 `capabilityRegion` is a canonical `BooleanCapabilityPredicate` within the conformance's availability
-formula. `BuildRequirementMap` obtains a match for every region in which candidates' optional
+formula. `BuildRequirementDictionary` obtains a match for every region in which candidates' optional
 concrete availability can change the applicable set, then canonicalizes the guarded results with
 `WIT-ALG-005`. Ordinary `inferredCapabilities` never partition the candidate set.
 
 The sum is indexed by the slot kind. For example, an associated-type match contains a canonical
 type and constraint proofs; a callable match contains a canonical declaration reference and a
 callable-signature proof; a nested-conformance match contains a stage-appropriate
-`WitnessCallRef<S>` whose semantic operand is an `InterfaceSubtypeWitnessId`.
+`SubtypeWitnessRef<S>` whose semantic operand is an `SubtypeWitnessId`.
 
 Candidate discovery uses the requirement's declared lookup role and the conformance declaration's
 explicit mappings. It retains inaccessible and wrong-kind candidates as structured rejection data
 for diagnostics. Candidate evaluation then:
 
-1. instantiates the requirement signature with concrete `Self` and interface arguments;
+1. instantiates the requirement signature with concrete `This` and interface arguments;
 2. checks declaration/value kind;
 3. checks generic binder and substitution compatibility;
 4. compares the full signature, including receiver presence/mode/traits, expanded parameter-slot
@@ -1375,19 +1384,19 @@ identity, never discovery order or an address.
 Successful matching and any required synthesis produce the following typed evidence:
 
 ```text
-RequirementSatisfactionAt<K, S: WitnessUseStage> =
-    Direct(payload: DirectWitnessAt<K, S>,
+RequirementWitnessAt<K, S: WitnessTableState> =
+    Direct(payload: RequirementWitnessPayloadAt<K, S>,
            proof: RequirementCompatibilityProofAt<K, S>)
-  | Adapted(declaration: CanonicalDeclRef, plan: RequirementAdapterPlanAt<K, S>)
-  | Default(entryPoint: Option<CanonicalDeclRef>, plan: DefaultUsePlan<K, S>)
+  | Adapted(declaration: DeclRef, plan: RequirementAdapterPlanAt<K, S>)
+  | Default(entryPoint: Option<DeclRef>, plan: DefaultUsePlan<K, S>)
   | Builtin(payload: BuiltinWitnessAt<K, S>)
-  | Inherited(projection: ConformanceProjectionAt<S>, nestedKey: RequirementKey<K>)
+  | Inherited(projection: WitnessTableProjectionAt<S>, nestedKey: RequirementKey<K>)
   | Reused(target: RequirementKey<K>, proof: RequirementReuseProof<K>)
   | OptionalAbsent(proof: OptionalAbsenceProof<K>)
   | Error(error: ErrorId, placeholder: RecoveryWitness<K>)
 
-ProvisionalRequirementSatisfaction<K> = RequirementSatisfactionAt<K, Construction>
-RequirementSatisfaction<K> = RequirementSatisfactionAt<K, Published>
+ProvisionalRequirementWitness<K> = RequirementWitnessAt<K, Construction>
+RequirementWitness<K> = RequirementWitnessAt<K, Published>
 ```
 
 The schema specializes this sum by kind; impossible variants are not constructible. A nested
@@ -1418,9 +1427,9 @@ kind/signature compatibility, so witness reuse cannot hide a diamond conflict.
 
 ## Defaults
 
-A default is checked once under the interface's generic binder and abstract `Self`. Its checked
+A default is checked once under the interface's generic binder and abstract `This`. Its checked
 form records all requirement dispatches it performs; applying it to a conformance substitutes the
-interface instance and supplies that conformance's identity for `Self` dispatch.
+interface instance and supplies that conformance's identity for `This` dispatch.
 
 Defaults may be:
 
@@ -1430,12 +1439,12 @@ Defaults may be:
 - a builtin plan registered by a standard-environment rule.
 
 `IFC-DEF-001`: A default does not itself prove that a type conforms. It is one candidate for one
-requirement slot after the conformance identity and instantiated slot are known.
+requirement slot after the witness-table identity and instantiated slot are known.
 
 `IFC-DEF-002`: A default member that needs a concrete entry point is rebound or thunked through a
 `DefaultUsePlan`; it is not cloned and mutated in the source interface declaration.
 
-`IFC-DEF-003`: Inherited defaults at incomparable refinement paths are ambiguous unless they are
+`IFC-DEF-003`: Inherited defaults at incomparable base-interface paths are ambiguous unless they are
 the same canonical default under equal substitution or an explicit override resolves them.
 
 `IFC-DEF-004`: A rebound default body may call other requirements through its construction-stage
@@ -1449,7 +1458,7 @@ Synthesis cannot reconstruct evidence from argument position or re-run conforman
 possibly different environment.
 
 `IFC-DEF-006`: `DefaultUsePlan.instantiated` is the sole owner of the default's specialization
-frames; the plan does not copy them. In `RequirementSatisfaction::Default`, `entryPoint` denotes
+frames; the plan does not copy them. In `RequirementWitness::Default`, `entryPoint` denotes
 only a synthesized callable entry point, never the source default declaration held by
 `DefaultImplementation`. It is `Some` exactly when `entryPointRequired` is true, has the exact
 required signature, and its body interprets the plan. With no entry point, the plan's kind-indexed
@@ -1460,9 +1469,9 @@ required signature, and its body interprets the plan. With no entry point, the p
 resolutions or an `OperationalWitnessDefinition` authorized by the current construction scope.
 Atomic freeze applies a total identity-preserving rewrite
 `publishDefaultPlan : DefaultUsePlan<K, Construction> -> DefaultUsePlan<K, Published>`: each
-operational resolution becomes the newly frozen definition reference for the same `ConformanceId`,
+operational resolution becomes the newly frozen definition reference for the same `WitnessTableId`,
 and the witness ID and every other plan field remain unchanged. Only the published form may occur
-in `RequirementSatisfaction<K>`.
+in `RequirementWitness<K>`.
 
 ## Associated type projections
 
@@ -1475,13 +1484,13 @@ projections equal. Definition revisions and source provenance are dependencies o
 not operands in canonical `TypeId` hashing.
 
 When normalizing a published `CanonicalTypeRecord`, the caller supplies a
-`WitnessCallRef<Published>` made from the projection's witness and
+`SubtypeWitnessRef<Published>` made from the projection's witness and
 `record.directWitnessDependencies[projection.witness]`. Normalization follows the witness
-operation; it never reruns conformance search or reconstructs a refinement path from endpoint
+operation; it never reruns conformance search or reconstructs a base-interface path from endpoint
 types.
 
 ```text
-W : WitnessCallRef<Published>
+W : SubtypeWitnessRef<Published>
 W.witness = w
 targetOf(W).subtype = B
 targetOf(W).superInterface = k.view
@@ -1514,12 +1523,12 @@ associated type cycle; it does not normalize to a provisional arbitrary type.
 `WIT-PROJ-006`: Constructing or deserializing `AssociatedTypeProjection(B, k, w)` validates the
 same three endpoint premises shown in `WIT-PROJ-001`: `B` is exactly the witness subtype, `k.view`
 is exactly its super-interface instance, and `k` is the active kind-correct associated-type entry
-under that view/refinement path. An unrelated base or requirement cannot be retained as a hashed
+under that view/base-interface path. An unrelated base or requirement cannot be retained as a hashed
 operand while normalization consults only the witness. Failed endpoint validation yields an error
 type and never performs witness lookup.
 
 `WIT-PROJ-004`: Equality of unresolved projections requires equal base type, canonical requirement
-key, and `InterfaceSubtypeWitnessId`, or an explicit type-equality proof. Definition revisions do
+key, and `SubtypeWitnessId`, or an explicit type-equality proof. Definition revisions do
 not change canonical type identity; equal endpoint types or declaration names are not enough.
 
 `WIT-PROJ-005`: All guarded satisfactions for one associated-type key must produce semantically
@@ -1534,18 +1543,18 @@ guards and their capability-universe revision.
 Requirement maps have a partial union, not last-write-wins insertion:
 
 ```text
-RequirementEvidenceConflictAt<K, S: WitnessUseStage> = {
-    entry: WitnessEntryKey<K>,
+RequirementEvidenceConflictAt<K, S: WitnessTableState> = {
+    entry: InterfaceRequirementKeyOf<K>,
     overlap: BooleanCapabilityPredicate,
-    left: RequirementSatisfactionAt<K, S>,
-    right: RequirementSatisfactionAt<K, S>,
+    left: RequirementWitnessAt<K, S>,
+    right: RequirementWitnessAt<K, S>,
     reason: DistinctEvidence | FailedReuseProof(ErrorId)
 }
 
-SomeRequirementEvidenceConflictAt<S: WitnessUseStage> =
+SomeRequirementEvidenceConflictAt<S: WitnessTableState> =
     exists K: RequirementKind . RequirementEvidenceConflictAt<K, S>
 
-MapMergeResultAt<S: WitnessUseStage> = Compatible(RequirementEvidenceMapAt<S>)
+MapMergeResultAt<S: WitnessTableState> = Compatible(RequirementDictionaryAt<S>)
     | Conflicts(NonEmpty<SomeRequirementEvidenceConflictAt<S>>)
 
 mergeMaps<S>(M,N) =
@@ -1562,7 +1571,7 @@ is a separate total stage rewrite after the combined construction map validates.
 
 `WIT-ALG-001`: At either witness-use stage, `mergeMaps<S>` is commutative and associative on
 compatible maps. A conflict is a typed `MapMergeResultAt<S>`, never a
-`RequirementSatisfactionAt<K,S>`, and cannot depend on insertion order.
+`RequirementWitnessAt<K,S>`, and cannot depend on insertion order.
 
 `WIT-ALG-002`: Conformance substitution transports each witness-entry key by applying
 `IFC-KEY-002` to its enclosed requirement key, substitutes every payload and proof, and retains
@@ -1577,7 +1586,7 @@ identical evidence on their overlap and must cover the conformance's availabilit
 `LookupSubtypeWitness` for that key. Diamond base paths therefore remain distinguishable even when
 their nested witness graphs share storage.
 
-`WIT-ALG-005`: `ConditionalSatisfaction` is a canonical partition over chapter 9's full
+`WIT-ALG-005`: `ConditionalRequirementWitness` is a canonical partition over chapter 9's full
 `BooleanCapabilityPredicate` domain, not the positive requirement-formula domain. Normalization may
 therefore split overlaps using complement, merges adjacent/equivalent evidence regions, removes
 unsatisfiable regions, and sorts by canonical predicate then evidence identity. A consumer supplies
@@ -1596,8 +1605,8 @@ SynthesisKey = {
 }
 
 SynthesisOutputKind =
-    DeclarationOutput | ConformanceIdentityOutput | ConformanceDefinitionOutput |
-    WitnessOutput | SemanticValueOutput
+    DeclOutput | WitnessTableIdentityOutput | WitnessTableDefinitionOutput |
+    WitnessOutput | SchemaValueOutput
 
 SynthesisOutputRole = {
     kind: SynthesisOutputKind,
@@ -1612,14 +1621,14 @@ SynthesizedSemanticId = {
 }
 
 SynthesizedDeclId = {
-    semantic: SynthesizedSemanticId where semantic.role.kind = DeclarationOutput,
+    semantic: SynthesizedSemanticId where semantic.role.kind = DeclOutput,
     declaration: DeclId
 }
 
 SemanticDependency =
     QueryDependency(QueryKey)
-  | DeclarationDependency(CanonicalDeclRef)
-  | ConformanceDependency(ValidatedConformanceRef)
+  | DeclDependency(DeclRef)
+  | WitnessTableDependency(ValidatedWitnessTableRef)
   | SynthesisDependency(SynthesisKey)
 
 SynthesisPlan<K> = {
@@ -1637,14 +1646,14 @@ SynthesisConstruction = {
     key: SynthesisKey,
     declarations:
         CanonicallyOrderedMap<SynthesizedDeclId, ElaboratedDeclAt<Construction>>,
-    conformanceIdentities:
-        CanonicallyOrderedMap<ConformanceId, ConformanceIdentity>,
+    witnessTableIdentities:
+        CanonicallyOrderedMap<WitnessTableId, WitnessTableIdentity>,
     provisionalRequirements:
-        CanonicallyOrderedMap<ConformanceId, ProvisionalRequirementEvidenceMap>,
+        CanonicallyOrderedMap<WitnessTableId, ProvisionalRequirementDictionary>,
     effectUseGraphs:
-        CanonicallyOrderedMap<CanonicalDeclRef, EffectUseGraph<Construction>>,
+        CanonicallyOrderedMap<DeclRef, EffectUseGraph<Construction>>,
     capabilityUseGraphs:
-        CanonicallyOrderedMap<CanonicalDeclRef, CapabilityUseGraph<Construction>>,
+        CanonicallyOrderedMap<DeclRef, CapabilityUseGraph<Construction>>,
     contractCompletions: ContractCompletionMap,
     uses: NodeMap<AnyNodeId, SynthesizedSemanticId>,
     dependencies: NodeList<SemanticDependency>
@@ -1653,8 +1662,8 @@ SynthesisConstruction = {
 SynthesisGroupDraft = {
     key: SynthesisKey,
     declarations: CanonicallyOrderedMap<SynthesizedDeclId, ElaboratedDeclAt<Published>>,
-    conformanceIdentities: CanonicallyOrderedMap<ConformanceId, ConformanceIdentity>,
-    conformanceDefinitions: CanonicallyOrderedMap<ConformanceId, ConformanceDefinition>,
+    witnessTableIdentities: CanonicallyOrderedMap<WitnessTableId, WitnessTableIdentity>,
+    witnessTableDefinitions: CanonicallyOrderedMap<WitnessTableId, WitnessTableDefinition>,
     uses: NodeMap<AnyNodeId, SynthesizedSemanticId>,
     dependencies: NodeList<SemanticDependency>
 }
@@ -1662,8 +1671,8 @@ SynthesisGroupDraft = {
 SynthesisGroup = {
     key: SynthesisKey,
     declarations: CanonicallyOrderedMap<SynthesizedDeclId, ElaboratedDeclAt<Published>>,
-    conformanceIdentities: CanonicallyOrderedMap<ConformanceId, ConformanceIdentity>,
-    conformanceDefinitions: CanonicallyOrderedMap<ConformanceId, ConformanceDefinition>,
+    witnessTableIdentities: CanonicallyOrderedMap<WitnessTableId, WitnessTableIdentity>,
+    witnessTableDefinitions: CanonicallyOrderedMap<WitnessTableId, WitnessTableDefinition>,
     uses: NodeMap<AnyNodeId, SynthesizedSemanticId>,
     dependencies: NodeList<SemanticDependency>
 }
@@ -1672,8 +1681,8 @@ SynthesisGroup = {
 Output identities derive from `(group key, output role, requirement key)`, not allocation or task
 order. A rule registers a canonical `(stableName, ordinal, kind)` for each output role; two outputs in one
 group cannot share the same role and requirement. `SynthesisGroupDraft` does not mean a partial
-conformance definition: it is an immutable, unpublished publication candidate whose
-`ConformanceDefinition` values are already complete.
+witness-table definition: it is an immutable, unpublished publication candidate whose
+`WitnessTableDefinition` values are already complete.
 
 `SYN-GRP-000`: `SynthesisOutputRole` is provenance-free canonical identity. A generated
 declaration may separately carry a source-facing `Name` and `Origin::Synthesized`, but neither is
@@ -1687,7 +1696,7 @@ or provisional requirement map may occur outside this value and its named valida
 
 `freeze(plans)` first builds `SynthesisConstruction`, canonicalizes identities, and reserves their
 definition-revision coordinates
-without constructing a `ValidatedConformanceRef`. It then validates generated bodies, merged
+without constructing a `ValidatedWitnessTableRef`. It then validates generated bodies, merged
 requirement fragments, and the whole raw-ID proof-dependency graph. Private provisional handles are
 permitted in construction-stage witness resolution sets inside this transaction but cannot escape
 in a published semantic node or query result. If
@@ -1717,28 +1726,30 @@ one another's provisional IDs.
 body is a direct interpretation of the validated adapter plan and cannot perform lookup, overload
 resolution, conversion search, or conformance discovery.
 
-`SYN-ADP-002`: A conformance definition is frozen only after all required synthesis plans have
+`SYN-ADP-002`: A witness-table definition is frozen only after all required synthesis plans have
 been incorporated into its group. An `Adaptable` match is not itself a witness-map entry.
 
 ## Lambda callable and interface-wrapper synthesis
 
-A typed lambda uses one atomic synthesis group containing its closure type, capture fields,
-initializer, invoke method, callable-conformance identity and definition, and the closure value's
+A typed lambda uses one atomic synthesis group containing its environment type, capture fields,
+initializer, invoke method, callable-conformance witness-table identity and definition, and the lambda value's
 uses. Capture discovery runs on the bound body; capture mode, lifetime, and result typing run on the
 typed body before this group is planned.
 
 `IFC-LAM-001`: The callable conformance target and call requirement key come from the versioned
-standard environment, and runtime invocation uses its `CallableEntry` `WitnessRuntimeEntryKey`.
+standard environment, and runtime invocation uses its `CallableEntry` `RuntimeInterfaceRequirementKey`.
 The invoke witness is matched by the same kind-indexed rules as a
-source-written conformance; closure field order is never witness identity.
+source-written conformance; lambda-environment field order is never witness identity.
 
 `IFC-LAM-002`: Lambda result inference joins all reachable returns plus normal fall-through, with
-`Never` and recovery handled explicitly, before the callable signature or conformance is frozen.
+`BottomType` and recovery handled explicitly, before the callable signature or conformance is
+frozen.
 
 `IFC-LAM-003`: A captureless lambda may convert to a raw function type only through a named
 `CapturelessFunctionThunk` synthesis rule. The lambda's atomic group is keyed by the lambda and
-required raw function signature and contains the thunk plus any closure artifacts required by that
-elaboration. The thunk does not change the closure's callable conformance.
+required raw function signature and contains the thunk plus any lambda-environment artifacts
+required by that elaboration. The thunk does not change the environment type's callable
+conformance.
 
 An interface wrapper is similarly explicit:
 
@@ -1746,30 +1757,30 @@ An interface wrapper is similarly explicit:
 WrapperRepresentation =
     InlineOwned
   | BoxedOwned(boxType: TypeId, allocationRule: RuleId)
-  | BorrowedReference(access: AccessMode)
+  | BorrowedReference(access: StorageAccessMode)
   | SharedHandle(handleType: TypeId)
 
 WrapperInitializationPlan =
     InitializeWithConversion(conversion: ConversionPlan<Construction>)
-  | CallInitializer(callee: CanonicalDeclRef,
+  | CallInitializer(callee: DeclRef,
                     signature: CallableSignatureId,
-                    arguments: NodeList<AccessPlanBindingAt<Construction>>)
+                    arguments: NodeList<StorageAccessPlanBindingAt<Construction>>)
   | BuiltinInitializer(rule: RuleId, inputs: CanonicalArguments)
 
 WrapperCopyPlan =
     CopyForbidden
   | TrivialCopy(rule: RuleId)
-  | CopyWith(callee: CanonicalDeclRef, signature: CallableSignatureId)
+  | CopyWith(callee: DeclRef, signature: CallableSignatureId)
 
 WrapperMovePlan =
     MoveForbidden
   | TrivialMove(rule: RuleId)
-  | MoveWith(callee: CanonicalDeclRef, signature: CallableSignatureId)
+  | MoveWith(callee: DeclRef, signature: CallableSignatureId)
 
 WrapperDestroyPlan =
     NoDestroy
   | TrivialDestroy(rule: RuleId)
-  | DestroyWith(callee: CanonicalDeclRef, signature: CallableSignatureId)
+  | DestroyWith(callee: DeclRef, signature: CallableSignatureId)
 
 WrapperStoragePlan = {
     sourceType: TypeId,
@@ -1786,18 +1797,18 @@ LifetimePlan =
     OwnedStorage(wrapperLifetime: LifetimeId)
   | BorrowedStorage(sourceLifetime: LifetimeId,
                     wrapperLifetime: LifetimeId,
-                    access: AccessMode,
+                    access: StorageAccessMode,
                     outlives: OutlivesProof)
   | SharedStorage(wrapperLifetime: LifetimeId,
-                  retain: CanonicalDeclRef,
-                  release: CanonicalDeclRef)
+                  retain: DeclRef,
+                  release: DeclRef)
 
 InterfaceWrapperPlan = {
     sourceType: TypeId,
     targetInterface: InterfaceInstanceKey,
     storage: WrapperStoragePlan,
     requirementPlans:
-        DependentNodeMap<K: RequirementKind, WitnessEntryKey<K>, SynthesisPlan<K>>,
+        DependentNodeMap<K: RequirementKind, InterfaceRequirementKeyOf<K>, SynthesisPlan<K>>,
     lifetime: LifetimePlan
 }
 ```
@@ -1824,22 +1835,22 @@ lifetime. Shared and boxed cleanup must be represented by the matching destroy p
 retain, release, allocation, or destruction may be added by IR lowering.
 
 `SYN-WRP-005`: `requirementPlans` is total for the target interface's active
-`WitnessEntryKey<K>` values, and every map key encloses the same requirement key stored in its
+`InterfaceRequirementKeyOf<K>` values, and every map key encloses the same requirement key stored in its
 `SynthesisPlan<K>`. Freeze interprets those plans into the wrapper conformance's all-kind witness
 map; map order is not declaration or ABI order.
 
 ## Existentials and witness use
 
-Packing a value as an existential requires a published interface-subtype witness. The package
-stores the value representation plus `WitnessCallRef<Published>`; this may denote a static table,
+Packing a value as an existential requires a published `SubtypeWitness`. The package
+stores the value representation plus `SubtypeWitnessRef<Published>`; this may denote a static table,
 a specialized generic table, a bound witness supplied at runtime, or a lookup result. Opening
 creates a fresh `OpenedTypeId`, a value of that abstract type, and an
-`OpenedExistentialWitness` projected from the package.
+`ExtractExistentialSubtypeWitness` projected from the package.
 
 `WIT-USE-001`: A runtime witness member lookup is
-`(WitnessCallRef<Published>, WitnessRuntimeEntryKey)`. The resulting `CallableValue` records direct,
-adapted, default, builtin, or inherited dispatch. Dispatch is not recovered from `FunctionType`,
-declaration nesting, witness-table position, or an allocated-but-unvalidated conformance identity.
+`(SubtypeWitnessRef<Published>, RuntimeInterfaceRequirementKey)`. The resulting `CallableValue` records direct,
+adapted, default, builtin, or inherited dispatch. Dispatch is not recovered from `FuncType`,
+declaration nesting, witness-table position, or an allocated-but-unvalidated witness-table identity.
 
 `WIT-USE-002`: Projecting a derived conformance to a refined interface follows the named
 `RefinementStepKey`. In a diamond, choosing a base interface without a path is ambiguous unless a
@@ -1849,44 +1860,44 @@ proof establishes that all paths yield equivalent evidence.
 retains the requirement key-to-slot map. Slot number is an encoding, never semantic identity.
 
 `WIT-USE-004`: A construction-stage generated/default body may form
-`(WitnessCallRef<Construction>, WitnessRuntimeEntryKey)`. An
-`OperationalWitnessDefinition(OperationalConformanceRef)` resolution is valid only when its scope
+`(SubtypeWitnessRef<Construction>, RuntimeInterfaceRequirementKey)`. An
+`OperationalWitnessDefinition(OperationalWitnessTableRef)` resolution is valid only when its scope
 is the query or synthesis transaction that owns that body and its identity is one of the
 transaction's allocated conformances. It may appear in construction-stage dispatch, provisional
 nested witnesses, projections, and effect/capability use graphs, but cannot escape into a published
 AST, existential package, or IR. Atomic freeze replaces only that resolution with
-`FrozenWitnessDefinition(ValidatedConformanceRef)` after the referenced definition validates;
+`FrozenWitnessDefinition(ValidatedWitnessTableRef)` after the referenced definition validates;
 otherwise the containing body and transaction are discarded. The stable witness ID is unchanged,
-and a published witness call accepts only `WitnessCallRef<Published>`.
+and a published witness call accepts only `SubtypeWitnessRef<Published>`.
 
 ## Scheduler interaction and proof cycles
 
 Interface checking is decomposed into policy-homogeneous queries:
 
-| Query                                                      | Result                                             | Cycle policy                                                                       |
-| ---------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `BuildInterfaceContract(decl)`                             | direct contract                                    | reject structural header cycles                                                    |
-| `EnumerateRequirementSlots(instance)`                      | instantiated slots                                 | reject refinement cycles                                                           |
-| `DeclareConformanceIdentity(provider,target)`              | identity                                           | nominal identity allocation                                                        |
-| `FindConformance(target,environment,evidence)`             | search result                                      | reject ungrounded search cycles                                                    |
-| `MatchRequirement(conformance,key,region)`                 | kind-indexed match                                 | inherit dependency failure; no provisional match                                   |
-| `BuildRequirementMap(conformance)`                         | `ProvisionalRequirementEvidenceMap`                | reject unproductive proof cycles                                                   |
-| `ValidateConformanceEffects(conformance,provisional)`      | `EffectValidatedRequirementEvidenceMap`            | `Reject`; requests only stabilized effect results and diagnoses false promises     |
-| `ValidateConformanceCapabilities(conformance,provisional)` | `CapabilityValidatedRequirementEvidenceMap`        | `Reject`; requests only stabilized capability results and diagnoses false promises |
-| `CombineRequirementMapValidation(effectMap,capabilityMap)` | `FullyValidatedConstructionRequirementEvidenceMap` | reject unequal provisional inputs                                                  |
-| `BuildConformanceDefinition(id,validatedMap)`              | `ConformanceDefinitionPublication`                 | reject proof cycles unless a named productive rule applies                         |
-| `NormalizeAssociatedTypeProjection(projection,evidence)`   | type                                               | reject mismatched evidence and unguarded projection/alias cycles                   |
-| `PlanSynthesis(cause)`                                     | synthesis plan/group                               | reject synthesis-key recursion                                                     |
-| `PublishSynthesisGroup(key)`                               | frozen group                                       | atomic publication barrier                                                         |
+| Query                                                                           | Result                                            | Cycle policy                                                                       |
+| ------------------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `CheckInterfaceDecl(decl)`                                                      | `InterfaceDecl<Typed>`                            | reject structural header cycles                                                    |
+| `EnumerateRequirementSlots(instance)`                                           | instantiated slots                                | reject interface-inheritance cycles                                                |
+| `DeclareWitnessTableIdentity(provider,target)`                                  | identity                                          | nominal identity allocation                                                        |
+| `FindConformance(target,environment,evidence)`                                  | search result                                     | reject ungrounded search cycles                                                    |
+| `MatchRequirement(conformance,key,region)`                                      | kind-indexed match                                | inherit dependency failure; no provisional match                                   |
+| `BuildRequirementDictionary(conformance)`                                       | `ProvisionalRequirementDictionary`                | reject unproductive proof cycles                                                   |
+| `ValidateConformanceEffects(conformance,provisional)`                           | `EffectValidatedRequirementDictionary`            | `Reject`; requests only stabilized effect results and diagnoses false promises     |
+| `ValidateConformanceCapabilities(conformance,provisional)`                      | `CapabilityValidatedRequirementDictionary`        | `Reject`; requests only stabilized capability results and diagnoses false promises |
+| `CombineRequirementDictionaryValidation(effectDictionary,capabilityDictionary)` | `FullyValidatedConstructionRequirementDictionary` | reject unequal provisional inputs                                                  |
+| `BuildWitnessTableDefinition(id,validatedDictionary)`                           | `WitnessTableDefinitionPublication`               | reject proof cycles unless a named productive rule applies                         |
+| `NormalizeAssociatedTypeProjection(projection,evidence)`                        | type                                              | reject mismatched evidence and unguarded projection/alias cycles                   |
+| `PlanSynthesis(cause)`                                                          | synthesis plan/group                              | reject synthesis-key recursion                                                     |
+| `PublishSynthesisGroup(key)`                                                    | frozen group                                      | atomic publication barrier                                                         |
 
-`BuildRequirementMap` reads only `selectionEffects`, `inferredCapabilities`, and
+`BuildRequirementDictionary` reads only `selectionEffects`, `inferredCapabilities`, and
 `concreteAvailability`; it cannot add an effective-contract node to either inference SCC. The
 ordinary capability field creates only the stored pending obligation, while the concrete field is
 checked by its immediate compatibility proof. `ValidateConformanceEffects` and
 `ValidateConformanceCapabilities` are downstream of all relevant stabilized results, and neither
 `InferEffects` nor `InferCapabilities` depends on its validation query.
-`CombineRequirementMapValidation` verifies both products refine the identical provisional map;
-`BuildConformanceDefinition` consumes only the combined result and performs the publication-stage
+`CombineRequirementDictionaryValidation` verifies both products refine the identical provisional dictionary;
+`BuildWitnessTableDefinition` consumes only the combined result and performs the publication-stage
 rewrite from `IFC-CON-008`. These one-way boundaries are the cycle-safe splits defined by chapters
 4 and 9.
 
@@ -1902,7 +1913,7 @@ constructor independent of the cyclic proof edge. Merely having an explicit decl
 preallocated identity is not productive.
 
 `IFC-CYCLE-003`: Default and generated method bodies may recursively call through a witness whose
-resolution contains a scoped `OperationalConformanceRef` after the identity is allocated; such
+resolution contains a scoped `OperationalWitnessTableRef` after the identity is allocated; such
 body-call edges are operational and do not enter the proof SCC. Their capability/effect inference
 follows chapter 10's fixpoint policy over construction-stage witness-use edges.
 
@@ -1923,8 +1934,8 @@ RequirementFailureReason =
     NoCandidate | WrongKind | SignatureMismatch | GenericMismatch |
     ReceiverMismatch | ModeMismatch | EffectMismatch |
     InferredCapabilityMismatch | ConcreteAvailabilityMismatch |
-    VisibilityMismatch | AssociatedConstraintFailure |
-    NestedConformanceFailure | SynthesisFailure
+    DeclVisibilityMismatch | AssociatedConstraintFailure |
+    ConformanceRequirementFailure | SynthesisFailure
 
 RequirementCandidateFailure = {
     identity: RequirementCandidateIdentity,
@@ -1944,7 +1955,7 @@ RequirementFailure<K> = {
 
 `IFC-DIAG-001`: A conformance emits at most one primary diagnostic for each unsatisfied requirement
 key. Path-distinct diamond requirements may each diagnose, but equivalent failures may be grouped
-under one primary with keys and refinement paths as ordered notes.
+under one primary with keys and base-interface paths as ordered notes.
 
 `IFC-DIAG-002`: Diagnostics sort by conformance origin, canonical requirement key, failure-class
 priority, and stable candidate identity. Worker completion, map iteration, and import discovery
@@ -1968,13 +1979,13 @@ payloads, immutable identity/definition graphs, and atomic synthesis.
 The following choices are proposed normative behavior and require differential compatibility
 coverage:
 
-- path-distinct requirement keys for diamond refinements;
+- path-distinct requirement keys for base-interface diamonds;
 - no implicit structural conformance except named language rules;
 - extension-scoped conformance coherence independent of import order;
 - defaults used only after no applicable explicit candidate under `DefaultShadowPolicy`; and
 - strict rejection of unproductive conformance proof cycles.
 
-Whether `extension IFoo` extends the existential container or all conforming `Self` types remains a
+Whether `extension IFoo` extends the existential container or all conforming `This` types remains a
 separate source-language decision in the compatibility ledger. It must not be resolved by changing
 the conformance evidence model or by silently broadening extension reachability.
 
@@ -1985,7 +1996,7 @@ The test manifest uses `<rule-id>/<class>/<case>`, where `class` is `positive`, 
 
 | Rule family                 | Required concrete test IDs                                                                                                                                                                                                                                                                                                                                          |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| interface identity          | `IFC-INS-004/serialization/self-binder-id`, `IFC-INS-005/permutation/equal-refinement-discriminator`                                                                                                                                                                                                                                                                |
+| interface identity          | `IFC-INS-004/serialization/this-type-binder-id`, `IFC-INS-005/permutation/equal-inheritance-clause-discriminator`                                                                                                                                                                                                                                                   |
 | kind indexing               | `IFC-KIND-001/negative/type-in-callable-slot`, `IFC-KIND-002/positive/accessor-role-map`, `IFC-KIND-005/serialization/associated-constraint-slot`, `IFC-KIND-006/negative/detached-callable-contract`, `IFC-KIND-007/negative/incoherent-accessor-product`, `IFC-KIND-008/positive/constref-and-ref-coexist`, `IFC-KIND-008/negative/ref-does-not-satisfy-constref` |
 | callable equality/roles     | `IFC-CALL-001/negative/unequal-field-certificate`, `IFC-CALL-002/positive/alpha-equal-signatures`, `IFC-CALL-003/negative/duplicate-implementation-target`, `IFC-CALL-010/negative/accessor-index-map-disagreement`                                                                                                                                                 |
 | callable access/error       | `IFC-CALL-004/mock/access-plan-endpoints`, `IFC-CALL-004/negative/adapter-input-mismatch`, `IFC-CALL-005/boundary/catch-residual-error`, `IFC-CALL-008/negative/frame-owner-mismatch`, `IFC-CALL-011/positive/physical-constref-forward`, `IFC-CALL-011/negative/no-constref-temporary`                                                                             |

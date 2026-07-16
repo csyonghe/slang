@@ -3,7 +3,7 @@
 This chapter defines the frontend semantics of differentiable types, callable promises, derivative
 operators, custom derivative providers, activity boundaries, and the contract passed to derivative
 IR transformations. Automatic-differentiation algorithms that transform a validated IR body are
-downstream implementations of this contract; they are not the first place where signature or
+downstream implementations of this contract; they are not the first layer where signature or
 language semantics are defined.
 
 Current compiler data structures—mutable type dictionaries on attributes, special witness classes,
@@ -12,7 +12,7 @@ and IR passes that rediscover frontend facts—are compatibility evidence only.
 ## Modes, order, and participation
 
 ```text
-DifferentiationMode = Forward | Reverse
+DifferentiationMode = Forward | Backward
 
 DerivativeOrder = {
     value: BigNat
@@ -34,7 +34,7 @@ DifferentialParticipation =
 ```
 
 Mode implication is versioned standard-environment data. If one language version declares that
-reverse differentiability implies forward differentiability, promise canonicalization closes the
+backward differentiability implies forward differentiability, promise canonicalization closes the
 set under that implication; the core algebra does not hard-code the implication.
 
 `DIF-MOD-001`: An omitted differentiation order maps to the version's declared default. An explicit
@@ -51,21 +51,21 @@ Differentiability is constructive. A type is active only with evidence describin
 value and algebra:
 
 ```text
-DifferentialFlavor = ValueDifferential | PointerDifferential
+DifferentialFlavor = IDifferentiable | IDifferentiablePtrType
 
 DifferentialAlgebraEntries = {
     differentialType:
-        WitnessEntryKey<AssociatedTypeKind>,
-    zero: WitnessRuntimeEntryKey,
-    add: WitnessRuntimeEntryKey,
-    scale: Option<WitnessRuntimeEntryKey>
+        InterfaceRequirementKeyOf<AssociatedTypeKind>,
+    zero: RuntimeInterfaceRequirementKey,
+    add: RuntimeInterfaceRequirementKey,
+    scale: Option<RuntimeInterfaceRequirementKey>
 }
 
 DifferentialAlgebraFailure =
-    MissingAlgebraEntry(entry: SomeWitnessEntryKey)
-  | AlgebraEntryKindMismatch(entry: SomeWitnessEntryKey,
+    MissingAlgebraEntry(entry: SomeInterfaceRequirementKey)
+  | AlgebraEntryKindMismatch(entry: SomeInterfaceRequirementKey,
                              expected: RequirementKind)
-  | AlgebraEntrySignatureMismatch(entry: WitnessRuntimeEntryKey,
+  | AlgebraEntrySignatureMismatch(entry: RuntimeInterfaceRequirementKey,
                                   expected: CallableSignatureId,
                                   actual: CallableSignatureId)
   | DifferentialAlgebraTypeMismatch(expected: TypeId, actual: TypeId)
@@ -79,10 +79,10 @@ DifferentialInfoFailure =
   | DifferentialConformanceUnavailable(type: TypeId,
                                         contract: InterfaceInstanceKey)
   | DifferentialTypeEntryUnavailable(
-        witness: InterfaceSubtypeWitnessId,
-        entry: WitnessEntryKey<AssociatedTypeKind>)
-  | DifferentialTypeEntryInvalid(witness: InterfaceSubtypeWitnessId,
-                                 entry: WitnessEntryKey<AssociatedTypeKind>)
+        witness: SubtypeWitnessId,
+        entry: InterfaceRequirementKeyOf<AssociatedTypeKind>)
+  | DifferentialTypeEntryInvalid(witness: SubtypeWitnessId,
+                                 entry: InterfaceRequirementKeyOf<AssociatedTypeKind>)
   | DifferentialAlgebraUnavailable(type: TypeId,
                                    contract: InterfaceInstanceKey)
   | InvalidDifferentialAlgebra(failure: DifferentialAlgebraFailure)
@@ -94,10 +94,10 @@ DifferentialInfoFailure =
 ValueDifferentialInfoKey = {
     primal: TypeId,
     flavor: DifferentialFlavor,
-    differentiabilityWitness: InterfaceSubtypeWitnessId,
+    differentiabilityWitness: SubtypeWitnessId,
     entries: DifferentialAlgebraEntries,
     differential: TypeId,
-    differentialAlgebraWitness: InterfaceSubtypeWitnessId,
+    differentialAlgebraWitness: SubtypeWitnessId,
     iteratedDifferential: TypeEqualityProofId,
     environment: SemanticEnvironmentId
 }
@@ -109,15 +109,15 @@ ValueDifferentialInfoEvidence = {
     key: ValueDifferentialInfoKey
 }
 
-ValueDifferentialInfoAt<S: WitnessUseStage> = {
+ValueDifferentialInfoAt<S: WitnessTableState> = {
     evidence: ValueDifferentialInfoEvidence,
-    differentiabilityWitness: WitnessCallRef<S>,
-    differentialAlgebraWitness: WitnessCallRef<S>
+    differentiabilityWitness: SubtypeWitnessRef<S>,
+    differentialAlgebraWitness: SubtypeWitnessRef<S>
 }
 
 ValueDifferentialInfo = ValueDifferentialInfoAt<Published>
 
-DifferentialInfoResultAt<S: WitnessUseStage> =
+DifferentialInfoResultAt<S: WitnessTableState> =
     Available(ValueDifferentialInfoAt<S>)
   | Unavailable(DifferentialInfoFailure)
   | Ambiguous(NonEmpty<ValueDifferentialInfoAt<S>>)
@@ -126,11 +126,12 @@ DifferentialInfoResultAt<S: WitnessUseStage> =
 DifferentialInfoResult = DifferentialInfoResultAt<Published>
 ```
 
-The standard environment registers the interface instances and entry keys that define value and
-pointer differentiation. The core checker does not assume a particular spelling such as
-`IDifferentiable` or that an associated type is the first witness-table entry.
+The default standard environment registers `IDifferentiable` for value differentiation and
+`IDifferentiablePtrType` for pointer differentiation, together with their exact interface instances
+and entry keys. Semantic rules resolve those registered declaration identities rather than comparing
+source spellings or assuming that an associated type is the first witness-table entry.
 
-`DIF-TYP-001`: `BuildDifferentialInfoAt<S>(T, E)` first obtains a `WitnessCallRef<S>` for the
+`DIF-TYP-001`: `BuildDifferentialInfoAt<S>(T, E)` first obtains a `SubtypeWitnessRef<S>` for the
 registered differentiability contract. It obtains the
 differential type by an exact witness-entry lookup, then obtains evidence that the resulting type
 satisfies the required differential algebra. A bound generic witness, specialized generic table,
@@ -149,7 +150,7 @@ from entry position or method name.
 contracts in one environment. Provider specialization may choose one strictly more specific
 contract; otherwise `Ambiguous` retains both candidates.
 
-`DIF-TYP-005`: `evidence.id = ContentId(evidence.key)`. Each witness call ref's stable witness ID
+`DIF-TYP-005`: `evidence.id = ContentId(evidence.key)`. Each subtype-witness ref's stable witness ID
 equals the correspondingly named ID in `evidence.key`, has the exact classifier required by that
 role, and retains exactly the stage-permitted definition resolutions reachable from its operation.
 `differentiabilityWitness` targets the registered differentiability contract for `primal`;
@@ -174,22 +175,22 @@ DifferentialExclusion =
                                          inputs: CanonicalArguments,
                                          origin: Origin)
 
-DifferentialAlgebraSynthesisPlanAt<S: WitnessUseStage> = {
-    primalTarget: InterfaceSubtypeTarget,
-    differentialTarget: InterfaceSubtypeTarget,
+DifferentialAlgebraSynthesisPlanAt<S: WitnessTableState> = {
+    primalTarget: SubtypeWitnessTarget,
+    differentialTarget: SubtypeWitnessTarget,
     differentialType: TypeId,
     entries: DifferentialAlgebraEntries,
     implementations:
-        CanonicallyOrderedMap<WitnessRuntimeEntryKey,
+        CanonicallyOrderedMap<RuntimeInterfaceRequirementKey,
                               CallableImplementationSubject>,
-    differentiabilityWitness: WitnessCallRef<S>,
-    differentialAlgebraWitness: WitnessCallRef<S>
+    differentiabilityWitness: SubtypeWitnessRef<S>,
+    differentialAlgebraWitness: SubtypeWitnessRef<S>
 }
 
 DifferentialAlgebraSynthesisPlan =
     DifferentialAlgebraSynthesisPlanAt<Published>
 
-DifferentialFieldPlanAt<S: WitnessUseStage> = {
+DifferentialFieldPlanAt<S: WitnessTableState> = {
     primalField: DeclId,
     differentialField: SynthesizedDeclId | DeclId,
     info: ValueDifferentialInfoAt<S>,
@@ -198,7 +199,7 @@ DifferentialFieldPlanAt<S: WitnessUseStage> = {
 
 DifferentialFieldPlan = DifferentialFieldPlanAt<Published>
 
-AggregateDifferentialPlanAt<S: WitnessUseStage> = {
+AggregateDifferentialPlanAt<S: WitnessTableState> = {
     primal: TypeId,
     differential: SynthesizedDeclId | TypeId,
     fields: CanonicallyOrderedMap<DifferentialFieldKey,
@@ -210,7 +211,7 @@ AggregateDifferentialPlanAt<S: WitnessUseStage> = {
 
 AggregateDifferentialPlan = AggregateDifferentialPlanAt<Published>
 
-AggregateDifferentialFailureAt<S: WitnessUseStage> =
+AggregateDifferentialFailureAt<S: WitnessTableState> =
     AggregateFieldDifferentialUnavailable(field: DeclId,
                                           failure: DifferentialInfoFailure)
   | AggregateFieldDifferentialAmbiguous(
@@ -221,11 +222,11 @@ AggregateDifferentialFailureAt<S: WitnessUseStage> =
                                     reason: RuleId)
   | DuplicateDerivativeFieldMapping(field: DeclId)
   | MissingDifferentialAlgebraImplementation(
-        entry: WitnessRuntimeEntryKey)
+        entry: RuntimeInterfaceRequirementKey)
   | AggregateDifferentialSynthesisFailed(synthesis: SynthesisKey,
                                          error: ErrorId)
 
-AggregateDifferentialResultAt<S: WitnessUseStage> =
+AggregateDifferentialResultAt<S: WitnessTableState> =
     SynthesizedAggregateDifferential(AggregateDifferentialPlanAt<S>)
   | RejectedAggregateDifferential(AggregateDifferentialFailureAt<S>)
   | RecoveredAggregateDifferential(AggregateDifferentialPlanAt<S>,
@@ -273,7 +274,7 @@ PrimalSlotKey =
 DifferentialInactivityReason =
     ExplicitNoDiff | NoDifferentialEvidence | RoleExcludedByRule(RuleId)
 
-DifferentialSlotAt<S: WitnessUseStage> =
+DifferentialSlotAt<S: WitnessTableState> =
     Inactive(type: TypeId, reason: DifferentialInactivityReason)
   | Active(info: ValueDifferentialInfoAt<S>)
 
@@ -285,7 +286,7 @@ DifferentialErrorPolicy =
   | RegisteredDifferentialErrorPolicy(rule: RuleId,
                                       inputs: CanonicalArguments)
 
-CallableDifferentialShapeAt<S: WitnessUseStage> = {
+CallableDifferentialShapeAt<S: WitnessTableState> = {
     signature: CallableSignatureId,
     environment: SemanticEnvironmentId,
     receiver: Option<DifferentialSlotAt<S>>,
@@ -297,7 +298,7 @@ CallableDifferentialShapeAt<S: WitnessUseStage> = {
 
 CallableDifferentialShape = CallableDifferentialShapeAt<Published>
 
-CallableDifferentialShapeFailureAt<S: WitnessUseStage> =
+CallableDifferentialShapeFailureAt<S: WitnessTableState> =
     SlotDifferentialInfoUnavailable(slot: PrimalSlotKey,
                                     failure: DifferentialInfoFailure)
   | SlotDifferentialInfoAmbiguous(
@@ -308,7 +309,7 @@ CallableDifferentialShapeFailureAt<S: WitnessUseStage> =
                                         policy: DifferentialErrorPolicy)
   | InvalidCallableDifferentiabilityPromise(reason: RuleId)
 
-CallableDifferentialShapeResultAt<S: WitnessUseStage> =
+CallableDifferentialShapeResultAt<S: WitnessTableState> =
     Shaped(CallableDifferentialShapeAt<S>)
   | RejectedShape(CallableDifferentialShapeFailureAt<S>)
   | RecoveredShape(CallableDifferentialShapeAt<S>, NonEmpty<ErrorId>)
@@ -322,15 +323,15 @@ DifferentialEvidenceRootRole =
 
 DifferentialEvidencePathStep =
     RootDifferentialEvidence(role: DifferentialEvidenceRootRole)
-  | WitnessSpecializationArgument(owner: InterfaceSubtypeWitnessId,
+  | WitnessSpecializationArgument(owner: SubtypeWitnessId,
                                   parameter: CanonicalBoundVariable)
-  | WitnessConstraintEvidence(owner: InterfaceSubtypeWitnessId,
+  | WitnessConstraintEvidence(owner: SubtypeWitnessId,
                               slot: CanonicalConstraintSlot)
-  | LookupBaseWitness(owner: InterfaceSubtypeWitnessId,
+  | LookupBaseWitness(owner: SubtypeWitnessId,
                       key: SubtypeWitnessLookupKey)
-  | AssociatedTypeWitness(owner: InterfaceSubtypeWitnessId,
-                          entry: WitnessEntryKey<AssociatedTypeKind>)
-  | OpenedExistentialEvidence(owner: InterfaceSubtypeWitnessId,
+  | AssociatedTypeWitness(owner: SubtypeWitnessId,
+                          entry: InterfaceRequirementKeyOf<AssociatedTypeKind>)
+  | OpenedExistentialEvidence(owner: SubtypeWitnessId,
                              opening: OpenedTypeId)
   | RegisteredDifferentialEvidence(rule: RuleId,
                                    inputs: CanonicalArguments)
@@ -340,21 +341,21 @@ DifferentialEvidenceOperandKey = {
     path: NonEmpty<DifferentialEvidencePathStep>
 }
 
-DifferentialEvidenceOperandSourceAt<S: WitnessUseStage> =
-    GenericSubstitutionOperand(owner: InterfaceSubtypeWitnessId,
+DifferentialEvidenceOperandSourceAt<S: WitnessTableState> =
+    GenericSubstitutionOperand(owner: SubtypeWitnessId,
                                parameter: CanonicalBoundVariable,
                                argument: GenericArg,
                                witnessResolutions: WitnessResolutionSetAt<S>)
-  | ConstraintEvidenceOperand(owner: InterfaceSubtypeWitnessId,
+  | ConstraintEvidenceOperand(owner: SubtypeWitnessId,
                               slot: CanonicalConstraintSlot,
                               evidence: ConstraintEvidence,
                               witnessResolutions: WitnessResolutionSetAt<S>)
-  | InterfaceWitnessOperand(witness: WitnessCallRef<S>)
+  | SubtypeWitnessOperand(witness: SubtypeWitnessRef<S>)
   | AssociatedTypeWitnessOperand(
         projection: TypeId,
-        witness: WitnessCallRef<S>,
-        entry: WitnessEntryKey<AssociatedTypeKind>)
-  | OpenedExistentialWitnessOperand(witness: WitnessCallRef<S>,
+        witness: SubtypeWitnessRef<S>,
+        entry: InterfaceRequirementKeyOf<AssociatedTypeKind>)
+  | OpenedExistentialWitnessOperand(witness: SubtypeWitnessRef<S>,
                                    opening: OpenedTypeId)
   | RegisteredEvidenceOperand(rule: RuleId,
                               inputs: CanonicalArguments,
@@ -365,21 +366,21 @@ DifferentialEvidenceOperandClassifier =
                                 sort: GenericParameterSort)
   | ConstraintEvidenceValue(slot: CanonicalConstraintSlot,
                             kind: ConstraintKind)
-  | InterfaceWitnessEvidence(InterfaceWitnessClassifier)
+  | SubtypeWitnessEvidence(SubtypeWitnessForm)
   | AssociatedTypeWitnessEvidence(projection: TypeId,
-                                  classifier: InterfaceWitnessClassifier)
-  | OpenedExistentialWitnessEvidence(InterfaceWitnessClassifier)
+                                  classifier: SubtypeWitnessForm)
+  | OpenedExistentialWitnessEvidence(SubtypeWitnessForm)
   | RegisteredDifferentialEvidenceValue(rule: RuleId,
                                         inputs: CanonicalArguments)
 
-DifferentialEvidenceOperandAt<S: WitnessUseStage> = {
+DifferentialEvidenceOperandAt<S: WitnessTableState> = {
     key: DifferentialEvidenceOperandKey,
     source: DifferentialEvidenceOperandSourceAt<S>,
     classifier: DifferentialEvidenceOperandClassifier,
     dependencies: CanonicallyOrderedSet<DifferentialEvidenceOperandKey>
 }
 
-DifferentialEvidenceOperandPlanAt<S: WitnessUseStage> = {
+DifferentialEvidenceOperandPlanAt<S: WitnessTableState> = {
     operands:
         CanonicallyOrderedMap<DifferentialEvidenceOperandKey,
                               DifferentialEvidenceOperandAt<S>>,
@@ -390,12 +391,12 @@ DifferentialEvidenceOperandPlan =
     DifferentialEvidenceOperandPlanAt<Published>
 ```
 
-`DIF-CAL-001`: Shape construction visits the receiver, every `ParameterSlot`, result, and non-`Never`
+`DIF-CAL-001`: Shape construction visits the receiver, every `ParameterSlot`, result, and non-`BottomType`
 error channel exactly
 once. `ExcludedByNoDiff` always yields `Inactive(ExplicitNoDiff)`. `InferFromType` requests
 `BuildDifferentialInfoAt<S>`; absence yields `NoDifferentialEvidence` only where the role permits an
 inactive value, otherwise a structured callable-shape failure. `error` is present exactly when the
-callable has a non-`Never` error type and the error policy preserves or transforms that channel;
+callable has a non-`BottomType` error type and the error policy preserves or transforms that channel;
 rejecting a throwing callable produces `UnsupportedDifferentialErrorChannel`, not an omitted slot.
 
 `DIF-CAL-002`: The shape is parameter-keyed and pack expansion creates distinct `ParameterKey`
@@ -403,7 +404,7 @@ entries. A mutable side dictionary populated opportunistically while checking th
 source of callable differentiability.
 
 `DIF-CAL-003`: A callable's structural `DifferentiabilityPromise` states which derivative surfaces
-its signature promises. Whether its local body, custom provider, interface witness, or registered
+its signature promises. Whether its local body, custom provider, subtype witness, or registered
 builtin fulfills that promise is an `EffectiveDifferentiabilityContract` query result and cannot
 alter function-type equality after body checking.
 
@@ -420,8 +421,8 @@ root witness-table reference.
 Every map key equals `operand.key`; every dependency is another key in the same map; and
 `materializationOrder` is the canonical duplicate-free topological order of the complete map. Each
 stage-specific source retains the exact minimal `WitnessResolutionSetAt<S>` needed to lower it. Its
-classifier is derived from that source and fixes the Core/IR evidence shape before lowering.
-Neither equal machine representations nor repeated witnesses merge distinct semantic keys; Core may
+classifier is derived from that source and fixes the IRReady/IR evidence shape before lowering.
+Neither equal machine representations nor repeated witnesses merge distinct semantic keys; IRReady may
 reuse the resulting SSA value only after preserving both keyed roles. No ambient conformance lookup,
 associated-type rediscovery, or reconstruction from `TypeId` is permitted.
 
@@ -445,7 +446,7 @@ DerivativeCallableSlotKey =
   | DerivativeErrorSlot
 
 DerivativeCallableSlotMode =
-    DerivativePassingMode(PassingMode)
+    DerivativeParamPassingMode(ParamPassingMode)
   | DerivativeResultMode
   | DerivativeErrorMode
 
@@ -471,7 +472,7 @@ ForwardDerivativeResultKind =
 DerivativeResultPlan =
     ForwardResult(output: DerivativeCallableSlotKey,
                   kind: ForwardDerivativeResultKind)
-  | ReverseUnitResult(output: DerivativeCallableSlotKey,
+  | BackwardVoidResult(output: DerivativeCallableSlotKey,
                       seedParameter: Option<ParameterKey>)
 
 DerivativeSignatureMap = {
@@ -492,7 +493,7 @@ DerivativeSignatureFailure =
                               mode: DerivativeCallableSlotMode,
                               flavor: DifferentialFlavor)
   | MissingPhysicalOperandDerivativeRule(slot: PrimalSlotKey,
-                                         primalMode: PassingMode,
+                                         primalMode: ParamPassingMode,
                                          differentiationMode: DifferentiationMode,
                                          order: DerivativeOrder)
   | UnsupportedDerivativeErrorChannel(error: TypeId,
@@ -529,7 +530,7 @@ rejected unless a registered pointer-differentiation rule defines their location
 and write-back semantics. `ConstRefMode` additionally obeys `DIF-SIG-FWD-004` even when its
 differential flavor is value-like.
 
-`DIF-SIG-FWD-003`: Under `PreserveErrorChannel`, a non-`Never` error channel is represented by
+`DIF-SIG-FWD-003`: Under `PreserveErrorChannel`, a non-`BottomType` error channel is represented by
 `ErrorPrimalSlot` and maps to `DerivativeErrorSlot` with the identical error type. The default
 language rule does not differentiate thrown error values. A registered error policy may define a
 different mapping explicitly; `RejectThrowingCallable` returns a signature failure instead of
@@ -545,12 +546,12 @@ substitute an `InMode` parameter, create a temporary, or erase `isPhysicalStorag
 rule produces `MissingPhysicalOperandDerivativeRule`; it never falls through to
 `DIF-SIG-FWD-001`.
 
-### Reverse mode
+### Backward mode
 
-The proposed default reverse mapping is explicit in the following table. `Pair<T>` means the
+The proposed default backward mapping is explicit in the following table. `Pair<T>` means the
 registered primal/differential pair and `D<T>` means the looked-up differential type.
 
-| primal slot            | active reverse slot                                                                  | inactive reverse slot                                                                |
+| primal slot            | active backward slot                                                                 | inactive backward slot                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `InMode` parameter `T` | `InOutMode Pair<T>` accumulator                                                      | unchanged `InMode T` input                                                           |
 | `OutMode T`            | `InMode D<T>` cotangent seed                                                         | dropped                                                                              |
@@ -560,23 +561,23 @@ registered primal/differential pair and `D<T>` means the looked-up differential 
 | result `R`             | appended `InMode D<R>` seed                                                          | no result parameter                                                                  |
 | preserved error `E`    | unchanged error output `E`                                                           | unchanged error output `E`                                                           |
 
-Reverse derivative functions return `Unit`. The primal component of a pair accumulator is an input
+Backward derivative functions return `VoidType`. The primal component of a pair accumulator is an input
 and is not modified; the differential component is the output accumulator. A receiver is mapped by
 the same rule as its explicit mode and remains a separate receiver-derived role in the map.
 
-`DIF-SIG-REV-001`: Every primal slot has exactly one `DerivativeSlotPlan`, including dropped slots
+`DIF-SIG-BWD-001`: Every primal slot has exactly one `DerivativeSlotPlan`, including dropped slots
 and a preserved error channel. `derivativeSlotOrder` is a duplicate-free bijection onto all produced
 derivative callable slots: receiver first when present, parameters in source-key order (followed by a
-result seed when reverse mode creates one), then result and error outputs when present. Filtering
+result seed when backward mode creates one), then result and error outputs when present. Filtering
 `DerivativeParameterSlot` alternatives gives the derivative declaration's parameter order. No
 downstream pass rediscovers which parameter is a cotangent or mistakes receiver/result/error for an
 ordinary parameter.
 
-`DIF-SIG-REV-002`: Aliasable `RefMode`, pointer-differential outputs, throwing functions, and other
+`DIF-SIG-BWD-002`: Aliasable `RefMode`, pointer-differential outputs, throwing functions, and other
 unsupported role combinations fail signature transformation with named reasons. A target or IR pass
 cannot silently choose a different signature.
 
-`DIF-SIG-REV-003`: `ConstRefMode(r)` has no default active or inactive reverse mapping. A
+`DIF-SIG-BWD-003`: `ConstRefMode(r)` has no default active or inactive backward mapping. A
 registered physical-operand derivative rule must consume the complete structural passing mode and
 state how primal and cotangent locations alias, which location requirements and access modes each
 produced slot preserves, and how their lifetimes relate. Its plan uses
@@ -585,7 +586,7 @@ identity unless the named rule proves a different registered transformation. Mis
 rules produce the corresponding structured `DerivativeSignatureFailure`; treating the slot as
 `InMode`, loading it, or manufacturing accumulator storage is invalid.
 
-`DIF-SIG-003`: Forward/reverse transformation is a pure, total query over a canonical callable
+`DIF-SIG-003`: Forward/backward transformation is a pure, total query over a canonical callable
 shape, mode, order, and registered rule environment. It produces the signature map or structured
 failure; user-defined and synthesized derivatives are checked against the same result.
 
@@ -595,19 +596,19 @@ and the error channel exactly when that channel exists in the callable shape. Ev
 `derivativeSlotOrder` after adding `result.output`; each derivative slot occurs once in the
 derivative signature, and its resolved type and passing mode equal its keyed
 `DerivativeCallableSlotShape`. A forward active result maps
-to `DerivativeResultSlot`; a reverse result seed maps to an explicit
-`DerivativeParameterSlot`; `result.output` is always `DerivativeResultSlot`, including the reverse
-`Unit` result; and a preserved error maps to `DerivativeErrorSlot`. A receiver is never encoded as
+to `DerivativeResultSlot`; a backward result seed maps to an explicit
+`DerivativeParameterSlot`; `result.output` is always `DerivativeResultSlot`, including the backward
+`VoidType` result; and a preserved error maps to `DerivativeErrorSlot`. A receiver is never encoded as
 parameter zero.
 
 ## Derivative providers
 
 ```text
 CallableIdentity =
-    DeclarationCallableIdentity(declaration: DeclId)
-  | WitnessCallableIdentity(entry: WitnessRuntimeEntryKey)
+    DeclCallableIdentity(declaration: DeclId)
+  | WitnessCallableIdentity(entry: RuntimeInterfaceRequirementKey)
   | DynamicCallableIdentity(owner: DeclId, slot: DynamicDispatchKey)
-  | ClosureCallableIdentity(invoke: DeclId)
+  | LambdaCallableIdentity(invoke: DeclId)
   | BuiltinCallableIdentity(rule: RuleId, operands: CanonicalArguments)
 
 DerivativeProviderKey = {
@@ -619,14 +620,14 @@ DerivativeProviderKey = {
 }
 
 DerivativeProviderSelectionContext = {
-    access: AccessContext,
+    access: VisibilityContext,
     allowedEffects: EffectAllowance,
     requiredCapabilities: CapabilityRequirement,
     contractSelection: ContractSelectionContext,
     errorPolicy: DifferentialErrorPolicy
 }
 
-DerivativeProviderRequestAt<S: WitnessUseStage> = {
+DerivativeProviderRequestAt<S: WitnessTableState> = {
     key: DerivativeProviderKey,
     primal: CallableValue<S>,
     context: DerivativeProviderSelectionContext
@@ -642,7 +643,7 @@ DerivativeAssociationDirection =
 DerivativeAssociationProof = {
     primal: CallableIdentity,
     primalSpecialization: CanonicalSpecializationSpine,
-    derivative: CanonicalDeclRef,
+    derivative: DeclRef,
     mode: DifferentiationMode,
     order: DerivativeOrder,
     direction: DerivativeAssociationDirection,
@@ -653,8 +654,8 @@ DerivativeAssociationFailure =
     AssociationEndpointNotCallable(origin: Origin)
   | AssociationPrimalMismatch(expected: CallableIdentity,
                               actual: CallableIdentity)
-  | AssociationDerivativeMismatch(expected: CanonicalDeclRef,
-                                  actual: CanonicalDeclRef)
+  | AssociationDerivativeMismatch(expected: DeclRef,
+                                  actual: DeclRef)
   | AssociationModeMismatch(expected: DifferentiationMode,
                             actual: DifferentiationMode)
   | AssociationOrderMismatch(expected: DerivativeOrder,
@@ -666,12 +667,12 @@ DerivativeAssociationFailure =
         primal: CallableIdentity,
         mode: DifferentiationMode,
         order: DerivativeOrder,
-        derivatives: NonEmpty<CanonicalDeclRef>)
+        derivatives: NonEmpty<DeclRef>)
   | NonReciprocalDerivativeAssociation(primal: CallableIdentity,
-                                       derivative: CanonicalDeclRef)
+                                       derivative: DeclRef)
 
 TreatAsDifferentiableProof = {
-    primal: CanonicalDeclRef,
+    primal: DeclRef,
     mode: DifferentiationMode,
     order: DerivativeOrder,
     policy: RuleId,
@@ -685,13 +686,13 @@ DynamicDerivativeDispatch = {
     derivativeSlot: DynamicDispatchKey
 }
 
-DerivativeProviderAt<S: WitnessUseStage> =
+DerivativeProviderAt<S: WitnessTableState> =
     UserDefinedDerivative(declaration: ResolvedDeclRefAt<S>,
                           association: DerivativeAssociationProof)
   | SynthesizedDerivative(output: SynthesizedDeclId,
                           synthesis: SynthesisKey)
-  | WitnessDerivative(witness: WitnessCallRef<S>,
-                       entry: WitnessRuntimeEntryKey)
+  | WitnessDerivative(witness: SubtypeWitnessRef<S>,
+                       entry: RuntimeInterfaceRequirementKey)
   | DynamicDerivative(dispatch: DynamicDerivativeDispatch)
   | BuiltinDerivative(rule: StandardEnvironmentRuleId,
                        inputs: CanonicalArguments,
@@ -702,19 +703,19 @@ DerivativeProviderAt<S: WitnessUseStage> =
 DerivativeProvider = DerivativeProviderAt<Published>
 
 DerivativeProviderIdentity =
-    UserDefinedDerivativeIdentity(declaration: CanonicalDeclRef,
+    UserDefinedDerivativeIdentity(declaration: DeclRef,
                                   primal: CallableIdentity,
                                   mode: DifferentiationMode,
                                   order: DerivativeOrder,
                                   direction: DerivativeAssociationDirection)
   | SynthesizedDerivativeIdentity(output: SynthesizedDeclId,
                                   synthesis: SynthesisKey)
-  | WitnessDerivativeIdentity(witness: InterfaceSubtypeWitnessId,
-                              entry: WitnessRuntimeEntryKey)
+  | WitnessDerivativeIdentity(witness: SubtypeWitnessId,
+                              entry: RuntimeInterfaceRequirementKey)
   | DynamicDerivativeIdentity(dispatch: DynamicDerivativeDispatch)
   | BuiltinDerivativeIdentity(rule: StandardEnvironmentRuleId,
                               inputs: CanonicalArguments)
-  | AssumedZeroDerivativeIdentity(declaration: CanonicalDeclRef,
+  | AssumedZeroDerivativeIdentity(declaration: DeclRef,
                                   mode: DifferentiationMode,
                                   order: DerivativeOrder,
                                   policy: RuleId)
@@ -723,23 +724,23 @@ DerivativeProviderCandidateKey =
     ProviderCandidateKey(request: DerivativeProviderKey,
                          provider: DerivativeProviderIdentity)
   | InvalidAssociationCandidateKey(request: DerivativeProviderKey,
-                                   declaration: CanonicalDeclRef,
+                                   declaration: DeclRef,
                                    origin: Origin)
 
 DerivativeProviderCandidateId = ContentId<DerivativeProviderCandidateKey>
 
-DerivativeProviderCandidateAt<S: WitnessUseStage> = {
+DerivativeProviderCandidateAt<S: WitnessTableState> = {
     id: DerivativeProviderCandidateId,
     key: DerivativeProviderCandidateKey,
     provider: Option<DerivativeProviderAt<S>>
 }
 
 DerivativeProviderAvailabilityEvidence =
-    DeclaredDerivativeProviderAccess(AccessEvidence)
+    DeclaredDerivativeProviderAccess(VisibilityEvidence)
   | RegisteredDerivativeProviderAccess(rule: StandardEnvironmentRuleId,
                                        environment: StandardEnvironmentId)
 
-DerivativeProviderCapabilityObligationAt<S: WitnessUseStage> = {
+DerivativeProviderCapabilityObligationAt<S: WitnessTableState> = {
     request: DerivativeProviderRequestAt<S>,
     provider: DerivativeProviderIdentity,
     required: CapabilityRequirement,
@@ -747,18 +748,18 @@ DerivativeProviderCapabilityObligationAt<S: WitnessUseStage> = {
     preInferenceProof: CapabilityImplicationProof
 }
 
-DerivativeProviderCapabilityDependencyAt<S: WitnessUseStage> =
+DerivativeProviderCapabilityDependencyAt<S: WitnessTableState> =
     CallableCapabilityDependency(declaration: ResolvedDeclRefAt<S>)
-  | WitnessEntryCapabilityDependency(witness: WitnessCallRef<S>,
-                                     entry: WitnessRuntimeEntryKey)
+  | WitnessEntryCapabilityDependency(witness: SubtypeWitnessRef<S>,
+                                     entry: RuntimeInterfaceRequirementKey)
   | DynamicSlotCapabilityDependency(owner: TypeId,
                                     slot: DynamicDispatchKey)
   | SynthesizedCapabilityDependency(output: SynthesizedDeclId)
 
-DerivativeProviderEffectiveCapabilitySourceAt<S: WitnessUseStage> =
+DerivativeProviderEffectiveCapabilitySourceAt<S: WitnessTableState> =
     CallableEffectiveCapability(contract: EffectiveCallableContractId)
-  | WitnessEntryEffectiveCapability(witness: WitnessCallRef<S>,
-                                    entry: WitnessRuntimeEntryKey,
+  | WitnessEntryEffectiveCapability(witness: SubtypeWitnessRef<S>,
+                                    entry: RuntimeInterfaceRequirementKey,
                                     requirement: CapabilityRequirement)
   | DynamicSlotEffectiveCapability(owner: TypeId,
                                    slot: DynamicDispatchKey,
@@ -766,14 +767,14 @@ DerivativeProviderEffectiveCapabilitySourceAt<S: WitnessUseStage> =
   | RegisteredEffectiveCapability(registration: RegisteredDataOperationRegistration,
                                   requirement: CapabilityRequirement)
 
-DerivativeProviderEffectiveCapabilityProofAt<S: WitnessUseStage> = {
+DerivativeProviderEffectiveCapabilityProofAt<S: WitnessTableState> = {
     obligation: DerivativeProviderCapabilityObligationAt<S>,
     source: DerivativeProviderEffectiveCapabilitySourceAt<S>,
     effectiveActual: CapabilityRequirement,
     effectiveProof: CapabilityImplicationProof
 }
 
-DerivativeProviderCapabilityCheckAt<S: WitnessUseStage> =
+DerivativeProviderCapabilityCheckAt<S: WitnessTableState> =
     PendingDerivativeProviderCapability {
         obligation: DerivativeProviderCapabilityObligationAt<S>,
         dependency: DerivativeProviderCapabilityDependencyAt<S>
@@ -781,10 +782,10 @@ DerivativeProviderCapabilityCheckAt<S: WitnessUseStage> =
   | ValidatedDerivativeProviderCapability(
         DerivativeProviderEffectiveCapabilityProofAt<S>)
 
-DerivativeProviderCompatibilityProofAt<S: WitnessUseStage> = {
+DerivativeProviderCompatibilityProofAt<S: WitnessTableState> = {
     request: DerivativeProviderRequestAt<S>,
     signatureMap: DerivativeSignatureMapId,
-    signature: FunctionTypeEqualityProof,
+    signature: FuncTypeEqualityProof,
     providerSelectionContract: PreInferenceCallableContract,
     allowedEffects: EffectAllowance,
     effectValidation: EffectAllowanceValidation,
@@ -799,7 +800,7 @@ DerivativeProviderCompatibilityProofAt<S: WitnessUseStage> = {
 DerivativeProviderCompatibilityProof =
     DerivativeProviderCompatibilityProofAt<Published>
 
-DerivativeProviderFailureAt<S: WitnessUseStage> =
+DerivativeProviderFailureAt<S: WitnessTableState> =
     NoDerivativeProvider(request: DerivativeProviderRequestAt<S>)
   | GenericDerivativeProviderFailure(provider: DerivativeProviderAt<S>,
                                      failure: GenericFailure)
@@ -807,7 +808,7 @@ DerivativeProviderFailureAt<S: WitnessUseStage> =
                                         expected: CallableSignatureId,
                                         actual: CallableSignatureId)
   | DerivativeProviderNotAccessible(provider: DerivativeProviderAt<S>,
-                                    decision: AccessDecision)
+                                    decision: VisibilityDecision)
   | DerivativeProviderRegisteredRuleUnavailable(
         rule: StandardEnvironmentRuleId,
         environment: StandardEnvironmentId)
@@ -833,14 +834,14 @@ DerivativeProviderFailureAt<S: WitnessUseStage> =
         provider: DerivativeProviderAt<S>,
         expected: DifferentialErrorPolicy,
         actual: DifferentialErrorPolicy)
-  | InvalidDerivativeProviderAssociation(declaration: CanonicalDeclRef,
+  | InvalidDerivativeProviderAssociation(declaration: DeclRef,
                                          reason: DerivativeAssociationFailure)
   | DerivativeProviderSynthesisFailure(request: DerivativeProviderRequestAt<S>,
                                        error: ErrorId)
 
 DerivativeProviderFailure = DerivativeProviderFailureAt<Published>
 
-ApplicableDerivativeProviderAt<S: WitnessUseStage> = {
+ApplicableDerivativeProviderAt<S: WitnessTableState> = {
     candidate: DerivativeProviderCandidateAt<S>,
     provider: DerivativeProviderAt<S>,
     signatureMap: DerivativeSignatureMap,
@@ -854,7 +855,7 @@ DerivativeProviderPriorityDimension =
   | RegisteredDerivativeProviderPriority(rule: StandardEnvironmentRuleId,
                                          inputs: CanonicalArguments)
 
-DerivativeProviderPriorityPremiseAt<S: WitnessUseStage> =
+DerivativeProviderPriorityPremiseAt<S: WitnessTableState> =
     ExplicitAssociationPremise(preferred: DerivativeProviderCandidateId,
                                other: DerivativeProviderCandidateId,
                                association: DerivativeAssociationProof,
@@ -871,7 +872,7 @@ DerivativeProviderPriorityPremiseAt<S: WitnessUseStage> =
         rule: StandardEnvironmentRuleId,
         inputs: CanonicalArguments)
 
-DerivativeProviderPriorityObservationAt<S: WitnessUseStage> =
+DerivativeProviderPriorityObservationAt<S: WitnessTableState> =
     LeftPreferred(DerivativeProviderPriorityPremiseAt<S>)
   | RightPreferred(DerivativeProviderPriorityPremiseAt<S>)
   | EqualPriority(rule: DerivativeProviderPriorityDimension)
@@ -881,7 +882,7 @@ DerivativeProviderPriorityObservationAt<S: WitnessUseStage> =
 DerivativeProviderComparisonOutcome =
     LeftBetter | RightBetter | SemanticallyEquivalent | Incomparable
 
-DerivativeProviderComparisonProofAt<S: WitnessUseStage> = {
+DerivativeProviderComparisonProofAt<S: WitnessTableState> = {
     request: DerivativeProviderRequestAt<S>,
     left: DerivativeProviderCandidateId,
     right: DerivativeProviderCandidateId,
@@ -894,7 +895,7 @@ DerivativeProviderComparisonProofAt<S: WitnessUseStage> = {
 DerivativeProviderComparisonProof =
     DerivativeProviderComparisonProofAt<Published>
 
-DerivativeProviderCandidateResultAt<S: WitnessUseStage> =
+DerivativeProviderCandidateResultAt<S: WitnessTableState> =
     ApplicableProviderCandidate(ApplicableDerivativeProviderAt<S>)
   | RejectedProviderCandidate {
         candidate: DerivativeProviderCandidateAt<S>,
@@ -902,7 +903,7 @@ DerivativeProviderCandidateResultAt<S: WitnessUseStage> =
         diagnostics: DiagnosticSet
     }
 
-SelectedDerivativeProviderAt<S: WitnessUseStage> = {
+SelectedDerivativeProviderAt<S: WitnessTableState> = {
     winner: ApplicableDerivativeProviderAt<S>,
     maximality:
         CanonicallyOrderedMap<DerivativeProviderCandidateId,
@@ -920,7 +921,7 @@ DerivativeProviderCandidatePair = {
 ApplicableDerivativeProvider = ApplicableDerivativeProviderAt<Published>
 SelectedDerivativeProvider = SelectedDerivativeProviderAt<Published>
 
-DerivativeProviderCapabilityValidationResultAt<S: WitnessUseStage> =
+DerivativeProviderCapabilityValidationResultAt<S: WitnessTableState> =
     ValidatedDerivativeProviderCapabilities(SelectedDerivativeProviderAt<S>)
   | RejectedDerivativeProviderCapabilities(
         selection: SelectedDerivativeProviderAt<S>,
@@ -929,14 +930,14 @@ DerivativeProviderCapabilityValidationResultAt<S: WitnessUseStage> =
         selection: SelectedDerivativeProviderAt<S>,
         errors: NonEmpty<ErrorId>)
 
-RejectedDerivativeProviderSearchAt<S: WitnessUseStage> = {
+RejectedDerivativeProviderSearchAt<S: WitnessTableState> = {
     considered:
         CanonicallyOrderedMap<DerivativeProviderCandidateId,
                               DerivativeProviderCandidateResultAt<S>>,
     failure: DerivativeProviderFailureAt<S>
 }
 
-AmbiguousDerivativeProviderSearchAt<S: WitnessUseStage> = {
+AmbiguousDerivativeProviderSearchAt<S: WitnessTableState> = {
     maximal: NonEmpty<ApplicableDerivativeProviderAt<S>>,
     incomparability:
         CanonicallyOrderedMap<DerivativeProviderCandidatePair,
@@ -946,7 +947,7 @@ AmbiguousDerivativeProviderSearchAt<S: WitnessUseStage> = {
                               DerivativeProviderCandidateResultAt<S>>
 }
 
-DerivativeProviderResultAt<S: WitnessUseStage> =
+DerivativeProviderResultAt<S: WitnessTableState> =
     Selected(SelectedDerivativeProviderAt<S>)
   | RejectedProviderSearch(RejectedDerivativeProviderSearchAt<S>)
   | AmbiguousProviderSearch(AmbiguousDerivativeProviderSearchAt<S>)
@@ -965,7 +966,7 @@ DerivativeSurfaceKey = {
     order: DerivativeOrder
 }
 
-EffectiveDifferentiabilityContractAt<S: WitnessUseStage> = {
+EffectiveDifferentiabilityContractAt<S: WitnessTableState> = {
     signature: CallableSignatureId,
     promise: DifferentiabilityPromise,
     shape: CallableDifferentialShapeAt<S>,
@@ -977,7 +978,7 @@ EffectiveDifferentiabilityContractAt<S: WitnessUseStage> = {
 EffectiveDifferentiabilityContract =
     EffectiveDifferentiabilityContractAt<Published>
 
-EffectiveDifferentiabilityContractFailureAt<S: WitnessUseStage> =
+EffectiveDifferentiabilityContractFailureAt<S: WitnessTableState> =
     ContractShapeRejected(CallableDifferentialShapeFailureAt<S>)
   | PromisedSurfaceRejected(surface: DerivativeSurfaceKey,
                             failure: DerivativeProviderFailureAt<S>)
@@ -987,7 +988,7 @@ EffectiveDifferentiabilityContractFailureAt<S: WitnessUseStage> =
   | ContractSignatureMismatch(expected: CallableSignatureId,
                               actual: CallableSignatureId)
 
-EffectiveDifferentiabilityContractResultAt<S: WitnessUseStage> =
+EffectiveDifferentiabilityContractResultAt<S: WitnessTableState> =
     BuiltDifferentiabilityContract(EffectiveDifferentiabilityContractAt<S>)
   | RejectedDifferentiabilityContract(
         EffectiveDifferentiabilityContractFailureAt<S>)
@@ -1000,7 +1001,7 @@ EffectiveDifferentiabilityContractResult =
 ```
 
 `DIF-PRV-001`: Provider lookup consumes a `DerivativeProviderRequestAt<S>` and considers
-forward/backward association spellings, primal-substitute associations, interface witness entries,
+forward/backward association spellings, primal-substitute associations, witness-table entries,
 dynamic derivative slots, registered builtins, and permitted synthesis together. A provider is
 applicable only when its generic binder, receiver/parameter correspondence, derivative signature
 map, visibility, pre-inference selection effects, optional concrete availability, ordinary
@@ -1038,7 +1039,7 @@ key. A dynamic derivative retains its owner plus distinct primal and derivative
 visible during checking.
 
 `DIF-PRV-006`: `CallableIdentity` is the stable dispatch identity and contains no
-`CanonicalSpecializationSpine`. A declaration or closure identity stores its `DeclId`, a witness
+`CanonicalSpecializationSpine`. A declaration or lambda identity stores its `DeclId`, a witness
 identity stores the complete kind-indexed runtime entry key, a dynamic identity stores owner and
 slot declaration identity, and a builtin identity stores its registered rule and static operands.
 The specialized dynamic owner type is retained on the request's `CallableValue`; its nominal
@@ -1108,8 +1109,8 @@ ambiguous surfaces make contract construction fail; they are not omitted from th
 
 `DIF-PRV-011`: `DerivativeProviderRequestAt<S>.primal` is executable at stage `S`.
 `callableIdentity(primal.dispatch) = key.primal`, and the dispatch's canonical specialization spine
-equals `key.specialization`; witness calls retain the exact `WitnessCallRef<S>`, dynamic calls retain
-owner/slot, closures retain their invoke identity, and builtin/direct calls retain their resolution
+equals `key.specialization`; witness calls retain the exact `SubtypeWitnessRef<S>`, dynamic calls retain
+owner/slot, lambdas retain their invoke identity, and builtin/direct calls retain their resolution
 sidecars. The access, effect, ordinary-capability, concrete-availability, and error-policy proofs in
 a successful candidate have exactly `request.context` as their use-side endpoints. Stable identity
 projection cannot be used to reconstruct or replace this operational callable value.
@@ -1169,47 +1170,47 @@ results has the appropriate validated alternative and endpoint-correct effective
 post-fixpoint validation query depends on inference, but provider discovery/applicability/ranking
 does not depend on that query, so it cannot create a cycle inside the capability-inference SCC.
 
-## Differentiation and stop-gradient expressions
+## Differentiation and detach-derivative expressions
 
 ```text
-DifferentiationExprAt<S: WitnessUseStage> =
-    ForwardDifferentiate(value: CallableValue<S>,
-                         selection: SelectedDerivativeProviderAt<S>)
-  | ReverseDifferentiate(value: CallableValue<S>,
-                         selection: SelectedDerivativeProviderAt<S>)
-  | StopGradient(value: TypedExpr,
-                  boundary: StopGradientBoundaryAt<S>)
+DifferentiationExprAt<S: WitnessTableState> =
+    ForwardDifferentiateExpr(value: CallableValue<S>,
+                             selection: SelectedDerivativeProviderAt<S>)
+  | BackwardDifferentiateExpr(value: CallableValue<S>,
+                              selection: SelectedDerivativeProviderAt<S>)
+  | DetachExpr(value: TypedExpr,
+                  boundary: DetachDerivativeBoundaryAt<S>)
 
 DifferentiationExpr = DifferentiationExprAt<Published>
 
-StopGradientBoundaryKeyAt<S: WitnessUseStage> = {
+DetachDerivativeBoundaryKeyAt<S: WitnessTableState> = {
     inputType: TypeId,
     outputType: TypeId,
     discarded: Option<ValueDifferentialInfoAt<S>>
 }
 
-StopGradientBoundaryIdAt<S: WitnessUseStage> =
-    ContentId<StopGradientBoundaryKeyAt<S>>
+DetachDerivativeBoundaryIdAt<S: WitnessTableState> =
+    ContentId<DetachDerivativeBoundaryKeyAt<S>>
 
-StopGradientBoundaryAt<S: WitnessUseStage> = {
-    id: StopGradientBoundaryIdAt<S>,
-    key: StopGradientBoundaryKeyAt<S>,
+DetachDerivativeBoundaryAt<S: WitnessTableState> = {
+    id: DetachDerivativeBoundaryIdAt<S>,
+    key: DetachDerivativeBoundaryKeyAt<S>,
     origin: Origin
 }
 
-StopGradientBoundaryKey = StopGradientBoundaryKeyAt<Published>
-StopGradientBoundaryId = StopGradientBoundaryIdAt<Published>
-StopGradientBoundary = StopGradientBoundaryAt<Published>
+DetachDerivativeBoundaryKey = DetachDerivativeBoundaryKeyAt<Published>
+DetachDerivativeBoundaryId = DetachDerivativeBoundaryIdAt<Published>
+DetachDerivativeBoundary = DetachDerivativeBoundaryAt<Published>
 
-StopGradientFailure =
+DetachDerivativeFailure =
     OutsideDifferentiabilityContext(origin: Origin)
-  | StopGradientTypeMismatch(input: TypeId, output: TypeId)
-  | StopGradientDifferentialMismatch(type: TypeId,
-                                     witness: InterfaceSubtypeWitnessId)
-  | StopGradientOnUnsupportedPlace(place: PlaceRef)
-  | RegisteredStopGradientRejection(rule: RuleId, origin: Origin)
+  | DetachDerivativeTypeMismatch(input: TypeId, output: TypeId)
+  | DetachDerivativeDifferentialMismatch(type: TypeId,
+                                     witness: SubtypeWitnessId)
+  | DetachDerivativeOnUnsupportedStorage(storage: StorageRef)
+  | RegisteredDetachDerivativeRejection(rule: RuleId, origin: Origin)
 
-DifferentiationCheckFailureAt<S: WitnessUseStage> =
+DifferentiationCheckFailureAt<S: WitnessTableState> =
     DifferentiationOperandNotCallable(origin: Origin, classifier: Classifier)
   | DifferentiationShapeRejected(CallableDifferentialShapeFailureAt<S>)
   | DifferentiationSignatureRejected(DerivativeSignatureFailure)
@@ -1217,9 +1218,9 @@ DifferentiationCheckFailureAt<S: WitnessUseStage> =
   | DifferentiationProviderAmbiguous(AmbiguousDerivativeProviderSearchAt<S>)
   | DifferentiationModeNotPromised(mode: DifferentiationMode,
                                    promise: DifferentiabilityPromise)
-  | StopGradientRejected(StopGradientFailure)
+  | DetachDerivativeRejected(DetachDerivativeFailure)
 
-DifferentiationCheckResultAt<S: WitnessUseStage> =
+DifferentiationCheckResultAt<S: WitnessTableState> =
     CheckedDifferentiation(DifferentiationExprAt<S>)
   | RejectedDifferentiation(DifferentiationCheckFailureAt<S>)
   | RecoveredDifferentiation(DifferentiationExprAt<S>,
@@ -1234,30 +1235,30 @@ a callable value with the derivative signature and provider dispatch. Applying i
 ordinary call/overload argument rules; the operator itself does not parse or mutate the later call.
 
 `DIF-EXP-002`: `no_diff(e)` evaluates the same primal expression once and preserves all its ordinary
-effects, capabilities, exceptions, and access operations. It inserts a typed `StopGradient`
+effects, capabilities, exceptions, and access operations. It inserts a typed `DetachExpr`
 boundary that changes derivative activity only. It is valid only in a declared differentiability
 context and cannot erase a non-differentiability diagnostic unrelated to derivative flow.
 
 `DIF-EXP-003`: Assigning an active value to an inactive storage path is a derivative-loss failure
-unless the value passes through an explicit stop-gradient boundary or a registered operation whose
+unless the value passes through an explicit detach-derivative boundary or a registered operation whose
 contract declares derivative consumption. Physical versus abstract storage remains governed by
 chapter 4; activity does not make abstract storage referenceable.
 
 `DIF-EXP-004`: A call from differentiable code to a nondifferentiable callable with active inputs or
-an active result requires an explicit stop-gradient/no-diff call boundary or a registered provider.
+an active result requires an explicit detach-derivative/no-diff call boundary or a registered provider.
 Whether values are observably active is dataflow over `DerivativeActivityAt<S>`, not a syntactic
 search for a modifier.
 
 `DIF-EXP-005`: A successful differentiate expression contains only
 `SelectedDerivativeProviderAt<S>`; rejected, ambiguous, recovered-provider-only, scheduler blocking,
 and cancellation states cannot inhabit a successful typed expression. The winner proof's request has
-`primal = value` and the mode written by the expression. A stop-gradient boundary satisfies
+`primal = value` and the mode written by the expression. A detach-derivative boundary satisfies
 `id = ContentId(key)`, has equal input/output primal types, and carries the exact stage-appropriate
 differential evidence being discarded when that evidence exists.
 
 `DIF-EXP-006`: `CheckDifferentiationAt<S>` is total at semantic completion. It returns
 `CheckedDifferentiation`, one structured `RejectedDifferentiation` alternative that preserves the
-failed shape/signature/provider/stop-gradient premise, or `RecoveredDifferentiation` with a valid
+failed shape/signature/provider/detach-derivative premise, or `RecoveredDifferentiation` with a valid
 error-bearing typed expression. Dependency waiting is only the enclosing scheduler
 `QueryStep.Blocked`; cancellation abandons the unpublished attempt. A provider rejection or
 ambiguity retains its entire considered-candidate map and therefore cannot disappear into
@@ -1266,7 +1267,7 @@ diagnostics while the query returns an apparently successful callable.
 ## Activity and body validation
 
 ```text
-DerivativeActivityAt<S: WitnessUseStage> =
+DerivativeActivityAt<S: WitnessTableState> =
     InactiveActivity(reason: DifferentialInactivityReason)
   | ActiveActivity(info: ValueDifferentialInfoAt<S>,
                    sources: CanonicallyOrderedSet<PrimalSlotKey>)
@@ -1277,25 +1278,25 @@ DerivativeActivityAt<S: WitnessUseStage> =
 DerivativeActivity = DerivativeActivityAt<Published>
 
 DerivativeUseKey = {
-    owner: CanonicalDeclRef,
+    owner: DeclRef,
     origin: Origin,
     ordinal: UInt32
 }
 
 DerivativeUseId = ContentId<DerivativeUseKey>
 
-DerivativeUseOperationAt<S: WitnessUseStage> =
+DerivativeUseOperationAt<S: WitnessTableState> =
     ProviderDerivativeUse(request: DerivativeProviderRequestAt<S>)
-  | StopGradientDerivativeUse(boundary: StopGradientBoundaryIdAt<S>)
+  | DetachDerivativeUse(boundary: DetachDerivativeBoundaryIdAt<S>)
   | RegisteredDerivativeUse(rule: RuleId, inputs: CanonicalArguments)
 
-DerivativeUseAt<S: WitnessUseStage> = {
+DerivativeUseAt<S: WitnessTableState> = {
     key: DerivativeUseKey,
     operation: DerivativeUseOperationAt<S>
 }
 
-DerivativeUseGraphAt<S: WitnessUseStage> = {
-    root: CanonicalDeclRef,
+DerivativeUseGraphAt<S: WitnessTableState> = {
+    root: DeclRef,
     rootWitnessResolutions: WitnessResolutionSetAt<S>,
     uses: CanonicallyOrderedMap<DerivativeUseId, DerivativeUseAt<S>>
 }
@@ -1303,8 +1304,8 @@ DerivativeUseGraphAt<S: WitnessUseStage> = {
 DerivativeUse = DerivativeUseAt<Published>
 DerivativeUseGraph = DerivativeUseGraphAt<Published>
 
-CallableDifferentiabilityValidationAt<S: WitnessUseStage> = {
-    callable: CanonicalDeclRef,
+CallableDifferentiabilityValidationAt<S: WitnessTableState> = {
+    callable: DeclRef,
     shape: CallableDifferentialShapeAt<S>,
     uses: DerivativeUseGraphAt<S>,
     providers:
@@ -1315,18 +1316,18 @@ CallableDifferentiabilityValidationAt<S: WitnessUseStage> = {
 CallableDifferentiabilityValidation =
     CallableDifferentiabilityValidationAt<Published>
 
-CallableDifferentiabilityValidationFailureAt<S: WitnessUseStage> =
+CallableDifferentiabilityValidationFailureAt<S: WitnessTableState> =
     BodyProviderRejected(use: DerivativeUseId,
                          failure: DerivativeProviderFailureAt<S>)
   | BodyProviderAmbiguous(
         use: DerivativeUseId,
         maximal: NonEmpty<ApplicableDerivativeProviderAt<S>>)
   | InvalidDerivativeActivityJoin(origin: Origin, reason: RuleId)
-  | DerivativeActivityLoss(origin: Origin, destination: PlaceRef)
+  | DerivativeActivityLoss(origin: Origin, destination: StorageRef)
   | UnsupportedDerivativeBodyOperation(rule: RuleId, origin: Origin)
   | RecursiveDerivativeBodyFailure(cycle: NonEmpty<QueryKey>)
 
-CallableDifferentiabilityValidationResultAt<S: WitnessUseStage> =
+CallableDifferentiabilityValidationResultAt<S: WitnessTableState> =
     ValidatedDifferentiableBody(CallableDifferentiabilityValidationAt<S>)
   | RejectedDifferentiableBody(
         NonEmpty<CallableDifferentiabilityValidationFailureAt<S>>,
@@ -1339,19 +1340,19 @@ CallableDifferentiabilityValidationResult =
 ```
 
 `DIF-BDY-001`: Activity starts at active callable slots and propagates through registered operation
-rules. A stop-gradient produces inactive output while retaining the input's use edge. A join uses
+rules. A detach-derivative produces inactive output while retaining the input's use edge. A join uses
 the declared finite activity lattice and preserves mixed provenance for diagnostics.
 
 `DIF-BDY-002`: Each differentiable call/use records its exact stage-bound
 `DerivativeProviderRequestAt<S>`. A completed validation has one successful selected provider whose
-winner's proof names that request for every `ProviderDerivativeUse` and no provider entry for stop-gradient
+winner's proof names that request for every `ProviderDerivativeUse` and no provider entry for detach-derivative
 or registered non-provider uses. Pending provider queries exist only as scheduler dependency edges;
 they are not graph payloads. Recursive and mutually recursive call graphs are solved by the
 scheduler's SCC policy; mutable visited sets or attribute-local dictionaries cannot decide success.
 
 `DIF-BDY-003`: Loop, side-effect, mutation, atomic, resource, and control-flow restrictions are
 registered validation rules with structured premises. A loop-bound/max-iteration promise is stored
-in the validated body and frontend IR, not consulted for the first time during reverse-mode code
+in the validated body and frontend IR, not consulted for the first time during backward-mode code
 generation.
 
 `DIF-BDY-004`: Every use map key equals `ContentId(use.key)`, every `use.key.owner` equals `root`,
@@ -1390,7 +1391,7 @@ witness, builtin, or explicit assumed evidence under the same provider algebra. 
 match without derivative evidence is insufficient.
 
 `DIF-CON-004`: Differential associated types/methods are ordinary kind-indexed witness entries.
-Their lookup uses `InterfaceSubtypeWitnessId` and exact keys; no rule assumes declaration order or
+Their lookup uses `SubtypeWitnessId` and exact keys; no rule assumes declaration order or
 special-cases a mutable witness-table representation.
 
 ## Scheduler products
@@ -1447,42 +1448,49 @@ reserved for a structurally valid error-bearing value and retains its root `Erro
 every declared failure constructor is reachable through a producing query and unit-testable without
 scraping diagnostics.
 
-## Core and frontend IR
+## IRReady and frontend IR
 
-Core AST carries the selected provider and `DerivativeSignatureMap` explicitly:
+`IRReadyAST` carries the selected provider and `DerivativeSignatureMap` explicitly:
 
 ```text
-CoreDerivativeProviderOperands =
+IRReadyDerivativeProviderOperands =
     StaticDerivativeProviderOperands
-  | WitnessDerivativeProviderOperands(witness: CoreValueId)
+  | WitnessDerivativeProviderOperands(witness: IRReadyValueId)
   | DynamicDerivativeProviderOperands
 
-CoreDifferentialEvidenceOperands = {
-    values: CanonicallyOrderedMap<DifferentialEvidenceOperandKey, CoreValueId>,
+IRReadyDifferentialEvidenceOperands = {
+    values: CanonicallyOrderedMap<DifferentialEvidenceOperandKey, IRReadyValueId>,
     materializationOrder: NodeList<DifferentialEvidenceOperandKey>
 }
 
-CoreDerivativeSelection = {
-    primalCallable: CoreValueId,
+IRReadyDerivativeEmissionPlan =
+    ForwardDerivativeEmissionPlan(base: IRReadyValueId)
+  | BackwardDerivativeEmissionPlan(applyFunction: IRReadyValueId,
+                                   contextType: IRReadyValueId,
+                                   backwardPropagateFunction: IRReadyValueId)
+
+IRReadyDerivativeSelectionPlan = {
+    primalCallable: IRReadyValueId,
     provider: ApplicableDerivativeProvider,
-    providerOperands: CoreDerivativeProviderOperands,
-    differentialEvidence: CoreDifferentialEvidenceOperands
+    providerOperands: IRReadyDerivativeProviderOperands,
+    differentialEvidence: IRReadyDifferentialEvidenceOperands,
+    emission: IRReadyDerivativeEmissionPlan
 }
 
-CoreDifferentiationOperation =
-    SelectForwardDerivative(selection: CoreDerivativeSelection)
-  | SelectReverseDerivative(selection: CoreDerivativeSelection)
-  | StopGradientOperation(value: CoreValueId,
-                          boundary: StopGradientBoundaryId)
+IRReadyDifferentiationPlan =
+    ForwardDerivativeSelectionPlan(selection: IRReadyDerivativeSelectionPlan)
+  | BackwardDerivativeSelectionPlan(selection: IRReadyDerivativeSelectionPlan)
+  | DetachDerivativePlan(value: IRReadyValueId,
+                         boundary: DetachDerivativeBoundaryId)
 
-IRDerivativePrimalOperand =
+DerivativePrimalMaterialization =
     DirectPrimalCallable(ordinal: UInt32, target: IRSymbolRef)
   | WitnessPrimalCallable(ordinal: UInt32,
-                          entry: WitnessRuntimeEntryKey)
+                          entry: RuntimeInterfaceRequirementKey)
   | DynamicPrimalCallable(ordinal: UInt32,
                           owner: TypeId,
                           slot: DynamicDispatchKey)
-  | ClosurePrimalCallable(ordinal: UInt32, invoke: IRSymbolRef)
+  | LambdaPrimalCallable(ordinal: UInt32, invoke: IRSymbolRef)
   | BuiltinPrimalCallable(ordinal: UInt32,
                           data: IRStaticData<IRBuiltinPrimalData>)
 
@@ -1508,116 +1516,140 @@ IRBuiltinDerivativeData = {
     inputs: CanonicalArguments
 }
 
-IRDerivativeProviderDescriptor =
-    UserDefinedIRDerivativeProvider(
+DerivativeProviderInstSemanticMetadata =
+    UserDefinedDerivativeProviderMetadata(
         target: IRSymbolRef,
         data: IRStaticData<IRDerivativeAssociationData>)
-  | SynthesizedIRDerivativeProvider(
+  | SynthesizedDerivativeProviderMetadata(
         target: IRSymbolRef,
         data: IRStaticData<SynthesisKey>)
-  | WitnessIRDerivativeProvider(
-        data: IRStaticData<WitnessRuntimeEntryKey>)
-  | DynamicIRDerivativeProvider(
+  | WitnessDerivativeProviderMetadata(
+        data: IRStaticData<RuntimeInterfaceRequirementKey>)
+  | DynamicDerivativeProviderMetadata(
         data: IRStaticData<DynamicDerivativeDispatch>)
-  | BuiltinIRDerivativeProvider(
+  | BuiltinDerivativeProviderMetadata(
         data: IRStaticData<IRBuiltinDerivativeData>)
-  | AssumedZeroIRDerivativeProvider(
+  | AssumedZeroDerivativeProviderMetadata(
         target: IRSymbolRef,
         data: IRStaticData<IRAssumedZeroDerivativeData>)
 
-IRDerivativeProviderOperands =
+DerivativeProviderMaterialization =
     NoAdditionalDerivativeProviderOperands
   | WitnessDerivativeProviderOperand(ordinal: UInt32,
-                                     classifier: InterfaceWitnessClassifier)
+                                     classifier: SubtypeWitnessForm)
   | DynamicDerivativeProviderOperand(primalOrdinal: UInt32,
                                      dispatch: DynamicDerivativeDispatch)
 
-IRDifferentialEvidenceOperand = {
+DifferentialEvidenceMaterialization = {
     key: DifferentialEvidenceOperandKey,
     ordinal: UInt32,
     shape: IRValueShape
 }
 
-IRDerivativeSelectionOperandLayout = {
-    primal: IRDerivativePrimalOperand,
-    provider: IRDerivativeProviderOperands,
+DerivativeSelectionMaterializationPlan = {
+    primal: DerivativePrimalMaterialization,
+    provider: DerivativeProviderMaterialization,
     differentialEvidence:
         CanonicallyOrderedMap<DifferentialEvidenceOperandKey,
-                              IRDifferentialEvidenceOperand>,
+                              DifferentialEvidenceMaterialization>,
     differentialEvidenceOrder: NodeList<DifferentialEvidenceOperandKey>,
     resultType: TypeId
 }
+
+DerivativeInstOperandLayout =
+    ForwardDerivativeInstOperands(base: UInt32)
+  | BackwardDerivativeInstOperands(applyFunction: UInt32,
+                                   contextType: UInt32,
+                                   backwardPropagateFunction: UInt32)
+
+DerivativeSelectionInstSemanticPlan = {
+    mode: DifferentiationMode,
+    provider: DerivativeProviderInstSemanticMetadata,
+    signature: DerivativeSignatureMapId,
+    materialization: DerivativeSelectionMaterializationPlan,
+    operands: DerivativeInstOperandLayout
+}
 ```
 
-Frontend IR has registered operations/decorations for derivative selection/request, stop-gradient,
-activity seeds, aggregate field mappings, loop bounds, and custom-provider associations. Each has a
-closed operand/result schema and direct semantic dependencies.
+Frontend IR uses the existing generated `IRForwardDifferentiate`, `IRBackwardDifferentiate`, and
+`IRDetachDerivative` instructions. Provider identity, signature maps, and materialization proofs
+live in `IRInstSemanticMetadata`; activity seeds, aggregate field mappings, loop bounds, and custom
+provider associations use their registered codebase operations/decorations. Each has a closed
+operand/result schema and direct semantic dependencies.
 
-`DIF-IR-001`: Lowering a derivative selection preserves provider kind. Direct/custom/builtin,
-witness-table, dynamic, assumed, and synthesized providers remain distinguishable. Operand zero is
-always the lowered primal callable value. Its runtime representation retains witness dispatch,
-dynamic receiver/slot state, or closure environment where applicable. A witness provider consumes
-its exact interface-witness value at the next ordinal. A dynamic provider consumes no hidden
-concrete method; it uses operand zero's dynamic state plus the stored derivative slot. Static
-providers add no runtime provider operand. Differential-evidence operands follow in
-`differentialEvidenceOrder`. The stored layout describes this exact sequence, and no lowering lookup
-may add or replace an operand.
+`DIF-IR-001`: Lowering a derivative selection plan preserves provider kind in
+`metadata.derivativeSelection`. Direct/custom/builtin, witness-table, dynamic, assumed, and
+synthesized providers remain distinguishable. The materialization plan emits explicit prerequisite
+instructions for specialization, witness lookup, dynamic callable selection, lambda-environment
+state, and differential evidence. It then emits exactly one generated differentiation instruction. A forward
+plan emits `IRForwardDifferentiate` with exactly one operand, `base`, and records
+`ForwardDerivativeInstOperands(base = 0)`. A backward plan emits `IRBackwardDifferentiate` with
+exactly three operands in this order: `applyFunction`, `contextType`, and
+`backwardPropagateFunction`; its recorded ordinals are `0`, `1`, and `2`. Provider or evidence
+values are not appended as extra differentiation operands and no provider payload is hidden in
+`IROp`.
 
 `DIF-IR-002`: The `DerivativeSignatureMap` is serialized or reproducibly referenced by content ID.
 Any downstream derivative body must have exactly that logical signature and slot map. A pass cannot
 derive parameter roles again from wrapper types, modifiers, or parameter position.
 
-`DIF-IR-003`: `StopGradientOperation` has the same primal result type and ordinary effects as its
+`DIF-IR-003`: Lowering an IRReady `DetachDerivativePlan` produces one `IRDetachDerivative`. The IR
+instruction
+has the same primal result type and ordinary effects as its
 operand while terminating derivative activity. Optimizations may remove it only when they prove no
 derivative transformation or diagnostic consumer observes the boundary.
 
-`DIF-IR-004`: `CoreDerivativeSelection.differentialEvidence` has exactly the keys and topological
-order of `provider.proof.evidenceOperands`. Each value is produced by structural lowering
+`DIF-IR-004`: `IRReadyDerivativeSelectionPlan.differentialEvidence` has exactly the keys and
+topological order of `provider.proof.evidenceOperands`. Each value is produced by structural lowering
 of its stage-specific source: table reference, bound ABI witness, specialization with explicit
 generic and constraint operands, one lookup operation, associated-type witness lookup, or
-existential opening.
-The IR layout has the same key set/order and assigns consecutive ordinals after the primal and
-optional provider operand. Every recorded `IRValueShape` equals the lowered evidence shape.
+existential opening. `DerivativeSelectionMaterializationPlan` has the same key set/order and assigns
+consecutive materialization ordinals. Every recorded `IRValueShape` equals the lowered evidence
+shape. Those values feed the explicit prerequisite graph that produces the one or three actual
+differentiation operands; they are not implicit extra operands of the final instruction.
 Differential type dictionaries, if used as an optimization, are derived from these explicit values
 and lookup operations. They are not semantic side tables and cannot be the only representation of
 generic, conformance, associated-type, or existential differential evidence.
 
-`DIF-IR-005`: A `CoreDerivativeSelection` has an applicable-provider proof whose request primal
-equals the callable represented by `primalCallable`, and the forward/reverse operation agrees with
-that request's mode. Typed-AST maximality proofs and rejected diagnostic candidates do not enter the
-executable Core node.
+`DIF-IR-005`: An `IRReadyDerivativeSelectionPlan` has an applicable-provider proof whose request
+primal equals the callable represented by `primalCallable`, and its forward/backward emission plan
+agrees with that request's mode. Typed-AST maximality proofs and rejected diagnostic candidates do
+not enter the executable IRReady node.
 `providerOperands` is `WitnessDerivativeProviderOperands` exactly for a
 `WitnessDerivative`, `DynamicDerivativeProviderOperands` exactly for a
-`DynamicDerivative`, and `StaticDerivativeProviderOperands` otherwise. Its sole result has the
-derivative function type named by `provider.signatureMap.derivative`. The corresponding frontend
-IR instruction preserves those operands and has exactly one
+`DynamicDerivative`, and `StaticDerivativeProviderOperands` otherwise. The forward `base`, or the
+backward apply/context/propagate triple, is the exact output of that plan's prerequisite
+materialization and cannot be replaced by an equal-typed value. The final instruction has exactly one
 `RuntimeValueShape(functionTypeOf(provider.signatureMap.derivative))` result.
 
-`DIF-IR-006`: `StopGradientOperation` consumes `value` as operand zero and returns one value of the
-same runtime type. The boundary ID, ordinary effect identity, and evaluation order are retained;
-there is no zero-operand decoration form from which a consumer must rediscover the stopped value.
+`DIF-IR-006`: `IRDetachDerivative` consumes `value` as operand zero and returns one value of the
+same runtime type. `DetachDerivativeBoundaryId` appears only in
+`metadata.detachDerivative = Some(DetachDerivativeInstSemanticPlan{boundary})`; it is not an
+operand or `IROp` payload. Ordinary effects come from the generated instruction schema, and
+evaluation order comes from the SSA graph. There is no zero-operand decoration form from which a
+consumer must rediscover the stopped value.
 
 `DIF-IR-007`: The semantic `DerivativeProviderAt<Published>` is exhaustively lowered to the matching
-`IRDerivativeProviderDescriptor`. User-defined and synthesized callable providers resolve to
+`DerivativeProviderInstSemanticMetadata`. User-defined and synthesized callable providers resolve to
 function `IRSymbolRef`s. Witness, dynamic, builtin, association, synthesis, and trust-policy facts
-use the descriptor alternative's exact `IRStaticData<T>` payload type with
+use the metadata alternative's exact `IRStaticData<T>` payload type with
 `id = ContentId(value)`. An assumed provider's callable endpoint is also an `IRSymbolRef`. Every
-symbol ref occurs in `FrontendIRFragment.references` and resolves under `IR-RES-001`; no descriptor
-contains `ResolvedDeclRef`, `CanonicalDeclRef`, `CallableValue`, witness-resolution sidecars, or AST
-nodes. Every standard-environment rule mentioned by the descriptor or its static data appears as a
-`StandardRuleDependency` in the fragment requirements.
+symbol ref occurs in `FrontendIRFragment.references` and resolves under `IR-RES-001`; no metadata
+contains `ResolvedDeclRef`, `DeclRef`, `CallableValue`, witness-resolution sidecars, or AST
+nodes. Every standard-environment rule mentioned by the provider metadata alternative or its
+static data appears as a `StandardRuleDependency` in the fragment requirements.
 
-`DIF-IR-008`: Descriptor static data is sufficient to validate provider kind, requested mode/order,
+`DIF-IR-008`: Provider semantic metadata is sufficient to validate provider kind, requested mode/order,
 witness entry or dynamic slot, builtin registration, and association/trust policy without semantic
 lookup. It does not duplicate a callable symbol identity: the `IRSymbolRef` is the sole IR authority
 for callable targets. Conversely, non-callable provider facts never masquerade as symbol refs.
-Serialization round-trips the descriptor and static data byte-for-byte, and linking rewrites only
+Serialization round-trips the metadata and static data byte-for-byte, and linking rewrites only
 `IRSymbolRef.linkage` under the ordinary symbol-resolution rules.
 
 ## Failure algebra and validation
 
 ```text
-DifferentiabilityFailureAt<S: WitnessUseStage> =
+DifferentiabilityFailureAt<S: WitnessTableState> =
     DifferentialInfoQueryFailure(DifferentialInfoFailure)
   | AggregateDifferentialQueryFailure(AggregateDifferentialFailureAt<S>)
   | CallableDifferentialShapeQueryFailure(
@@ -1644,8 +1676,8 @@ a list of provider names, and scheduler `Blocked` is never wrapped as a language
 
 Unit/property suites cover every type evidence constructor (including generic and existential
 witnesses), field synthesis, all slot × mode × activity × differentiation-mode combinations,
-custom-provider coherence, interface dispatch, stop-gradient effect preservation, recursive
-queries, serialization, and exact Core/IR slot mapping. Provider tests independently vary
+custom-provider coherence, interface dispatch, detach-derivative effect preservation, recursive
+queries, serialization, and exact IRReady/IR slot mapping. Provider tests independently vary
 pre-inference selection effects, ordinary inferred requirements, and concrete availability; cover
 `None` versus explicit `TrueFormula` sources; prove that an unavailable concrete source rejects
 before ranking while an ordinary requirement becomes a use; and mutate post-fixpoint effective

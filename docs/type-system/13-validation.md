@@ -33,7 +33,7 @@ SymbolRef = {
 
 TestHarnessKind =
     UnitHarness | SlangTestHarness | PropertyHarness | FuzzHarness |
-    DifferentialHarness | RegisteredTestHarness(QualifiedName)
+    FrontendComparisonHarness | RegisteredTestHarness(QualifiedName)
 
 TestSelector =
     WholeArtifact
@@ -104,17 +104,25 @@ from filenames or line coverage.
 The unit-test library exposes builders for each immutable domain:
 
 ```text
-TestSource::fromBytes(bytes, encoding) -> SourceDocument
-TestTokens::fromKinds(...) -> PhysicalTokenTape
-TestCst::sourceNode(kind, physicalSlices...) -> SourceGreenNode
-TestCst::grammarNode(kind, expandedTokens...) -> GrammarGreenNode
-TestAst<S>::node(kind, fields...) -> AstSnapshot<S>
+TestSourceFixture = {
+    record: SourceFileRecord,
+    snapshot: SourceFileSnapshot,
+    view: SourceView
+}
+
+TestSource::fromBytes(bytes, encoding) -> TestSourceFixture
+TestTokens::fromKinds(...) -> PhysicalTokenList
+TestCST::sourceNode(kind, physicalSlices...) -> SourceGreenNode
+TestCST::grammarNode(kind, expandedTokens...) -> GrammarGreenNode
+TestAST<S>::node(kind, fields...) -> ASTSnapshot<S>
 TestSemantics::type(...), decl(...), scope(...), witness(...)
 FakeQueryContext::given(key, result)
 FakeStandardEnvironment::withDecls(...)
 ```
 
 Builders validate the same schema as production code and assign deterministic synthetic IDs. A
+`TestSourceFixture` satisfies `record.decoded = ContentId(snapshot)` and
+`view.key.snapshot = record.decoded`. A
 test that needs two overload candidates should not load the core module, construct a linkage, parse
 a file, or run declaration checking unless that dependency is the subject of the test.
 
@@ -142,12 +150,12 @@ supply small fakes:
 | effect inference             | direct-effect uses, declared contracts, local/imported callee facts                                          |
 | capability inference         | atom graph, direct-use facts, callee requirements                                                            |
 | expression checking          | bound children and the narrow primitive queries the node rule requests                                       |
-| property reference formation | typed abstract/physical place, accessor target, call/access planner, registered-operation validator          |
-| Core lowering                | canonical semantic values, imported symbol resolver, IR fragment builder                                     |
+| property reference formation | typed abstract/physical storage, accessor target, call/access planner, registered-operation validator        |
+| IRReady lowering             | canonical semantic values, imported symbol resolver, IR fragment builder                                     |
 
 Mocks return real domain values, not booleans that bypass invariants. For example, a mock coercion
 provider returns a `ConversionResult` with plan, rank, and witness; a mock conformance provider
-returns a `ConformanceSearchResult` referring to immutable identity/definition facts.
+returns a `WitnessTableSearchResult` referring to immutable identity/definition facts.
 
 `TST-MOCK-001`: A unit test asserts both its result and the exact dependency requests made. An
 unexpected dependency fails the test, exposing hidden coupling early.
@@ -171,7 +179,7 @@ Required direct lexer/CST suites include:
 - whole and sliced `>>` expanded-token coverage;
 - every grammar production in isolation;
 - property/subscript accessor blocks containing `constref`, `ref`, and both spellings; normalization
-  to distinct `AccessorRole.Ref(ReadAccess)`/`Ref(ReadWriteAccess)` keys; exact-role duplicate
+  to distinct `AccessorRole.RefAccessor(ReadAccess)`/`Ref(ReadWriteAccess)` keys; exact-role duplicate
   diagnostics; and round trips preserving declaration order without using that order as identity;
 - disambiguation of unbracketed accessor `constref`, parameter `__constref`, and receiver
   `[constref]`, including recovery at each production boundary and CST-to-Surface normalization;
@@ -181,7 +189,7 @@ Required direct lexer/CST suites include:
 
 The parser has two generated completeness tests:
 
-1. every `CstKind` must be constructible by at least one grammar production or recovery rule;
+1. every `CSTKind` must be constructible by at least one grammar production or recovery rule;
 2. every grammar production must have at least one positive token sequence and one generated
    single-token deletion/insertion recovery case.
 
@@ -237,7 +245,7 @@ end-to-end language tests happen to create the node.
 - `extendRank` identity/associativity/monotonicity, overflow failure, and search dominance;
 - rank ordering, irreflexivity/transitivity of `strictlyBetter`, antisymmetry after quotienting by
   `SemanticallyEquivalent`, and stable equal-rank ambiguity;
-- argument arity, labels, defaults, variadics, direction/place requirements, and receiver matching;
+- argument arity, labels, defaults, variadics, direction/storage requirements, and receiver matching;
 - generic and non-generic candidates, explicit/partial generic application, and defaults;
 - each tie-break rule isolated from all later rules;
 - “best failed candidate” diagnostic ranking isolated from semantic applicability; and
@@ -261,8 +269,8 @@ alternatives and both outer `CheckResult` alternatives: only an applicable conve
 slot. Dependency tests leave each child query pending in turn and require scheduler blocking rather
 than a fabricated semantic failure.
 
-Ranking mutation tests replace `AccessPlan.rankingConversion` independently with `None`,
-`ConvertedAccess`, and each `ConsumedWithoutAccessConversion(rule)`. Candidate validation derives
+Ranking mutation tests replace `StorageAccessPlan.rankingCoercion` independently with `None`,
+`AppliedStorageCoercion`, and each `ConsumedWithoutStorageCoercion(rule)`. Candidate validation derives
 exactly one `SourceAdaptationRank` from that stored value, rejects `None`, and admits
 `PhysicalParameterIdentityPassingRule` as the sole conversion-free physical-mode rule. No parallel
 rank field or conversion plan is accepted. Alias-rejection fixtures round-trip the complete
@@ -276,29 +284,29 @@ The `__constref` matrix contains, at minimum:
   `mode.domain = PhysicalOperand(r)` and `mode.access = ReadAccess`, while `__ref` maps to
   `RefMode(r)` with `ReadWriteAccess`; changing either structural axis fails
   function-type validation;
-- an exactly typed physical place satisfying the complete instantiated `r` succeeds without a
-  temporary and remains `isPhysicalStorage = True` through Typed, Core, IR, and the callable ABI;
+- an exactly typed physical storage satisfying the complete instantiated `r` succeeds without a
+  temporary and remains `isPhysicalStorage = True` through Typed, IRReady, IR, and the callable ABI;
 - mutable physical storage may satisfy `ConstRefMode(r)` through a read-only provision proof, but
   the selected argument cannot gain write access from the underlying location's stronger access;
 - mutable and immutable stored variables are crossed with both physical modes: each readable
   location may satisfy `ConstRefMode`, while `RefMode` succeeds only when effective access provides
   `ReadWriteAccess`; mutability and access failures retain distinct reasons;
 - an rvalue, literal, computed value, temporary materialization proposal, nonidentity conversion,
-  getter-only, setter-only, getter-plus-setter property/subscript, and ordinary abstract place
+  getter-only, setter-only, getter-plus-setter property/subscript, and ordinary abstract storage
   without the exact reference-accessor key each fail with their distinct structured premise
   failure;
 - a property or subscript with a declared `constref` accessor evaluates its receiver and indices
-  once, selects exactly `AccessorRole.Ref(ReadAccess)`, validates the returned reference/location
+  once, selects exactly `AccessorRole.RefAccessor(ReadAccess)`, validates the returned reference/location
   certificate, and passes the resulting physical location without loading its value;
 - accessor-produced physical-parameter fixtures pair the retained plan with the exact typed
-  `AbstractPlace` source and authenticated slot site. Replacing that source with an equal-classified
+  `AbstractStorage` source and authenticated slot site. Replacing that source with an equal-classified
   sibling, validating against the enclosing call node, changing the slot ordinal, or reusing a
   sibling slot's site is rejected before lowering;
-- a property or subscript having only `get`, only `ref` (`AccessorRole.Ref(ReadWriteAccess)`), or an
+- a property or subscript having only `get`, only `ref` (`AccessorRole.RefAccessor(ReadWriteAccess)`), or an
   optional/absent `constref` accessor does not satisfy `ConstRefMode`; no access-strength
   substitution, ordinary-read fallback, or getter-to-temporary recovery is attempted;
 - properties/subscripts declaring both `constref` and `ref` retain both keys through requirement
-  signatures, witness maps, adapters, serialization, and runtime witness-entry projection; lookup
+  signatures, `RequirementDictionary` values, adapters, serialization, and runtime witness-entry projection; lookup
   selects the exact requested role independently of declaration order;
 - exact, one-of, generic, and standard-referenceable address-space requirements are crossed with
   allowed and forbidden storage address spaces, while `AnyPhysicalStorage` and every registered
@@ -329,7 +337,7 @@ The `__constref` matrix contains, at minimum:
 
 Mutation tests independently exchange the accessor role, physical-location identity, access proof,
 location requirement, address space, source provenance, lifetime, alias root,
-`AccessEnvironmentId`, Core category, IR operation, ABI input alternative, and call-local admission
+`AccessEnvironmentId`, IRReady category, IR operation, ABI input alternative, and call-local admission
 proof. They also inject a getter, value conversion, load, temporary, nonphysical category, or
 write-capable use. Each mutation must fail validation rather than being repaired by lowering.
 Const-reference projection fixtures cover stored fields, builtin indexing, vector elements, and
@@ -337,7 +345,7 @@ registered read-only physical projections with zero, one, and multiple runtime i
 success preserves the physical base's location proof and derives the projected physical location,
 read access, lifetime, address space, provenance, and alias by the registered projection rule; no
 projection may erase `isPhysicalStorage`, mint write permission, or reconstruct an operand from a
-later Core/IR result.
+later IRReady/IR result.
 Alias-algebra unit tests exhaust the exact/exact, exact/joined, joined/joined, and unknown cases of
 `CompareAliasOverlap`, including symmetry and canonical common-region selection. Call-level tests
 then cross disjoint, shared-read, exclusive, read-only-reference, write-capable-reference, and
@@ -371,14 +379,14 @@ resolution. Registered physical resource projections are positive `__ref` cases;
 declared properties/subscripts remain negative direct-`__ref` cases. Dereference fixtures likewise
 require the selected registered standard prefix candidate; a user-defined `operator*` remains an
 ordinary typed call and cannot enter `CheckDereferenceAt<S>` from token spelling alone. They set the
-handle and expression-context lifetimes independently, require every successful result place to use
+handle and expression-context lifetimes independently, require every successful result storage to use
 the context's exact `evaluationLifetime`, and require the source-lifetime proof to have those exact
 endpoints; a shorter handle selects `DereferenceLifetimeExpired(actual, required)`. Every
 successful case also derives a stage-free `DereferenceApplicationIdentity`, retains the exact
-executable handle separately, and carries `DereferencedReference(identity)` through Typed, Core,
+executable handle separately, and carries `DereferencedReference(identity)` through Typed, IRReady,
 and IR forms. Tests
 replace the identity with the handle `NodeId<Typed>`, a sibling dereference identity, and the later
-Core/IR producer ID; drop or replace the handle operand; and independently mutate every
+IRReady/IR producer ID; drop or replace the handle operand; and independently mutate every
 `DereferencedStorageProof` endpoint. The matrix is repeated for an internal ref-accessor read/write
 fallback, whose identity is derived from the accessor invocation rather than an otherwise
 nonexistent dereference-expression node.
@@ -390,24 +398,24 @@ Registered physical-projection fixtures independently vary standard-environment 
 inputs, source-only site assignment, optional base, zero/one/multiple indices, endpoint access
 plans, and written evaluation order. A success retains executable base/index expressions and
 evaluates each exactly once through
-Typed, Elaborated, Core, and IR forms. Negative tests drop, duplicate, reorder, or replace one
+Typed, Elaborated, IRReady, and IR forms. Negative tests drop, duplicate, reorder, or replace one
 runtime operand; mutate registered result type, path identity, or each access/mutability/lifetime/
 address-space/alias derivation; and substitute an ordinary data operation with the same target
 opcode. Construction stores only the intrinsic `RegisteredPhysicalProjectionResultProof`.
 Read/write/physical-reference-mode/initialization/address tests then create distinct use-specific
 `PhysicalStorageProof` values without changing the projection's classifier, content identity, or
-serialized Core/IR descriptor. Round trips require the IR operand order and role-to-shape map to
+serialized IRReady/IR descriptor. Round trips require the IR operand order and role-to-shape map to
 replay the exact registered application without an AST or reconstructed base path.
 
 Builtin physical-element fixtures independently vary the physical base, converted runtime index,
 named builtin rule, result type, path, alias derivation, and written base-then-index order. A
 success retains exactly one `BuiltinPhysicalProjectionApplicationAt<S>` and lowers one-to-one
-through Elaborated, `CoreBuiltinPhysicalProjection`, and
-`BuiltinPhysicalProjectionStorageOperation`. Round trips assert that
+through Elaborated, `IRReadyBuiltinPhysicalProjection`, and
+an instruction carrying `BuiltinPhysicalProjectionInstPlan`. Round trips assert that
 `BuiltinElement(inputStorage.path, identity)` contains no `NodeId<Typed>`, while the application and
-Core/IR operation still carry both executable operands and the complete result proof. Negative
+IRReady/IR operation still carry both executable operands and the complete result proof. Negative
 tests drop, duplicate, reorder, or exchange equal-typed operands; substitute the index node ID,
-Core value ID, or IR instruction ID for the stable identity; mutate the base path or any storage
+IRReady value ID, or IR instruction ID for the stable identity; mutate the base path or any storage
 component; and retag the application as a registered projection or generic data operation. Every
 mutation fails instead of triggering path-based operand reconstruction.
 
@@ -419,12 +427,12 @@ a sibling; and verify that builtin, registered, dereference, const-reference-acc
 accessor-invocation constructors produce distinct nominal identities. Synthesized-anchor mutation
 tests attempt to embed a `SynthesizedSemanticId`, `SynthesisKey`, or syntax-node cause; recovery
 tests attempt to embed `ErrorId` or its semantic diagnostic anchor. All are rejected transitively,
-as are direct `StableSemanticId`, `NodeId<Typed>`, Core value, and IR instruction substitutions.
+as are direct `StableSemanticId`, `NodeId<Typed>`, IRReady value, and IR instruction substitutions.
 Index tests publish the exact content-addressed internal storage plans and
 their scheduler-query dependencies, then reject duplicate identities, missing/extra plans,
 non-bijective dependencies, unresolved owners, wrong application kinds, and identity mismatches.
-Round trips require `StoredRoot(CanonicalDeclRef)` and reject a `BoundDeclUse`, lookup path, access
-decision, witness sidecar, origin, or AST ID in every transitive Core/IR storage proof.
+Round trips require `StoredRoot(DeclRef)` and reject a `BoundDeclUse`, lookup path, access
+decision, witness sidecar, origin, or AST ID in every transitive IRReady/IR storage proof.
 
 The matrix covers declared and registered accessor availability; exact direct/witness/dynamic/
 builtin dispatch; recursive accessor calls that retain pre-inference `TypedCallAt.Selection`; and
@@ -434,9 +442,9 @@ expansion projections from one captured pack, dense capture-result IDs, each sou
 slot/operand/evaluate-once step, each keyed access recipe and cleanup, exact referent/
 access/lifetime/address-space/alias proof endpoints, and serialization without fresh lookup,
 mapping, conversion, or contract inference. It also asserts that the original property remains an
-abstract place: a physical mode succeeds only when planning selects and retains the exact declared
-reference-accessor route. `ConstRefMode` requires `AccessorRole.Ref(ReadAccess)`, while `RefMode`
-requires `AccessorRole.Ref(ReadWriteAccess)`; neither key substitutes for the other. Each route
+abstract storage: a physical mode succeeds only when planning selects and retains the exact declared
+reference-accessor route. `ConstRefMode` requires `AccessorRole.RefAccessor(ReadAccess)`, while `RefMode`
+requires `AccessorRole.RefAccessor(ReadWriteAccess)`; neither key substitutes for the other. Each route
 invokes the accessor and its stored dereference exactly once to produce the proved physical
 endpoint, without reclassifying the original property. Each stored semantic-use edge enters inference
 exactly once. Separate
@@ -473,18 +481,18 @@ fixture requires `PassArgument`. Cross-purpose alternatives, a dummy runtime arg
 standalone write, or a storage terminal in a call slot are independently rejected under
 `ELB-ACC-010`.
 Read/write fallback fixtures require the
-closed `ResolveAbstractPlaceThroughReference` sequence, physical load/store, and a non-escaping
+closed `ResolveAbstractStorageThroughReference` sequence, physical load/store, and a non-escaping
 intermediate handle; they reject naming that handle from the plan terminal, turning it into a
 `RuntimeArgument`, returning/capturing it, or
-reclassifying the source `AbstractPlace` as physical.
+reclassifying the source `AbstractStorage` as physical.
 The fallback accessor site must be the fixed-role child of the authenticated storage-access site,
 and the fallback dereference site must in turn be the fixed-role child of that accessor site.
 Sibling-parent substitutions and identities derived from either typed call ID are rejected.
 
 `TST-ID-001`: For every retained operational identity above, round-trip validation accepts only the
 matching nominal `ContentId<SemanticOperationSiteKey>` constructor. It recursively rejects every
-site anchor containing an AST identity and every identity reconstructed from a Typed/Core/IR node,
-while proving that removing the source-only assignment at the Core boundary leaves the nominal ID
+site anchor containing an AST identity and every identity reconstructed from a Typed/IRReady/IR node,
+while proving that removing the source-only assignment at the IRReady boundary leaves the nominal ID
 and complete executable application unchanged.
 
 Typed-call construction tests independently vary the complete `capabilitySelection` against the
@@ -500,11 +508,11 @@ atomically;
 they reject a certificate for a prior/equal-typed call and prove that no builder requires a
 `TypedCallAt` which already contains its own certificate. Ordinary, fixed, accessor, and registered
 call-result authorities are tested as disjoint alternatives. Every successful accessor invocation
-must have the exact `ReferenceHandleCallResult`/raw-certificate equation from `EXP-REF-003`;
+must have the exact `PointerLikeCallResult`/raw-certificate equation from `EXP-REF-003`;
 deserialization rejects `OrdinaryCallResult`, fixed/registered provenance, changed raw shape, or a
 sibling certificate even when signature and result type agree. Header tests give two declarations
-the same signature but different result authorities and require `BindHeader`, specialization,
-candidate construction, typed/elaborated/Core calls, `FunctionAbiMap`, and IR function/call shapes
+the same signature but different result authorities and require `BindDeclHeader`, specialization,
+candidate construction, typed/elaborated/IRReady calls, `FunctionAbiMap`, and IR function/call shapes
 to preserve the declaration-anchored ID. Builders receive no authority override, and mutation of
 the ABI map or declaration shape to the other same-signature authority is rejected.
 Access-environment tests require the
@@ -531,16 +539,16 @@ lifetime would have compared equal.
 - exact, adapted, defaulted, builtin, missing, and ambiguous requirement matches;
 - associated type, value, callable, property/accessor, subscript, constructor, and nested
   conformance requirements;
-- keyed maps under reordered interface declarations;
+- `RequirementDictionary` values under reordered interface declarations;
 - inherited/overridden requirements and diamond interfaces;
 - receiver/mode/effect/capability mismatch;
-- conformance identity/definition graph cycles, conditional witness partitions, optional absence,
+- witness-table identity/definition graph cycles, conditional witness partitions, optional absence,
   and path-distinct diamond keys;
-- concrete, generic, specialized, bound, lookup, existential, and pack interface-subtype witness
+- concrete, generic, specialized, bound, lookup, existential, and pack `SubtypeWitness`
   values, with stable identity across construction-to-publication definition-resolution rewrites;
 - exact one-to-one `LookupSubtypeWitness` spines, including requirement-key mismatch, diamond path
   distinction, serialization, and one frontend-IR lookup operation per semantic lookup;
-- synthesis-key idempotence and deterministic thunk bodies; and
+- synthesis-key idempotence and deterministic synthesized requirement witness method bodies; and
 - witness substitution, composition, validation, serialization, and IR key preservation.
 
 ### Initialization
@@ -572,15 +580,16 @@ lifetime would have compared equal.
   direct-to-destination lowering, and exactly-once input evaluation;
 - materialized temporary initialization uses one authenticated `TemporaryStorageIdentity` and
   `TemporaryStorageAliasRegion` through the outer access descriptor, nested destination binding,
-  Core storage, and IR storage; substituting a plan ordinal, node ID, destination content ID, or
+  IRReady storage, and IR storage; substituting a plan ordinal, node ID, destination content ID, or
   sibling operation site is rejected;
 - `INI-CTR-001` endpoint mutation in which access, value type, lifetime, entry state, and capability
   facts remain valid while the exact `AddressSpaceAdmissionProof` is missing, belongs to another
   storage shape, or proves another symbolic address-space requirement; none can substitute for it;
-- one-to-one selected-plan mapping to each closed Core/frontend-IR initialization operation and
-  explicit creation, result extraction, all-exit cleanup, and dependency tracking for plan-owned
-  storage, with lossless IR physical-storage shapes;
-- tooling-only recovered initialization lowers to `IRErrorOperation` with no initialization-plan
+- exact selected-plan-step mapping to its declared actual-`IROp` emission recipe and
+  `InitializationInstSemanticPlan` sidecars, including explicit creation, result extraction,
+  all-exit cleanup, dependency-map merging for multi-instruction recipes, and lossless physical
+  storage shapes;
+- tooling-only recovered initialization lowers to `IRPoison` with no initialization-plan
   dependency and is rejected from publishable frontend IR;
 - per-subobject definite initialization on normal/exceptional/delegating paths, replay of every
   exit-state proof, dependency-correct partial destruction, and exactly-once required allocation
@@ -599,9 +608,9 @@ drops one role, converts one into the other, or loses a source while retaining t
 
 - value and pointer differential evidence, associated-type idempotence, `dzero`/`dadd`, aggregate
   field maps, exclusions, and ambiguous providers;
-- forward and reverse signature maps for receiver, every passing mode, result/error policy, packs,
+- forward and backward signature maps for receiver, every passing mode, result/error policy, packs,
   active/inactive slots, and derivative order boundaries;
-- `ConstRefMode(r)` is tested separately from `InMode` in forward and reverse mode, for both active
+- `ConstRefMode(r)` is tested separately from `InMode` in forward and backward mode, for both active
   and inactive slots. Missing registration yields `MissingPhysicalOperandDerivativeRule`; no case
   falls back to an unchanged value input or an implicit pair/accumulator mapping;
 - registered const-reference derivative rules are crossed with exact and mismatched access,
@@ -622,22 +631,25 @@ drops one role, converts one into the other, or loses a source while retaining t
   of discovery/source/module order;
 - keyed differential-evidence operand plans for concrete, generic-specialized, bound, lookup,
   associated-type, and opened-existential witnesses, including transitive substitution/constraint
-  dependencies, stage-correct resolution sets, topological order, and exact Core/IR operand shapes;
+  dependencies, stage-correct resolution sets, topological order, and exact IRReady/IR operand shapes;
 - derivative slot maps whose domains include receiver, every expanded `ParameterKey`, result, and
   preserved error channel, with receiver/result/error never encoded as ordinary parameters;
 - `fwd_diff`, `bwd_diff`, `no_diff`, custom association coherence, interface dispatch, and exact
-  preservation of ordinary effects/access across stop-gradient boundaries;
+  preservation of ordinary effects/access across detach-derivative boundaries;
 - body activity joins, mutation/control-flow restrictions, recursive provider/synthesis queries,
   and deterministic serialization;
 - total differentiation query products covering every structured rejection and ambiguity,
   scheduler blocking/resumption, valid recovery values, and proof that no declared failure is
   reachable only through diagnostic text;
-- Core-to-IR provider lowering in which callable endpoints are `IRSymbolRef`s, other provider facts
+- IRReady-to-IR provider lowering in which callable endpoints are `IRSymbolRef`s, other provider facts
   are canonical `IRStaticData`, all references resolve, and no descriptor serializes an AST callable
   or witness-resolution sidecar; and
-- exact Core/IR preservation of provider identity, `DerivativeSignatureMap`, primal callable
-  operand, witness-provider operand, dynamic/closure state, and stop-gradient input/result
-  operations.
+- exact IRReady/IR preservation of provider identity, `DerivativeSignatureMap`, prerequisite
+  witness/dynamic/lambda materialization, and final generated operands: one `base` for
+  `IRForwardDifferentiate`; `applyFunction`, `contextType`, and `backwardPropagateFunction` for
+  `IRBackwardDifferentiate`; and one `value` for `IRDetachDerivative`. Tests reject extra provider
+  or evidence operands, swapped backward operands, an opcode payload, and a detach boundary stored
+  anywhere except `IRInstSemanticMetadata`.
 
 ### Capabilities
 
@@ -669,7 +681,7 @@ drops one role, converts one into the other, or loses a source while retaining t
 - conversion, access-plan, and typed-call composition preserves the complete
   `CapabilitySelectionAt<S>`. A selected call merges its callable/extension selection with every
   call-slot plan selection; removing a conversion source/use, retaining only a flat requirement,
-  or copying a proof from another region is invalid in both Core replay and frontend-IR replay;
+  or copying a proof from another region is invalid in both IRReady replay and frontend-IR replay;
 - interface and adapter fixtures independently mutate ordinary inferred compatibility and
   region-indexed concrete-availability compatibility, including an equal formula used in both roles
   without merging their proof/use identities;
@@ -701,11 +713,17 @@ validator, and implementation version are registered.
 
 Elaboration tests directly instantiate typed nodes and assert explicit plans:
 
+- `IROp` is mutated independently from every `IRInstSemanticMetadata` facet. Tests require the
+  exact generated opcode/operand schemas for `IRCall`, `IRSpecialize`,
+  `IRLookupWitnessMethod`, `IRExtractExistentialWitnessTable`, the three derivative instructions,
+  `IRUnconditionalBranch`, `IRConditionalBranch`, `IRSwitch`, `IRReturn`, `IRThrow`, and
+  `IRUnreachable`; reject semantic payload hidden in an opcode; and derive CFG successors only from
+  terminator operands;
 - receiver insertion and every parameter passing mode;
 - default/named argument mapping, stage-neutral access recipes, operand binding, aliasing,
   temporary/write-back, closed terminal purpose, and terminal-relative normal/exceptional cleanup
   behavior;
-- call capability metadata from typed call through elaborated call, `CoreCallContract`, and the
+- call capability metadata from typed call through elaborated call, `IRReadyCallContract`, and the
   stage-free `IRCapabilitySelection` projection. Fixtures cover zero, one, and multiple concrete
   sources; exact subject/source IDs, combined requirement, region proof, and keyed ordinary uses;
   local/witness use stamps, per-concrete-source dependency stamps, inverse reconstruction; and
@@ -713,33 +731,35 @@ Elaboration tests directly instantiate typed nodes and assert explicit plans:
   Projection is rejected after mutating any source/use/proof/stamp/dependency. The metadata is
   absent from ABI inputs/results and
   `AbiCallInstantiation`, and equal flattened formulas never substitute for it;
-- lambda capture identity, ordering, mode, nested forwarding, closure layout, and callable witness;
+- lambda capture identity, ordering, mode, nested forwarding, environment layout, and callable
+  witness;
 - property/subscript getter and setter rewrites plus explicit reference-formation accessor calls;
   capture-once result environments retain the exact `CapturedStorageSource` and executable
-  `ElaboratedExprAt<S>` even for a place; source-set identity, source projections, ordinary
+  `ElaboratedExprAt<S>` even for a storage; source-set identity, source projections, ordinary
   typed-call contract completion,
-  closed Core reference producer/dereference payloads, and one-to-one `IRReferenceOperation`
-  alternatives; multi-expansion tests project one captured pack result, while negative tests mutate
+  closed IRReady reference producer/dereference payloads, and one-to-one
+  `ReferenceInstSemanticPlan` alternatives whose selected actual opcodes match their sidecars;
+  multi-expansion tests project one captured pack result, while negative tests mutate
   the result ID, source role, expansion path, slot, operand, or evaluate-once step independently;
   physical-mode call planning retains exactly one keyed reference-accessor invocation and its
   stored dereference when the argument is abstract. `ConstRefMode` accepts only
-  `AccessorRole.Ref(ReadAccess)` and rejects a mutable `ref`-only property; `RefMode` accepts only
-  `AccessorRole.Ref(ReadWriteAccess)`. Both preserve the resulting physical location without a
+  `AccessorRole.RefAccessor(ReadAccess)` and rejects a mutable `ref`-only property; `RefMode` accepts only
+  `AccessorRole.RefAccessor(ReadWriteAccess)`. Both preserve the resulting physical location without a
   load. The separately authorized
-  ordinary read/write fallback expands through `ResolveAbstractPlaceThroughReference`, physical
+  ordinary read/write fallback expands through `ResolveAbstractStorageThroughReference`, physical
   load/store, and a non-escaping handle. Payload-complete writes retain their source evaluation,
   conversion, completion condition, write terminal, and returned source value under `ELB-ACC-009`;
-  physical reads lower directly to Core `Load`, writes to `Store`/setter regions, and only
+  physical reads lower directly to IRReady `Load`, writes to `Store`/setter regions, and only
   `PassArgument` contributes to an enclosing call region. These cover `ELB-REF-001` through
   `ELB-REF-004`, `ELB-ACC-007` through `ELB-ACC-010`, and `IR-REF-001` through `IR-REF-005`
   independently. Registered direct-reference and handle-transform cases require their stage-free
-  Core applications to retain registration, endpoint proofs, and control while keeping the exact
-  physical/handle value as a separate Core operand; `input.operand`, selection state, semantic uses,
+  IRReady applications to retain registration, endpoint proofs, and control while keeping the exact
+  physical/handle value as a separate IRReady operand; `input.operand`, selection state, semantic uses,
   and every typed-node identity are absent;
 - builtin physical-element applications preserve their base/index operand roles, evaluation order,
-  stable projection identity, result proof, and output storage through `ELB-PLC-003`,
-  `ELB-PLC-004`, and `IR-PLC-002`. Dereference applications preserve the independently executable
-  handle plus the stable identity/path equation through `IR-REF-004`; no Core or IR descriptor
+  stable projection identity, result proof, and output storage through `ELB-STO-003`,
+  `ELB-STO-004`, and `IR-STO-002`. Dereference applications preserve the independently executable
+  handle plus the stable identity/path equation through `IR-REF-004`; no IRReady or IR descriptor
   contains a `NodeId<Typed>`;
 - accessor-result certificate lowering retains producer instruction/normal ordinal, call
   instantiation ID, contract, stage-free subject evidence, signature, referent, exact
@@ -764,17 +784,17 @@ Elaboration tests directly instantiate typed nodes and assert explicit plans:
   requirement, provenance-policy, and same-`TypeId` mutations exercise `IR-ABI-001` through
   `IR-ABI-004`;
   return/throw and call-result tests reject handle provenance erasure or fabrication;
-- physical/abstract plan-ID separation and elimination of every abstract place before Core;
+- physical/abstract plan-ID separation and elimination of every abstract storage before IRReady;
 - interface adapter/default/builtin synthesis;
 - existential open/pack and witness dispatch;
 - static/generic/specialized/bound/lookup/existential witness values and witness calls whose first
   IR operand is the witness value rather than a table symbol;
-- direct-to-destination initialization and derivative-provider/stop-gradient Core operations;
+- direct-to-destination initialization and derivative-provider/detach-derivative IRReady operations;
 - defer/throw cleanup edges; and
 - pack/compile-time/target elaboration.
 
-Core-to-IR tests use a fake symbol resolver and compare a normalized IR fragment. They do not run
-target legalization or emission. Mutual-recursion tests publish all `IRSymbolDeclaration`s before
+IRReady-to-IR tests use a fake symbol resolver and compare a normalized IR fragment. They do not run
+target legalization or emission. Mutual-recursion tests publish all `IRSymbolDecl`s before
 definitions and verify stable `ParameterKey`/requirement-key maps.
 
 ## Differential and migration testing
@@ -785,7 +805,7 @@ same source and compares normalized observations:
 - accepted/rejected status and structured diagnostics;
 - exported declarations and canonical signatures;
 - selected overloads and inferred generic arguments;
-- witness-map keys and satisfying declaration identities;
+- `RequirementDictionary` keys and satisfying declaration identities;
 - required effects, capabilities, and visibility; and
 - normalized initial IR.
 
