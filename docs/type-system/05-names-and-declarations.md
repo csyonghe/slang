@@ -366,7 +366,7 @@ parameter declaration by position.
 
 ## Contextual words and syntax ambiguities
 
-A word used as fixed grammar syntax is resolved by `SyntaxFeatureSet`, not ordinary semantic name
+A word used as fixed grammar syntax is resolved by `GrammarVocabulary`, not ordinary semantic name
 lookup. A word in a named ambiguous CST is classified by:
 
 ```text

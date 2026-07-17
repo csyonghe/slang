@@ -117,14 +117,20 @@ ExactFloatingPointLiteral = {
 
 LiteralFailure = {
     kind: InvalidSpelling | InvalidEscape | InvalidSuffix | InvalidUnicodeScalar,
-    range: SourceRange,
+    token: TokenRef,
+    spellingRange: ByteRange,
     offendingText: Utf8String
 }
 
-LiteralDecodeResult = DecodedLiteral(LiteralValue) | InvalidLiteral(LiteralFailure)
+DecodedLiteralPayload = {
+    value: LiteralValue,
+    suffixSpelling: Utf8String
+}
 
-DecodeLiteral(token) -> LiteralDecodeResult
-ChooseLiteralType(value, suffix, expected, Σ) -> TypeId
+LiteralDecodeResult = DecodedLiteral(DecodedLiteralPayload) | InvalidLiteral(LiteralFailure)
+
+DecodeLiteral(token: TokenRef, languageRules: LanguageRuleSetId) -> LiteralDecodeResult
+ChooseLiteralType(value, suffixSpelling, expected, Σ) -> TypeId
 ```
 
 An explicit suffix selects a standard-environment literal type or reports an unsupported suffix.
@@ -135,8 +141,16 @@ values before conversion to the selected type. `IntegerLiteralValue` and
 the current host-sized payloads with exact immutable values; contextual conversion, not decoding,
 performs target-width rounding and range checks.
 
+`DecodeLiteral` accepts a content-literal `TokenType`, or an `Identifier` spelling that the named
+language rules classify as `BoolLiteralValue`, `NullPtrLiteralValue`, or `NoneLiteralValue`.
+`LiteralFailure.spellingRange` is half-open in the token's logical spelling, so failure remains
+representable for macro-pasted and synthesized tokens without inventing a physical `SourceRange`.
+The token's `TokenOriginId` supplies diagnostic provenance. The query is pure and its result may be
+cached by `(TokenRef, LanguageRuleSetId)`; no decoded payload is stored as competing token authority.
+
 ```text
-decode(tok) = v    chooseType(v, suffix(tok), expected, Σ) = τ
+decode(tok, rules(Σ)) = { value = v, suffixSpelling = s }
+chooseType(v, s, expected, Σ) = τ
 ---------------------------------------------------------------- EXP-LIT-001
 Γ ⊢ tok ⇝ LiteralExpr(v, τ, origin(tok)) : τ @ RValue
 ```
@@ -2501,7 +2515,8 @@ ConstEvalResult = Value(ConstValue)
 ConstPhase = GenericArgument | TypeFormation | Attribute | CaseLabel | FullCompileTime
 ```
 
-Preprocessor constant evaluation is a separate pre-CST domain with its own macro-defined-name and
+Preprocessor constant evaluation is a separate `PreprocessorStructured`/`MacroExpanded` CST domain
+with its own macro-defined-name and
 integer rules; it never accepts a `TypedExpr` or reads semantic declarations. `PpConstResult` is a
 preprocessor integer/boolean value or structured preprocessor error.
 

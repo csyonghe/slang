@@ -21,7 +21,7 @@ NameClass =
   | OperatorName
   | ConstructorName
   | AccessorName(role: GetterName | SetterName | RefAccessorName(StorageAccessMode))
-  | ContextualName(feature: SyntaxFeatureId)
+  | ContextualName(word: GrammarWordId)
 
 NameKey = {
     normalizedText: Utf8String,
@@ -1538,7 +1538,7 @@ SemanticOperationSiteDerivation =
 
 SemanticOperationSiteAssignmentContext = {
     sources: CanonicallyOrderedSet<SourceFileSnapshotId>,
-    expandedViews: CanonicallyOrderedSet<ExpandedTokenViewId>,
+    parsedCST: CanonicallyOrderedSet<CSTSnapshotId<Parsed>>,
     provenance: SemanticSnapshotId
 }
 
@@ -2277,10 +2277,11 @@ call, exact `BoundCallSlot`, and full child role path instead of pretending the 
 standalone Typed projection node.
 
 `TYP-STO-015`: A retained operational application identity is constructed only from a serialized
-`SemanticOperationSiteKey`. Parsed syntax anchors the key in its canonical physical source ranges
-and deterministic same-range occurrence before a CST or AST snapshot exists. Macro-origin ranges
-are projected through the immutable preprocessing origin map. Synthesized, imported, and recovery
-syntax uses the corresponding closed stage-free anchor. A synthesized anchor contains only a
+`SemanticOperationSiteKey`. Parsed syntax anchors the key in canonical physical source ranges and
+a deterministic same-range occurrence derived from its CST cursor, without embedding a CST or AST
+snapshot identity. Macro-origin ranges are computed by `physicalSpellingSources` from each token's
+immutable `TokenOriginId` through the `CSTRewrite` graph. Synthesized,
+imported, and recovery syntax uses the corresponding closed stage-free anchor. A synthesized anchor contains only a
 source/import/recovery root plus a fixed rule/ordinal synthesis path; it never embeds the source
 `SynthesizedSemanticId`, `SynthesisKey`, cause, or canonical arguments. A recovery anchor contains
 only canonical source ranges and an occurrence; it never embeds `ErrorId` or a semantic diagnostic
@@ -2289,7 +2290,8 @@ fixed `RuleId` and deterministic ordinal to `rolePath`; cloning or expansion app
 role rather than reusing the source
 application. Physical projection, dereference, accessor invocation, and temporary-storage allocation
 constructors content-address that complete key and wrap the result in
-distinct nominal types. None accepts `StableSemanticId`, `CSTNodeId`, `AnyNodeId`, `NodeId<Typed>`, an IR-ready AST
+distinct nominal types. None accepts `StableSemanticId`, `AnyCSTNodeId`, `AnyNodeId`,
+`NodeId<Typed>`, an IR-ready AST
 value ID, or an IR instruction ID. Requests carry an authenticated site assignment explicitly, and
 their successful
 application identity must equal the corresponding constructor result, avoiding both an AST content-
@@ -2297,8 +2299,8 @@ identity cycle and a later attempt to recover a site from `Origin`.
 
 `TYP-STO-016`: `AssignSemanticOperationSite` normalizes the supplied origin to exactly one closed
 source/synthesis/import/recovery anchor using only its explicit frozen assignment context. That
-context is part of the query key and records the exact source snapshots, expanded-token views, and
-earlier-stage provenance snapshot traversed; it cannot include the Typed snapshot being built, and
+context is part of the query key and records the exact source snapshots, macro-expanded CST
+predecessors, and earlier-stage provenance snapshot traversed; it cannot include the Typed snapshot being built, and
 no ambient source manager or AST registry participates. A root
 derived from synthesized or recovery `Origin` recursively projects provenance to the closed
 `SemanticOperationSourceAnchor` and records only the fixed derivation path shown above. Failure to

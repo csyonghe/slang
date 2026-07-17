@@ -1,0 +1,156 @@
+{
+  "schemaVersion": {
+    "major": 1,
+    "minor": 0
+  },
+  "grammar": "grammar.ebnf",
+  "grammarSha256": "8bbd5bf6f43e2143fff653f4a395a9e98e81eae73c87038067d9d9a8371476d5",
+  "stage": "Parsed",
+  "wireTags": {
+    "algorithm": "sha256-domain-prefix-u32be-v1",
+    "namespace": "slang.frontend.cst-production.v1",
+    "reserved": [0],
+    "collisionRule": "reject",
+    "overrides": {
+      "nodeKinds": {},
+      "fields": {},
+      "groups": {},
+      "alternatives": {}
+    }
+  },
+  "productionKind": {
+    "algorithm": "hyphenated-lower-to-upper-camel-v1",
+    "overrides": {
+      "source-file": "GrammarRoot",
+      "if-statement": "IfStatement"
+    }
+  },
+  "fieldNaming": {
+    "algorithm": "source-ordered-leaf-role-v1",
+    "collisionRule": "append-one-based-occurrence-from-second-use",
+    "softKeywordRule": "logical-spelling-lower-camel-plus-Keyword",
+    "literalRoles": {
+      "!": "exclamation",
+      "!=": "exclamationEqual",
+      "$": "dollar",
+      "%": "percent",
+      "%=": "percentEqual",
+      "&": "ampersand",
+      "&&": "ampersandAmpersand",
+      "&=": "ampersandEqual",
+      "(": "leftParenthesis",
+      "()": "emptyParentheses",
+      ")": "rightParenthesis",
+      "*": "asterisk",
+      "*=": "asteriskEqual",
+      "+": "plus",
+      "++": "plusPlus",
+      "+=": "plusEqual",
+      ",": "comma",
+      "-": "minus",
+      "--": "minusMinus",
+      "-=": "minusEqual",
+      "->": "arrow",
+      ".": "dot",
+      "/": "slash",
+      "/=": "slashEqual",
+      ":": "colon",
+      "::": "scope",
+      ";": "semicolon",
+      "<": "leftAngle",
+      "<<": "shiftLeft",
+      "<<=": "shiftLeftEqual",
+      "<=": "lessEqual",
+      "=": "equal",
+      "==": "equalEqual",
+      "=>": "fatArrow",
+      ">": "rightAngle",
+      ">=": "greaterEqual",
+      ">>": "shiftRight",
+      ">>=": "shiftRightEqual",
+      "?": "question",
+      "[": "leftBracket",
+      "[]": "emptyBrackets",
+      "]": "rightBracket",
+      "^": "caret",
+      "^=": "caretEqual",
+      "{": "leftBrace",
+      "|": "pipe",
+      "|=": "pipeEqual",
+      "||": "pipePipe",
+      "}": "rightBrace",
+      "~": "tilde"
+    },
+    "terminalRoles": {
+      "CHAR_LITERAL": "characterLiteral",
+      "END_OF_FILE": "endOfFile",
+      "FLOATING_POINT_LITERAL": "floatingPointLiteral",
+      "IDENTIFIER": "identifier",
+      "INTEGER_LITERAL": "integerLiteral",
+      "STRING_LITERAL": "stringLiteral",
+      "TOKEN": "token",
+      "VIRTUAL_GREATER_FROM_SHIFT_RIGHT": "virtualGreaterFromShiftRight"
+    }
+  },
+  "categoryMembership": {
+    "ExprCSTCategory": ["expression", "if-let-binding"],
+    "StmtCSTCategory": ["statement"],
+    "DeclCSTCategory": ["declaration", "top-level-declaration"]
+  },
+  "productionOverrides": {
+    "if-statement": {
+      "exact": true,
+      "fields": [
+        {
+          "name": "ifKeyword",
+          "baseType": "TerminalNodeId<Parsed>",
+          "select": [{ "kind": "soft", "symbol": "if", "ordinal": 1 }]
+        },
+        {
+          "name": "leftParenthesis",
+          "baseType": "TerminalNodeId<Parsed>",
+          "select": [{ "kind": "literal", "symbol": "(", "ordinal": 1 }]
+        },
+        {
+          "name": "conditionExpr",
+          "baseType": "ExprCSTNodeId<Parsed>",
+          "merge": "exclusiveAlternatives",
+          "select": [
+            { "kind": "nonterminal", "symbol": "expression", "ordinal": 1 },
+            { "kind": "nonterminal", "symbol": "if-let-binding", "ordinal": 1 }
+          ]
+        },
+        {
+          "name": "rightParenthesis",
+          "baseType": "TerminalNodeId<Parsed>",
+          "select": [{ "kind": "literal", "symbol": ")", "ordinal": 1 }]
+        },
+        {
+          "name": "trueBranch",
+          "baseType": "StmtCSTNodeId<Parsed>",
+          "select": [
+            { "kind": "nonterminal", "symbol": "statement", "ordinal": 1 }
+          ]
+        },
+        {
+          "name": "elseKeyword",
+          "baseType": "TerminalNodeId<Parsed>",
+          "select": [{ "kind": "soft", "symbol": "else", "ordinal": 1 }]
+        },
+        {
+          "name": "falseBranch",
+          "baseType": "StmtCSTNodeId<Parsed>",
+          "select": [
+            { "kind": "nonterminal", "symbol": "statement", "ordinal": 2 }
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "coPresent",
+          "fields": ["elseKeyword", "falseBranch"]
+        }
+      ]
+    }
+  }
+}

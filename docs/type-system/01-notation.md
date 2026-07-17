@@ -198,7 +198,8 @@ The rule identifier is part of the rule and is recorded in elaboration provenanc
 Every primitive query returns a value of this shape:
 
 ```text
-DiagnosticSeverity = Note | Warning | Error | Fatal
+Severity = Disable | Note | Warning | Error | Fatal | Internal
+EmittedSeverity = Severity where value in {Note, Warning, Error, Fatal}
 
 DiagnosticAnchor = SourceAnchor(SourceRange) | SemanticAnchor(StableSemanticId)
 
@@ -220,7 +221,7 @@ RelatedDiagnostic = {
 DiagnosticKey = {
     rootError: Option<ErrorId>,
     code: QualifiedName,
-    severity: DiagnosticSeverity,
+    severity: EmittedSeverity,
     primary: Origin,
     rule: RuleId,
     arguments: CanonicalArguments
@@ -242,6 +243,10 @@ CheckResult<T> =
     Success(value: T, diagnostics: DiagnosticSet)
   | Recovered(value: T, errors: NonEmpty<ErrorId>, diagnostics: DiagnosticSet)
 ```
+
+`Disable` is the result of diagnostic policy and never appears in a `DiagnosticKey`. `Internal`
+records a compiler invariant/infrastructure failure rather than a source-language error; chapter 10
+captures it as an execution failure, not a serialized language diagnostic.
 
 Dependency blocking and cancellation are execution states of the scheduler in chapter 10, not
 semantic `CheckResult` alternatives and never values in a published AST snapshot.
@@ -273,7 +278,8 @@ The specification distinguishes:
 - **node identity** — stable identity within a snapshot, used for provenance and declarations;
 - **structural equality** — equal kind and recursively equal fields;
 - **semantic equality** — equality after canonical type/value normalization; and
-- **source equivalence** — equal physical token text and origin mapping.
+- **source equivalence** — equal ordered `Token | Trivia` physical spellings and token-origin
+  mapping.
 
 Canonicalization is a pure query. Pointer equality may optimize canonical equality inside one
 process but must never define language semantics.
@@ -369,13 +375,14 @@ the implementation must not use it as a scheduler lattice.
 
 ## Provenance
 
-Every transformation output carries one of:
+Every AST or semantic transformation output carries one of the following. Concrete-syntax
+translations carry the stage-indexed `CSTNodeOrigin` and `CSTRewrite` records defined in chapter 3.
 
 ```text
 ModuleInterfaceContentId = ContentId<SchemaValue>
 
 Origin =
-    Parsed(cst: CSTNodeId)
+    Parsed(cst: CSTNodeId<Parsed>)
   | Derived(previous: AnyNodeId, rule: RuleId)
   | Synthesized(group: SynthesisKey, outputRole: SynthesisOutputRole,
                 causes: NonEmpty<StableSemanticId>)
@@ -386,8 +393,8 @@ OriginSet = CanonicallyOrderedSet<Origin>
 ```
 
 Provenance is a semantic edge, not a structural child. Generic traversal can choose whether to
-follow structural, semantic, or provenance edges and therefore cannot accidentally recurse through
-the entire history of a node.
+follow structural, packed-alternative, semantic, or provenance edges and therefore cannot
+accidentally recurse through the entire history of a node.
 
 ## Rule template
 

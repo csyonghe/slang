@@ -797,7 +797,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 659
+          "line": 804
         }
       ]
     },
@@ -877,11 +877,11 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 3146
+          "line": 3148
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1727
+          "line": 1741
         },
         {
           "file": "09-capabilities-and-visibility.md",
@@ -912,19 +912,19 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 3149
+          "line": 3151
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1534
+          "line": 1548
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1706
+          "line": 1720
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1871
+          "line": 1885
         },
         {
           "file": "07-calls-and-generics.md",
@@ -948,15 +948,15 @@
         },
         {
           "file": "13-validation.md",
-          "line": 503
+          "line": 648
         },
         {
           "file": "13-validation.md",
-          "line": 604
+          "line": 749
         },
         {
           "file": "13-validation.md",
-          "line": 666
+          "line": 811
         },
         {
           "file": "14-subtyping-facets-and-extensions.md",
@@ -1150,7 +1150,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1727
+          "line": 1741
         },
         {
           "file": "09-capabilities-and-visibility.md",
@@ -1224,7 +1224,7 @@
       "title": "CON-DECL-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2536
+        "line": 2551
       },
       "definitionCount": 1,
       "implementation": [],
@@ -1234,7 +1234,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2536
+          "line": 2551
         }
       ]
     },
@@ -1243,7 +1243,7 @@
       "title": "CON-EVAL-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2546
+        "line": 2561
       },
       "definitionCount": 1,
       "implementation": [],
@@ -1253,7 +1253,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2546
+          "line": 2561
         }
       ]
     },
@@ -1262,7 +1262,7 @@
       "title": "CON-EVAL-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2553
+        "line": 2568
       },
       "definitionCount": 1,
       "implementation": [],
@@ -1272,7 +1272,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2553
+          "line": 2568
         }
       ]
     },
@@ -1281,7 +1281,7 @@
       "title": "CON-PP-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2549
+        "line": 2564
       },
       "definitionCount": 1,
       "implementation": [],
@@ -1291,7 +1291,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2549
+          "line": 2564
         }
       ]
     },
@@ -2564,7 +2564,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 623
+          "line": 768
         },
         {
           "file": "16-differentiability.md",
@@ -2682,7 +2682,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 623
+          "line": 768
         },
         {
           "file": "16-differentiability.md",
@@ -2861,7 +2861,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 623
+          "line": 768
         },
         {
           "file": "16-differentiability.md",
@@ -3291,7 +3291,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 3134
+          "line": 3136
         },
         {
           "file": "11-elaboration-and-ir.md",
@@ -3387,7 +3387,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 754
+          "line": 899
         }
       ]
     },
@@ -3429,7 +3429,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 751
+          "line": 896
         }
       ]
     },
@@ -3456,11 +3456,11 @@
         },
         {
           "file": "13-validation.md",
-          "line": 482
+          "line": 627
         },
         {
           "file": "13-validation.md",
-          "line": 754
+          "line": 899
         }
       ]
     },
@@ -4027,7 +4027,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 753
+          "line": 898
         }
       ]
     },
@@ -4088,7 +4088,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 754
+          "line": 899
         }
       ]
     },
@@ -4153,7 +4153,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 760
+          "line": 905
         }
       ]
     },
@@ -4176,7 +4176,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 761
+          "line": 906
         }
       ]
     },
@@ -4185,7 +4185,7 @@
       "title": "EXP-ASN-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 244
+        "line": 258
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4195,7 +4195,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 244
+          "line": 258
         }
       ]
     },
@@ -4204,7 +4204,7 @@
       "title": "EXP-CALL-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1930
+        "line": 1944
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4214,7 +4214,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1930
+          "line": 1944
         }
       ]
     },
@@ -4318,7 +4318,7 @@
       "title": "EXP-COND-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1966
+        "line": 1980
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4328,7 +4328,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1966
+          "line": 1980
         }
       ]
     },
@@ -4337,7 +4337,7 @@
       "title": "EXP-DIF-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1945
+        "line": 1959
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4347,7 +4347,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1945
+          "line": 1959
         }
       ]
     },
@@ -4356,7 +4356,7 @@
       "title": "EXP-DIF-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1949
+        "line": 1963
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4366,7 +4366,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1949
+          "line": 1963
         }
       ]
     },
@@ -4408,7 +4408,7 @@
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1410
+          "line": 1424
         }
       ]
     },
@@ -4417,7 +4417,7 @@
       "title": "EXP-EXT-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2112
+        "line": 2126
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4427,7 +4427,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2112
+          "line": 2126
         }
       ]
     },
@@ -4436,7 +4436,7 @@
       "title": "EXP-INIT-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1984
+        "line": 1998
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4446,7 +4446,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1984
+          "line": 1998
         }
       ]
     },
@@ -4455,7 +4455,7 @@
       "title": "EXP-INIT-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1987
+        "line": 2001
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4465,7 +4465,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1987
+          "line": 2001
         }
       ]
     },
@@ -4474,7 +4474,7 @@
       "title": "EXP-INIT-003",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1997
+        "line": 2011
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4484,7 +4484,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1997
+          "line": 2011
         }
       ]
     },
@@ -4493,7 +4493,7 @@
       "title": "EXP-LAM-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2083
+        "line": 2097
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4503,7 +4503,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2083
+          "line": 2097
         }
       ]
     },
@@ -4512,7 +4512,7 @@
       "title": "EXP-LAM-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2095
+        "line": 2109
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4522,7 +4522,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2095
+          "line": 2109
         }
       ]
     },
@@ -4531,7 +4531,7 @@
       "title": "EXP-LAM-003",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2088
+        "line": 2102
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4541,7 +4541,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2088
+          "line": 2102
         }
       ]
     },
@@ -4550,7 +4550,7 @@
       "title": "EXP-LIT-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 140
+        "line": 154
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4560,7 +4560,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 140
+          "line": 154
         }
       ]
     },
@@ -4569,7 +4569,7 @@
       "title": "EXP-MEM-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 275
+        "line": 289
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4579,51 +4579,13 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 275
+          "line": 289
         }
       ]
     },
     {
       "id": "EXP-MEM-002",
       "title": "EXP-MEM-002",
-      "primary": {
-        "file": "06-expressions-and-statements.md",
-        "line": 278
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 278
-        }
-      ]
-    },
-    {
-      "id": "EXP-MEM-003",
-      "title": "EXP-MEM-003",
-      "primary": {
-        "file": "06-expressions-and-statements.md",
-        "line": 285
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 285
-        }
-      ]
-    },
-    {
-      "id": "EXP-MEM-004",
-      "title": "EXP-MEM-004",
       "primary": {
         "file": "06-expressions-and-statements.md",
         "line": 292
@@ -4641,11 +4603,11 @@
       ]
     },
     {
-      "id": "EXP-MEM-005",
-      "title": "EXP-MEM-005",
+      "id": "EXP-MEM-003",
+      "title": "EXP-MEM-003",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 303
+        "line": 299
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4655,7 +4617,45 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 303
+          "line": 299
+        }
+      ]
+    },
+    {
+      "id": "EXP-MEM-004",
+      "title": "EXP-MEM-004",
+      "primary": {
+        "file": "06-expressions-and-statements.md",
+        "line": 306
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 306
+        }
+      ]
+    },
+    {
+      "id": "EXP-MEM-005",
+      "title": "EXP-MEM-005",
+      "primary": {
+        "file": "06-expressions-and-statements.md",
+        "line": 317
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 317
         }
       ]
     },
@@ -4664,7 +4664,7 @@
       "title": "EXP-MEM-006",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 332
+        "line": 346
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4674,7 +4674,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 332
+          "line": 346
         }
       ]
     },
@@ -4683,7 +4683,7 @@
       "title": "EXP-MEM-007",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 486
+        "line": 500
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4693,7 +4693,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 486
+          "line": 500
         }
       ]
     },
@@ -4702,7 +4702,7 @@
       "title": "EXP-MEM-008",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 501
+        "line": 515
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4712,7 +4712,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 501
+          "line": 515
         }
       ]
     },
@@ -4721,7 +4721,7 @@
       "title": "EXP-NAME-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 153
+        "line": 167
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4731,7 +4731,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 153
+          "line": 167
         }
       ]
     },
@@ -4740,7 +4740,7 @@
       "title": "EXP-PACK-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2142
+        "line": 2156
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4750,7 +4750,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2142
+          "line": 2156
         }
       ]
     },
@@ -4759,7 +4759,7 @@
       "title": "EXP-PAR-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 180
+        "line": 194
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4769,7 +4769,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 180
+          "line": 194
         }
       ]
     },
@@ -4778,7 +4778,7 @@
       "title": "EXP-PAR-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 189
+        "line": 203
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4788,7 +4788,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 189
+          "line": 203
         }
       ]
     },
@@ -4797,7 +4797,7 @@
       "title": "EXP-PAR-003",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 197
+        "line": 211
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4807,7 +4807,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 197
+          "line": 211
         }
       ]
     },
@@ -4816,7 +4816,7 @@
       "title": "EXP-REF-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1422
+        "line": 1436
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4826,61 +4826,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1422
-        },
-        {
-          "file": "13-validation.md",
-          "line": 366
-        }
-      ]
-    },
-    {
-      "id": "EXP-REF-002",
-      "title": "EXP-REF-002",
-      "primary": {
-        "file": "06-expressions-and-statements.md",
-        "line": 1440
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 1440
-        },
-        {
-          "file": "13-validation.md",
-          "line": 366
-        }
-      ]
-    },
-    {
-      "id": "EXP-REF-003",
-      "title": "EXP-REF-003",
-      "primary": {
-        "file": "06-expressions-and-statements.md",
-        "line": 1445
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 1445
-        },
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 1803
-        },
-        {
-          "file": "13-validation.md",
-          "line": 366
+          "line": 1436
         },
         {
           "file": "13-validation.md",
@@ -4889,11 +4835,11 @@
       ]
     },
     {
-      "id": "EXP-REF-004",
-      "title": "EXP-REF-004",
+      "id": "EXP-REF-002",
+      "title": "EXP-REF-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1499
+        "line": 1454
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4903,19 +4849,73 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 264
-        },
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 1499
-        },
-        {
-          "file": "06-expressions-and-statements.md",
-          "line": 1602
+          "line": 1454
         },
         {
           "file": "13-validation.md",
-          "line": 367
+          "line": 511
+        }
+      ]
+    },
+    {
+      "id": "EXP-REF-003",
+      "title": "EXP-REF-003",
+      "primary": {
+        "file": "06-expressions-and-statements.md",
+        "line": 1459
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 1459
+        },
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 1817
+        },
+        {
+          "file": "13-validation.md",
+          "line": 511
+        },
+        {
+          "file": "13-validation.md",
+          "line": 656
+        }
+      ]
+    },
+    {
+      "id": "EXP-REF-004",
+      "title": "EXP-REF-004",
+      "primary": {
+        "file": "06-expressions-and-statements.md",
+        "line": 1513
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 278
+        },
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 1513
+        },
+        {
+          "file": "06-expressions-and-statements.md",
+          "line": 1616
+        },
+        {
+          "file": "13-validation.md",
+          "line": 512
         }
       ]
     },
@@ -4924,7 +4924,7 @@
       "title": "EXP-REF-005",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1543
+        "line": 1557
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4934,11 +4934,11 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1543
+          "line": 1557
         },
         {
           "file": "13-validation.md",
-          "line": 367
+          "line": 512
         }
       ]
     },
@@ -4947,7 +4947,7 @@
       "title": "EXP-REF-006",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1632
+        "line": 1646
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4957,15 +4957,15 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1632
+          "line": 1646
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1890
+          "line": 1904
         },
         {
           "file": "13-validation.md",
-          "line": 367
+          "line": 512
         }
       ]
     },
@@ -4974,7 +4974,7 @@
       "title": "EXP-REF-007",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1657
+        "line": 1671
       },
       "definitionCount": 1,
       "implementation": [],
@@ -4984,11 +4984,11 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1657
+          "line": 1671
         },
         {
           "file": "13-validation.md",
-          "line": 367
+          "line": 512
         }
       ]
     },
@@ -4997,7 +4997,7 @@
       "title": "EXP-REF-008",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1674
+        "line": 1688
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5007,11 +5007,11 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1674
+          "line": 1688
         },
         {
           "file": "13-validation.md",
-          "line": 367
+          "line": 512
         }
       ]
     },
@@ -5020,7 +5020,7 @@
       "title": "EXP-REF-009",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1712
+        "line": 1726
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5030,11 +5030,11 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1712
+          "line": 1726
         },
         {
           "file": "13-validation.md",
-          "line": 367
+          "line": 512
         }
       ]
     },
@@ -5043,7 +5043,7 @@
       "title": "EXP-REF-010",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1729
+        "line": 1743
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5053,11 +5053,11 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1729
+          "line": 1743
         },
         {
           "file": "13-validation.md",
-          "line": 368
+          "line": 513
         }
       ]
     },
@@ -5066,7 +5066,7 @@
       "title": "EXP-REF-011",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1749
+        "line": 1763
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5076,7 +5076,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1749
+          "line": 1763
         }
       ]
     },
@@ -5085,7 +5085,7 @@
       "title": "EXP-REF-012",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1840
+        "line": 1854
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5095,7 +5095,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1840
+          "line": 1854
         }
       ]
     },
@@ -5104,7 +5104,7 @@
       "title": "EXP-REF-013",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1848
+        "line": 1862
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5114,7 +5114,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1848
+          "line": 1862
         }
       ]
     },
@@ -5123,7 +5123,7 @@
       "title": "EXP-REF-014",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1878
+        "line": 1892
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5133,7 +5133,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1878
+          "line": 1892
         }
       ]
     },
@@ -5142,7 +5142,7 @@
       "title": "EXP-REF-015",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1896
+        "line": 1910
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5152,7 +5152,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1896
+          "line": 1910
         }
       ]
     },
@@ -5161,7 +5161,7 @@
       "title": "EXP-REF-016",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1905
+        "line": 1919
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5171,11 +5171,11 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1905
+          "line": 1919
         },
         {
           "file": "13-validation.md",
-          "line": 368
+          "line": 513
         }
       ]
     },
@@ -5184,7 +5184,7 @@
       "title": "EXP-STO-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1550
+        "line": 1564
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5194,7 +5194,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1550
+          "line": 1564
         }
       ]
     },
@@ -5203,7 +5203,7 @@
       "title": "EXP-STO-002",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1562
+        "line": 1576
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5213,7 +5213,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1562
+          "line": 1576
         },
         {
           "file": "07-calls-and-generics.md",
@@ -5226,7 +5226,7 @@
       "title": "EXP-STO-003",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1571
+        "line": 1585
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5236,7 +5236,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1571
+          "line": 1585
         }
       ]
     },
@@ -5245,7 +5245,7 @@
       "title": "EXP-STO-004",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1597
+        "line": 1611
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5255,7 +5255,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1597
+          "line": 1611
         }
       ]
     },
@@ -5264,7 +5264,7 @@
       "title": "EXP-STO-005",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 1608
+        "line": 1622
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5274,7 +5274,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1608
+          "line": 1622
         }
       ]
     },
@@ -5283,7 +5283,7 @@
       "title": "EXP-STO-006",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 257
+        "line": 271
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5293,7 +5293,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 257
+          "line": 271
         }
       ]
     },
@@ -5302,7 +5302,7 @@
       "title": "EXP-STO-007",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 260
+        "line": 274
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5312,7 +5312,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 260
+          "line": 274
         }
       ]
     },
@@ -5321,7 +5321,7 @@
       "title": "EXP-THIS-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 171
+        "line": 185
       },
       "definitionCount": 1,
       "implementation": [],
@@ -5331,7 +5331,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 171
+          "line": 185
         }
       ]
     },
@@ -7431,7 +7431,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 585
+          "line": 730
         },
         {
           "file": "15-initialization.md",
@@ -8317,7 +8317,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 600
+          "line": 745
         },
         {
           "file": "15-initialization.md",
@@ -8340,7 +8340,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 600
+          "line": 745
         },
         {
           "file": "15-initialization.md",
@@ -8633,7 +8633,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 784
+          "line": 929
         }
       ]
     },
@@ -8698,7 +8698,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 785
+          "line": 930
         }
       ]
     },
@@ -8877,7 +8877,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 754
+          "line": 899
         }
       ]
     },
@@ -8938,7 +8938,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 762
+          "line": 907
         }
       ]
     },
@@ -8961,7 +8961,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 754
+          "line": 899
         }
       ]
     },
@@ -9087,7 +9087,7 @@
         },
         {
           "file": "13-validation.md",
-          "line": 761
+          "line": 906
         }
       ]
     },
@@ -9210,7 +9210,7 @@
       "title": "LEX-ID-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 132
+        "line": 192
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9220,7 +9220,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 132
+          "line": 192
         }
       ]
     },
@@ -9229,7 +9229,7 @@
       "title": "LEX-LIT-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 159
+        "line": 219
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9239,7 +9239,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 159
+          "line": 219
         }
       ]
     },
@@ -9248,7 +9248,7 @@
       "title": "LEX-LIT-002",
       "primary": {
         "file": "02-syntax.md",
-        "line": 162
+        "line": 224
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9258,7 +9258,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 162
+          "line": 224
         }
       ]
     },
@@ -9267,7 +9267,7 @@
       "title": "LEX-SRC-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 80
+        "line": 130
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9277,7 +9277,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 80
+          "line": 130
         }
       ]
     },
@@ -9286,7 +9286,7 @@
       "title": "LEX-SRC-002",
       "primary": {
         "file": "02-syntax.md",
-        "line": 84
+        "line": 134
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9296,7 +9296,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 84
+          "line": 134
         }
       ]
     },
@@ -9305,7 +9305,7 @@
       "title": "LEX-TOK-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 111
+        "line": 169
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9315,7 +9315,11 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 111
+          "line": 169
+        },
+        {
+          "file": "12-compatibility-ledger.md",
+          "line": 74
         }
       ]
     },
@@ -9324,7 +9328,7 @@
       "title": "LEX-TOK-002",
       "primary": {
         "file": "02-syntax.md",
-        "line": 116
+        "line": 173
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9334,7 +9338,11 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 116
+          "line": 173
+        },
+        {
+          "file": "12-compatibility-ledger.md",
+          "line": 54
         }
       ]
     },
@@ -9343,7 +9351,7 @@
       "title": "LEX-TRI-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 182
+        "line": 245
       },
       "definitionCount": 1,
       "implementation": [],
@@ -9353,7 +9361,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 182
+          "line": 245
         }
       ]
     },
@@ -10267,7 +10275,7 @@
       "title": "PAR-ACC-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 299
+        "line": 639
       },
       "definitionCount": 1,
       "implementation": [],
@@ -10277,7 +10285,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 299
+          "line": 639
         },
         {
           "file": "08-interfaces-and-synthesis.md",
@@ -10294,7 +10302,7 @@
       "title": "PAR-ACC-002",
       "primary": {
         "file": "02-syntax.md",
-        "line": 305
+        "line": 645
       },
       "definitionCount": 1,
       "implementation": [],
@@ -10304,7 +10312,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 305
+          "line": 645
         }
       ]
     },
@@ -10313,7 +10321,7 @@
       "title": "PAR-AGG-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 276
+        "line": 616
       },
       "definitionCount": 1,
       "implementation": [],
@@ -10323,7 +10331,7 @@
       "references": [
         {
           "file": "02-syntax.md",
-          "line": 276
+          "line": 616
         }
       ]
     },
@@ -10332,538 +10340,6 @@
       "title": "PAR-AMB-001",
       "primary": {
         "file": "02-syntax.md",
-        "line": 352
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 352
-        }
-      ]
-    },
-    {
-      "id": "PAR-AMB-002",
-      "title": "PAR-AMB-002",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 356
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 356
-        }
-      ]
-    },
-    {
-      "id": "PAR-EXP-001",
-      "title": "PAR-EXP-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 333
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 333
-        }
-      ]
-    },
-    {
-      "id": "PAR-INI-001",
-      "title": "PAR-INI-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 281
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 281
-        }
-      ]
-    },
-    {
-      "id": "PAR-NRM-001",
-      "title": "PAR-NRM-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 426
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 426
-        }
-      ]
-    },
-    {
-      "id": "PAR-REC-001",
-      "title": "PAR-REC-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 401
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 401
-        }
-      ]
-    },
-    {
-      "id": "PAR-REC-002",
-      "title": "PAR-REC-002",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 405
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 405
-        }
-      ]
-    },
-    {
-      "id": "PAR-REC-003",
-      "title": "PAR-REC-003",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 408
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 408
-        }
-      ]
-    },
-    {
-      "id": "PAR-REC-004",
-      "title": "PAR-REC-004",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 411
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 411
-        }
-      ]
-    },
-    {
-      "id": "PP-EXP-001",
-      "title": "PP-EXP-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 236
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 236
-        }
-      ]
-    },
-    {
-      "id": "PP-EXP-002",
-      "title": "PP-EXP-002",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 240
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 240
-        }
-      ]
-    },
-    {
-      "id": "PP-EXP-003",
-      "title": "PP-EXP-003",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 243
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 243
-        }
-      ]
-    },
-    {
-      "id": "PP-INC-001",
-      "title": "PP-INC-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 247
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 247
-        }
-      ]
-    },
-    {
-      "id": "PP-TREE-001",
-      "title": "PP-TREE-001",
-      "primary": {
-        "file": "02-syntax.md",
-        "line": 233
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "02-syntax.md",
-          "line": 233
-        }
-      ]
-    },
-    {
-      "id": "REP-CST-001",
-      "title": "REP-CST-001",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 355
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 355
-        }
-      ]
-    },
-    {
-      "id": "REP-CST-002",
-      "title": "REP-CST-002",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 360
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 360
-        }
-      ]
-    },
-    {
-      "id": "REP-CST-003",
-      "title": "REP-CST-003",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 366
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 366
-        }
-      ]
-    },
-    {
-      "id": "REP-CST-004",
-      "title": "REP-CST-004",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 369
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 369
-        }
-      ]
-    },
-    {
-      "id": "REP-CST-005",
-      "title": "REP-CST-005",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 335
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 335
-        }
-      ]
-    },
-    {
-      "id": "REP-DIA-001",
-      "title": "REP-DIA-001",
-      "primary": {
-        "file": "01-notation.md",
-        "line": 256
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "01-notation.md",
-          "line": 256
-        }
-      ]
-    },
-    {
-      "id": "REP-DIA-002",
-      "title": "REP-DIA-002",
-      "primary": {
-        "file": "01-notation.md",
-        "line": 263
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "01-notation.md",
-          "line": 263
-        }
-      ]
-    },
-    {
-      "id": "REP-KEY-001",
-      "title": "REP-KEY-001",
-      "primary": {
-        "file": "01-notation.md",
-        "line": 347
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "01-notation.md",
-          "line": 347
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-001",
-      "title": "REP-SCH-001",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 756
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 756
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-002",
-      "title": "REP-SCH-002",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 759
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 759
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-003",
-      "title": "REP-SCH-003",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 762
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 762
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-004",
-      "title": "REP-SCH-004",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 772
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 772
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-005",
-      "title": "REP-SCH-005",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 765
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 765
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-006",
-      "title": "REP-SCH-006",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 684
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 684
-        }
-      ]
-    },
-    {
-      "id": "REP-SCH-007",
-      "title": "REP-SCH-007",
-      "primary": {
-        "file": "03-representations.md",
         "line": 693
       },
       "definitionCount": 1,
@@ -10873,8 +10349,723 @@
       "compatibility": "Unclassified",
       "references": [
         {
-          "file": "03-representations.md",
+          "file": "02-syntax.md",
           "line": 693
+        }
+      ]
+    },
+    {
+      "id": "PAR-AMB-002",
+      "title": "PAR-AMB-002",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 697
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 697
+        }
+      ]
+    },
+    {
+      "id": "PAR-CST-001",
+      "title": "PAR-CST-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 574
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 574
+        }
+      ]
+    },
+    {
+      "id": "PAR-CST-002",
+      "title": "PAR-CST-002",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 583
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 583
+        }
+      ]
+    },
+    {
+      "id": "PAR-EXP-001",
+      "title": "PAR-EXP-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 673
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 673
+        }
+      ]
+    },
+    {
+      "id": "PAR-INI-001",
+      "title": "PAR-INI-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 621
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 621
+        }
+      ]
+    },
+    {
+      "id": "PAR-NRM-001",
+      "title": "PAR-NRM-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 778
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 778
+        }
+      ]
+    },
+    {
+      "id": "PAR-REC-001",
+      "title": "PAR-REC-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 751
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 751
+        }
+      ]
+    },
+    {
+      "id": "PAR-REC-002",
+      "title": "PAR-REC-002",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 755
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 755
+        }
+      ]
+    },
+    {
+      "id": "PAR-REC-003",
+      "title": "PAR-REC-003",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 758
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 758
+        }
+      ]
+    },
+    {
+      "id": "PAR-REC-004",
+      "title": "PAR-REC-004",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 761
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 761
+        }
+      ]
+    },
+    {
+      "id": "PP-EXP-001",
+      "title": "PP-EXP-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 307
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 307
+        },
+        {
+          "file": "12-compatibility-ledger.md",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "id": "PP-EXP-002",
+      "title": "PP-EXP-002",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 343
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 343
+        }
+      ]
+    },
+    {
+      "id": "PP-EXP-003",
+      "title": "PP-EXP-003",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 358
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 358
+        }
+      ]
+    },
+    {
+      "id": "PP-EXP-004",
+      "title": "PP-EXP-004",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 368
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 368
+        },
+        {
+          "file": "12-compatibility-ledger.md",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "id": "PP-INC-001",
+      "title": "PP-INC-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 373
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 373
+        },
+        {
+          "file": "12-compatibility-ledger.md",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "id": "PP-INC-002",
+      "title": "PP-INC-002",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 382
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 382
+        }
+      ]
+    },
+    {
+      "id": "PP-TREE-001",
+      "title": "PP-TREE-001",
+      "primary": {
+        "file": "02-syntax.md",
+        "line": 298
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "02-syntax.md",
+          "line": 298
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-001",
+      "title": "REP-CST-001",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 748
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 748
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-002",
+      "title": "REP-CST-002",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1852
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1852
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-003",
+      "title": "REP-CST-003",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1857
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1857
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-004",
+      "title": "REP-CST-004",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1907
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1907
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-005",
+      "title": "REP-CST-005",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1913
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1913
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-006",
+      "title": "REP-CST-006",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1918
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1918
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-007",
+      "title": "REP-CST-007",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1927
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1927
+        }
+      ]
+    },
+    {
+      "id": "REP-CST-008",
+      "title": "REP-CST-008",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 1933
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 1933
+        }
+      ]
+    },
+    {
+      "id": "REP-DIA-001",
+      "title": "REP-DIA-001",
+      "primary": {
+        "file": "01-notation.md",
+        "line": 261
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "01-notation.md",
+          "line": 261
+        }
+      ]
+    },
+    {
+      "id": "REP-DIA-002",
+      "title": "REP-DIA-002",
+      "primary": {
+        "file": "01-notation.md",
+        "line": 268
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "01-notation.md",
+          "line": 268
+        }
+      ]
+    },
+    {
+      "id": "REP-KEY-001",
+      "title": "REP-KEY-001",
+      "primary": {
+        "file": "01-notation.md",
+        "line": 353
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "01-notation.md",
+          "line": 353
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-001",
+      "title": "REP-SCH-001",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2546
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2546
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-002",
+      "title": "REP-SCH-002",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2549
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2549
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-003",
+      "title": "REP-SCH-003",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2552
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2552
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-004",
+      "title": "REP-SCH-004",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2562
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2562
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-005",
+      "title": "REP-SCH-005",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2555
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2555
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-006",
+      "title": "REP-SCH-006",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2448
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2448
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-007",
+      "title": "REP-SCH-007",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2460
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2460
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-008",
+      "title": "REP-SCH-008",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2476
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2476
+        }
+      ]
+    },
+    {
+      "id": "REP-SCH-009",
+      "title": "REP-SCH-009",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2484
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2484
         }
       ]
     },
@@ -10883,7 +11074,7 @@
       "title": "REP-SER-001",
       "primary": {
         "file": "03-representations.md",
-        "line": 867
+        "line": 2659
       },
       "definitionCount": 1,
       "implementation": [],
@@ -10893,7 +11084,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 867
+          "line": 2659
         }
       ]
     },
@@ -10902,7 +11093,7 @@
       "title": "REP-SER-002",
       "primary": {
         "file": "03-representations.md",
-        "line": 869
+        "line": 2661
       },
       "definitionCount": 1,
       "implementation": [],
@@ -10912,7 +11103,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 869
+          "line": 2661
         }
       ]
     },
@@ -10921,7 +11112,7 @@
       "title": "REP-SER-003",
       "primary": {
         "file": "03-representations.md",
-        "line": 872
+        "line": 2664
       },
       "definitionCount": 1,
       "implementation": [],
@@ -10931,70 +11122,13 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 872
+          "line": 2664
         }
       ]
     },
     {
       "id": "REP-SRC-001",
       "title": "REP-SRC-001",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 84
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 84
-        }
-      ]
-    },
-    {
-      "id": "REP-SRC-002",
-      "title": "REP-SRC-002",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 87
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 87
-        }
-      ]
-    },
-    {
-      "id": "REP-SRC-003",
-      "title": "REP-SRC-003",
-      "primary": {
-        "file": "03-representations.md",
-        "line": 90
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "03-representations.md",
-          "line": 90
-        }
-      ]
-    },
-    {
-      "id": "REP-SRC-004",
-      "title": "REP-SRC-004",
       "primary": {
         "file": "03-representations.md",
         "line": 97
@@ -11012,8 +11146,27 @@
       ]
     },
     {
-      "id": "REP-SRC-005",
-      "title": "REP-SRC-005",
+      "id": "REP-SRC-002",
+      "title": "REP-SRC-002",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 100
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 100
+        }
+      ]
+    },
+    {
+      "id": "REP-SRC-003",
+      "title": "REP-SRC-003",
       "primary": {
         "file": "03-representations.md",
         "line": 103
@@ -11031,11 +11184,11 @@
       ]
     },
     {
-      "id": "REP-SRC-006",
-      "title": "REP-SRC-006",
+      "id": "REP-SRC-004",
+      "title": "REP-SRC-004",
       "primary": {
         "file": "03-representations.md",
-        "line": 109
+        "line": 110
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11045,13 +11198,13 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 109
+          "line": 110
         }
       ]
     },
     {
-      "id": "REP-SRC-007",
-      "title": "REP-SRC-007",
+      "id": "REP-SRC-005",
+      "title": "REP-SRC-005",
       "primary": {
         "file": "03-representations.md",
         "line": 117
@@ -11069,11 +11222,11 @@
       ]
     },
     {
-      "id": "REP-STG-001",
-      "title": "REP-STG-001",
+      "id": "REP-SRC-006",
+      "title": "REP-SRC-006",
       "primary": {
         "file": "03-representations.md",
-        "line": 545
+        "line": 123
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11083,7 +11236,45 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 545
+          "line": 123
+        }
+      ]
+    },
+    {
+      "id": "REP-SRC-007",
+      "title": "REP-SRC-007",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 131
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 131
+        }
+      ]
+    },
+    {
+      "id": "REP-STG-001",
+      "title": "REP-STG-001",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 2141
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 2141
         }
       ]
     },
@@ -11092,7 +11283,7 @@
       "title": "REP-STG-002",
       "primary": {
         "file": "03-representations.md",
-        "line": 548
+        "line": 2144
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11102,7 +11293,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 548
+          "line": 2144
         }
       ]
     },
@@ -11111,7 +11302,7 @@
       "title": "REP-STG-003",
       "primary": {
         "file": "03-representations.md",
-        "line": 551
+        "line": 2147
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11121,7 +11312,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 551
+          "line": 2147
         }
       ]
     },
@@ -11130,7 +11321,7 @@
       "title": "REP-TOK-001",
       "primary": {
         "file": "03-representations.md",
-        "line": 209
+        "line": 313
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11140,7 +11331,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 209
+          "line": 313
         }
       ]
     },
@@ -11149,7 +11340,7 @@
       "title": "REP-TOK-002",
       "primary": {
         "file": "03-representations.md",
-        "line": 214
+        "line": 319
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11159,7 +11350,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 214
+          "line": 319
         }
       ]
     },
@@ -11168,7 +11359,7 @@
       "title": "REP-TOK-003",
       "primary": {
         "file": "03-representations.md",
-        "line": 217
+        "line": 328
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11178,7 +11369,26 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 217
+          "line": 328
+        }
+      ]
+    },
+    {
+      "id": "REP-TOK-004",
+      "title": "REP-TOK-004",
+      "primary": {
+        "file": "03-representations.md",
+        "line": 331
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "03-representations.md",
+          "line": 331
         }
       ]
     },
@@ -11187,7 +11397,7 @@
       "title": "REP-TYP-001",
       "primary": {
         "file": "03-representations.md",
-        "line": 502
+        "line": 2098
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11197,7 +11407,7 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 502
+          "line": 2098
         }
       ]
     },
@@ -11206,7 +11416,7 @@
       "title": "REP-TYP-002",
       "primary": {
         "file": "03-representations.md",
-        "line": 508
+        "line": 2104
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11216,11 +11426,11 @@
       "references": [
         {
           "file": "03-representations.md",
-          "line": 508
+          "line": 2104
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1845
+          "line": 1859
         }
       ]
     },
@@ -11229,7 +11439,7 @@
       "title": "SCH-CYCLE-001",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 330
+        "line": 342
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11239,7 +11449,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 330
+          "line": 342
         }
       ]
     },
@@ -11248,7 +11458,7 @@
       "title": "SCH-CYCLE-010",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 345
+        "line": 357
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11258,7 +11468,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 345
+          "line": 357
         }
       ]
     },
@@ -11267,7 +11477,7 @@
       "title": "SCH-CYCLE-020",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 424
+        "line": 436
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11277,7 +11487,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 424
+          "line": 436
         }
       ]
     },
@@ -11286,7 +11496,7 @@
       "title": "SCH-CYCLE-021",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 427
+        "line": 439
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11296,7 +11506,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 427
+          "line": 439
         }
       ]
     },
@@ -11305,7 +11515,7 @@
       "title": "SCH-DET-001",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 469
+        "line": 481
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11315,7 +11525,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 469
+          "line": 481
         }
       ]
     },
@@ -11324,7 +11534,7 @@
       "title": "SCH-FIX-001",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 359
+        "line": 371
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11334,7 +11544,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 359
+          "line": 371
         }
       ]
     },
@@ -11343,7 +11553,7 @@
       "title": "SCH-FIX-002",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 362
+        "line": 374
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11353,7 +11563,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 362
+          "line": 374
         }
       ]
     },
@@ -11362,7 +11572,7 @@
       "title": "SCH-FIX-003",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 377
+        "line": 389
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11372,7 +11582,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 377
+          "line": 389
         }
       ]
     },
@@ -11381,7 +11591,7 @@
       "title": "SCH-INC-001",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 626
+        "line": 640
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11391,7 +11601,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 626
+          "line": 640
         }
       ]
     },
@@ -11400,7 +11610,7 @@
       "title": "SCH-INC-002",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 632
+        "line": 646
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11410,7 +11620,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 632
+          "line": 646
         }
       ]
     },
@@ -11419,7 +11629,7 @@
       "title": "SCH-INC-003",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 636
+        "line": 650
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11429,7 +11639,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 636
+          "line": 650
         }
       ]
     },
@@ -11438,7 +11648,7 @@
       "title": "SCH-INC-004",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 647
+        "line": 661
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11448,7 +11658,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 647
+          "line": 661
         }
       ]
     },
@@ -11457,7 +11667,7 @@
       "title": "SCH-KEY-000",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 97
+        "line": 99
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11467,32 +11677,13 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 97
+          "line": 99
         }
       ]
     },
     {
       "id": "SCH-QRY-001",
       "title": "SCH-QRY-001",
-      "primary": {
-        "file": "10-work-scheduler.md",
-        "line": 165
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "10-work-scheduler.md",
-          "line": 165
-        }
-      ]
-    },
-    {
-      "id": "SCH-QRY-002",
-      "title": "SCH-QRY-002",
       "primary": {
         "file": "10-work-scheduler.md",
         "line": 167
@@ -11510,8 +11701,8 @@
       ]
     },
     {
-      "id": "SCH-QRY-003",
-      "title": "SCH-QRY-003",
+      "id": "SCH-QRY-002",
+      "title": "SCH-QRY-002",
       "primary": {
         "file": "10-work-scheduler.md",
         "line": 169
@@ -11529,8 +11720,8 @@
       ]
     },
     {
-      "id": "SCH-QRY-004",
-      "title": "SCH-QRY-004",
+      "id": "SCH-QRY-003",
+      "title": "SCH-QRY-003",
       "primary": {
         "file": "10-work-scheduler.md",
         "line": 171
@@ -11548,11 +11739,11 @@
       ]
     },
     {
-      "id": "SCH-TERM-001",
-      "title": "SCH-TERM-001",
+      "id": "SCH-QRY-004",
+      "title": "SCH-QRY-004",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 446
+        "line": 173
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11562,11 +11753,30 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 379
+          "line": 173
+        }
+      ]
+    },
+    {
+      "id": "SCH-TERM-001",
+      "title": "SCH-TERM-001",
+      "primary": {
+        "file": "10-work-scheduler.md",
+        "line": 458
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "10-work-scheduler.md",
+          "line": 391
         },
         {
           "file": "10-work-scheduler.md",
-          "line": 446
+          "line": 458
         }
       ]
     },
@@ -11575,7 +11785,7 @@
       "title": "SCH-TERM-002",
       "primary": {
         "file": "10-work-scheduler.md",
-        "line": 451
+        "line": 463
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11585,7 +11795,7 @@
       "references": [
         {
           "file": "10-work-scheduler.md",
-          "line": 451
+          "line": 463
         }
       ]
     },
@@ -11613,7 +11823,7 @@
       "title": "STM-BRK-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2253
+        "line": 2267
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11623,7 +11833,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2253
+          "line": 2267
         }
       ]
     },
@@ -11632,7 +11842,7 @@
       "title": "STM-RET-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 2265
+        "line": 2279
       },
       "definitionCount": 1,
       "implementation": [],
@@ -11642,7 +11852,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 2265
+          "line": 2279
         }
       ]
     },
@@ -12686,7 +12896,7 @@
       "title": "TERM-ALIAS-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 448
+        "line": 510
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12696,7 +12906,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 448
+          "line": 510
         }
       ]
     },
@@ -12781,7 +12991,7 @@
       "title": "TERM-CAP-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 249
+        "line": 299
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12791,7 +13001,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 249
+          "line": 299
         }
       ]
     },
@@ -12800,7 +13010,7 @@
       "title": "TERM-DIF-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 324
+        "line": 374
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12810,13 +13020,89 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 324
+          "line": 374
         }
       ]
     },
     {
       "id": "TERM-DIF-002",
       "title": "TERM-DIF-002",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 381
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 381
+        }
+      ]
+    },
+    {
+      "id": "TERM-DIF-003",
+      "title": "TERM-DIF-003",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 392
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 392
+        }
+      ]
+    },
+    {
+      "id": "TERM-INI-001",
+      "title": "TERM-INI-001",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 387
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 387
+        }
+      ]
+    },
+    {
+      "id": "TERM-IR-001",
+      "title": "TERM-IR-001",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 326
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 326
+        }
+      ]
+    },
+    {
+      "id": "TERM-IR-002",
+      "title": "TERM-IR-002",
       "primary": {
         "file": "00-terminology.md",
         "line": 331
@@ -12834,87 +13120,11 @@
       ]
     },
     {
-      "id": "TERM-DIF-003",
-      "title": "TERM-DIF-003",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 342
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 342
-        }
-      ]
-    },
-    {
-      "id": "TERM-INI-001",
-      "title": "TERM-INI-001",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 337
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 337
-        }
-      ]
-    },
-    {
-      "id": "TERM-IR-001",
-      "title": "TERM-IR-001",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 276
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 276
-        }
-      ]
-    },
-    {
-      "id": "TERM-IR-002",
-      "title": "TERM-IR-002",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 281
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 281
-        }
-      ]
-    },
-    {
       "id": "TERM-IR-003",
       "title": "TERM-IR-003",
       "primary": {
         "file": "00-terminology.md",
-        "line": 285
+        "line": 335
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12924,7 +13134,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 285
+          "line": 335
         }
       ]
     },
@@ -12933,7 +13143,7 @@
       "title": "TERM-IR-004",
       "primary": {
         "file": "00-terminology.md",
-        "line": 289
+        "line": 339
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12943,7 +13153,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 289
+          "line": 339
         }
       ]
     },
@@ -12952,7 +13162,7 @@
       "title": "TERM-IR-005",
       "primary": {
         "file": "00-terminology.md",
-        "line": 294
+        "line": 344
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12962,7 +13172,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 294
+          "line": 344
         }
       ]
     },
@@ -12971,7 +13181,7 @@
       "title": "TERM-LKP-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 189
+        "line": 239
       },
       "definitionCount": 1,
       "implementation": [],
@@ -12981,7 +13191,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 189
+          "line": 239
         }
       ]
     },
@@ -12990,7 +13200,7 @@
       "title": "TERM-LKP-002",
       "primary": {
         "file": "00-terminology.md",
-        "line": 193
+        "line": 243
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13000,7 +13210,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 193
+          "line": 243
         }
       ]
     },
@@ -13009,7 +13219,7 @@
       "title": "TERM-NEW-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 371
+        "line": 421
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13019,7 +13229,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 371
+          "line": 421
         }
       ]
     },
@@ -13028,7 +13238,7 @@
       "title": "TERM-NEW-002",
       "primary": {
         "file": "00-terminology.md",
-        "line": 375
+        "line": 425
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13038,7 +13248,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 375
+          "line": 425
         }
       ]
     },
@@ -13047,7 +13257,7 @@
       "title": "TERM-SRC-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 59
+        "line": 90
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13057,7 +13267,11 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 59
+          "line": 90
+        },
+        {
+          "file": "12-compatibility-ledger.md",
+          "line": 54
         }
       ]
     },
@@ -13066,7 +13280,7 @@
       "title": "TERM-SRC-002",
       "primary": {
         "file": "00-terminology.md",
-        "line": 65
+        "line": 97
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13076,16 +13290,16 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 65
+          "line": 97
         }
       ]
     },
     {
-      "id": "TERM-STO-001",
-      "title": "TERM-STO-001",
+      "id": "TERM-SRC-003",
+      "title": "TERM-SRC-003",
       "primary": {
         "file": "00-terminology.md",
-        "line": 150
+        "line": 101
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13095,16 +13309,16 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 150
+          "line": 101
         }
       ]
     },
     {
-      "id": "TERM-STO-002",
-      "title": "TERM-STO-002",
+      "id": "TERM-SRC-004",
+      "title": "TERM-SRC-004",
       "primary": {
         "file": "00-terminology.md",
-        "line": 154
+        "line": 107
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13114,108 +13328,13 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 154
+          "line": 107
         }
       ]
     },
     {
-      "id": "TERM-STO-003",
-      "title": "TERM-STO-003",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 160
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 160
-        }
-      ]
-    },
-    {
-      "id": "TERM-STO-004",
-      "title": "TERM-STO-004",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 165
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 165
-        }
-      ]
-    },
-    {
-      "id": "TERM-STO-005",
-      "title": "TERM-STO-005",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 169
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 169
-        }
-      ]
-    },
-    {
-      "id": "TERM-TYP-001",
-      "title": "TERM-TYP-001",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 106
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 106
-        }
-      ]
-    },
-    {
-      "id": "TERM-TYP-002",
-      "title": "TERM-TYP-002",
-      "primary": {
-        "file": "00-terminology.md",
-        "line": 110
-      },
-      "definitionCount": 1,
-      "implementation": [],
-      "tests": [],
-      "status": "Proposed",
-      "compatibility": "Unclassified",
-      "references": [
-        {
-          "file": "00-terminology.md",
-          "line": 110
-        }
-      ]
-    },
-    {
-      "id": "TERM-TYP-003",
-      "title": "TERM-TYP-003",
+      "id": "TERM-SRC-005",
+      "title": "TERM-SRC-005",
       "primary": {
         "file": "00-terminology.md",
         "line": 114
@@ -13233,11 +13352,11 @@
       ]
     },
     {
-      "id": "TERM-VAL-001",
-      "title": "TERM-VAL-001",
+      "id": "TERM-STO-001",
+      "title": "TERM-STO-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 454
+        "line": 200
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13247,7 +13366,159 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 454
+          "line": 200
+        }
+      ]
+    },
+    {
+      "id": "TERM-STO-002",
+      "title": "TERM-STO-002",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 204
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 204
+        }
+      ]
+    },
+    {
+      "id": "TERM-STO-003",
+      "title": "TERM-STO-003",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 210
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 210
+        }
+      ]
+    },
+    {
+      "id": "TERM-STO-004",
+      "title": "TERM-STO-004",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 215
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 215
+        }
+      ]
+    },
+    {
+      "id": "TERM-STO-005",
+      "title": "TERM-STO-005",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 219
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 219
+        }
+      ]
+    },
+    {
+      "id": "TERM-TYP-001",
+      "title": "TERM-TYP-001",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 156
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 156
+        }
+      ]
+    },
+    {
+      "id": "TERM-TYP-002",
+      "title": "TERM-TYP-002",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 160
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 160
+        }
+      ]
+    },
+    {
+      "id": "TERM-TYP-003",
+      "title": "TERM-TYP-003",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 164
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 164
+        }
+      ]
+    },
+    {
+      "id": "TERM-VAL-001",
+      "title": "TERM-VAL-001",
+      "primary": {
+        "file": "00-terminology.md",
+        "line": 516
+      },
+      "definitionCount": 1,
+      "implementation": [],
+      "tests": [],
+      "status": "Proposed",
+      "compatibility": "Unclassified",
+      "references": [
+        {
+          "file": "00-terminology.md",
+          "line": 516
         }
       ]
     },
@@ -13256,7 +13527,7 @@
       "title": "TERM-VAL-002",
       "primary": {
         "file": "00-terminology.md",
-        "line": 458
+        "line": 520
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13266,7 +13537,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 458
+          "line": 520
         }
       ]
     },
@@ -13275,7 +13546,7 @@
       "title": "TERM-VAL-002a",
       "primary": {
         "file": "00-terminology.md",
-        "line": 463
+        "line": 525
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13285,7 +13556,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 463
+          "line": 525
         }
       ]
     },
@@ -13294,7 +13565,7 @@
       "title": "TERM-VAL-003",
       "primary": {
         "file": "00-terminology.md",
-        "line": 468
+        "line": 530
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13304,7 +13575,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 468
+          "line": 530
         }
       ]
     },
@@ -13313,7 +13584,7 @@
       "title": "TERM-VAL-004",
       "primary": {
         "file": "00-terminology.md",
-        "line": 473
+        "line": 535
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13323,7 +13594,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 473
+          "line": 535
         }
       ]
     },
@@ -13332,7 +13603,7 @@
       "title": "TERM-VAL-005",
       "primary": {
         "file": "00-terminology.md",
-        "line": 478
+        "line": 540
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13342,7 +13613,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 478
+          "line": 540
         }
       ]
     },
@@ -13351,7 +13622,7 @@
       "title": "TERM-WIT-001",
       "primary": {
         "file": "00-terminology.md",
-        "line": 218
+        "line": 268
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13361,7 +13632,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 218
+          "line": 268
         }
       ]
     },
@@ -13370,7 +13641,7 @@
       "title": "TERM-WIT-002",
       "primary": {
         "file": "00-terminology.md",
-        "line": 223
+        "line": 273
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13380,7 +13651,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 223
+          "line": 273
         }
       ]
     },
@@ -13389,7 +13660,7 @@
       "title": "TERM-WIT-003",
       "primary": {
         "file": "00-terminology.md",
-        "line": 228
+        "line": 278
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13399,7 +13670,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 228
+          "line": 278
         }
       ]
     },
@@ -13408,7 +13679,7 @@
       "title": "TERM-WIT-004",
       "primary": {
         "file": "00-terminology.md",
-        "line": 232
+        "line": 282
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13418,7 +13689,7 @@
       "references": [
         {
           "file": "00-terminology.md",
-          "line": 232
+          "line": 282
         }
       ]
     },
@@ -13484,7 +13755,7 @@
       "title": "TST-ID-001",
       "primary": {
         "file": "13-validation.md",
-        "line": 492
+        "line": 637
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13494,7 +13765,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 492
+          "line": 637
         }
       ]
     },
@@ -13503,7 +13774,7 @@
       "title": "TST-MOCK-001",
       "primary": {
         "file": "13-validation.md",
-        "line": 160
+        "line": 165
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13513,7 +13784,7 @@
       "references": [
         {
           "file": "13-validation.md",
-          "line": 160
+          "line": 165
         }
       ]
     },
@@ -13598,7 +13869,7 @@
       "title": "TYP-ACC-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2347
+        "line": 2349
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13608,7 +13879,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2347
+          "line": 2349
         }
       ]
     },
@@ -13617,7 +13888,7 @@
       "title": "TYP-ACC-003",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2361
+        "line": 2363
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13627,7 +13898,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2361
+          "line": 2363
         }
       ]
     },
@@ -13636,7 +13907,7 @@
       "title": "TYP-ACC-004",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2369
+        "line": 2371
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13646,7 +13917,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2369
+          "line": 2371
         }
       ]
     },
@@ -13655,7 +13926,7 @@
       "title": "TYP-ACC-005",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2372
+        "line": 2374
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13665,7 +13936,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2372
+          "line": 2374
         },
         {
           "file": "11-elaboration-and-ir.md",
@@ -13678,7 +13949,7 @@
       "title": "TYP-ACC-006",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2383
+        "line": 2385
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13688,7 +13959,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2383
+          "line": 2385
         }
       ]
     },
@@ -13697,7 +13968,7 @@
       "title": "TYP-ACC-007",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2396
+        "line": 2398
       },
       "definitionCount": 1,
       "implementation": [],
@@ -13707,7 +13978,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2396
+          "line": 2398
         },
         {
           "file": "11-elaboration-and-ir.md",
@@ -13734,7 +14005,7 @@
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1859
+          "line": 1873
         }
       ]
     },
@@ -13898,7 +14169,7 @@
         },
         {
           "file": "04-semantic-domains.md",
-          "line": 2716
+          "line": 2718
         }
       ]
     },
@@ -14006,7 +14277,7 @@
       "title": "TYP-CON-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2481
+        "line": 2483
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14016,7 +14287,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2481
+          "line": 2483
         }
       ]
     },
@@ -14025,7 +14296,7 @@
       "title": "TYP-CON-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2487
+        "line": 2489
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14035,7 +14306,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2487
+          "line": 2489
         }
       ]
     },
@@ -14082,7 +14353,7 @@
       "title": "TYP-DRF-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2703
+        "line": 2705
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14092,7 +14363,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2703
+          "line": 2705
         }
       ]
     },
@@ -14101,7 +14372,7 @@
       "title": "TYP-DRF-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2708
+        "line": 2710
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14115,7 +14386,7 @@
         },
         {
           "file": "04-semantic-domains.md",
-          "line": 2708
+          "line": 2710
         }
       ]
     },
@@ -14124,7 +14395,7 @@
       "title": "TYP-DRF-003",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2713
+        "line": 2715
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14134,7 +14405,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2713
+          "line": 2715
         }
       ]
     },
@@ -14143,7 +14414,7 @@
       "title": "TYP-DRF-004",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2720
+        "line": 2722
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14153,7 +14424,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2720
+          "line": 2722
         }
       ]
     },
@@ -14162,7 +14433,7 @@
       "title": "TYP-DRF-005",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2728
+        "line": 2730
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14172,7 +14443,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2728
+          "line": 2730
         }
       ]
     },
@@ -14347,7 +14618,7 @@
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1662
+          "line": 1676
         }
       ]
     },
@@ -14375,7 +14646,7 @@
       "title": "TYP-EQ-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2617
+        "line": 2619
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14385,7 +14656,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2617
+          "line": 2619
         }
       ]
     },
@@ -14394,7 +14665,7 @@
       "title": "TYP-EVD-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2821
+        "line": 2823
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14404,7 +14675,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2821
+          "line": 2823
         }
       ]
     },
@@ -14413,7 +14684,7 @@
       "title": "TYP-EVD-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2827
+        "line": 2829
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14423,7 +14694,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2827
+          "line": 2829
         }
       ]
     },
@@ -14432,7 +14703,7 @@
       "title": "TYP-EVD-003",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2835
+        "line": 2837
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14442,7 +14713,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2835
+          "line": 2837
         }
       ]
     },
@@ -14451,7 +14722,7 @@
       "title": "TYP-EVD-004",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2842
+        "line": 2844
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14461,7 +14732,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2842
+          "line": 2844
         }
       ]
     },
@@ -14470,7 +14741,7 @@
       "title": "TYP-EXPR-001",
       "primary": {
         "file": "06-expressions-and-statements.md",
-        "line": 219
+        "line": 233
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14480,7 +14751,7 @@
       "references": [
         {
           "file": "06-expressions-and-statements.md",
-          "line": 219
+          "line": 233
         }
       ]
     },
@@ -14489,7 +14760,7 @@
       "title": "TYP-FAC-000",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2939
+        "line": 2941
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14499,7 +14770,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2939
+          "line": 2941
         }
       ]
     },
@@ -14508,7 +14779,7 @@
       "title": "TYP-FAC-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2952
+        "line": 2954
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14518,7 +14789,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2952
+          "line": 2954
         }
       ]
     },
@@ -14527,7 +14798,7 @@
       "title": "TYP-FAC-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2960
+        "line": 2962
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14537,7 +14808,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2960
+          "line": 2962
         }
       ]
     },
@@ -14546,7 +14817,7 @@
       "title": "TYP-FAC-003",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2944
+        "line": 2946
       },
       "definitionCount": 1,
       "implementation": [],
@@ -14556,7 +14827,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2944
+          "line": 2946
         }
       ]
     },
@@ -15007,7 +15278,7 @@
       "title": "TYP-OVL-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 3125
+        "line": 3127
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15017,7 +15288,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 3125
+          "line": 3127
         }
       ]
     },
@@ -15026,7 +15297,7 @@
       "title": "TYP-OVL-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 3142
+        "line": 3144
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15036,7 +15307,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 3142
+          "line": 3144
         }
       ]
     },
@@ -15045,7 +15316,7 @@
       "title": "TYP-PACK-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2623
+        "line": 2625
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15055,7 +15326,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2623
+          "line": 2625
         }
       ]
     },
@@ -15064,7 +15335,7 @@
       "title": "TYP-PACK-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2629
+        "line": 2631
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15074,7 +15345,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2629
+          "line": 2631
         }
       ]
     },
@@ -15083,7 +15354,7 @@
       "title": "TYP-PACK-003",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2643
+        "line": 2645
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15093,7 +15364,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2643
+          "line": 2645
         }
       ]
     },
@@ -15102,7 +15373,7 @@
       "title": "TYP-SHP-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2494
+        "line": 2496
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15112,7 +15383,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2494
+          "line": 2496
         }
       ]
     },
@@ -15234,7 +15505,7 @@
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 287
+          "line": 301
         }
       ]
     },
@@ -15257,7 +15528,7 @@
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 288
+          "line": 302
         }
       ]
     },
@@ -15318,7 +15589,7 @@
         },
         {
           "file": "06-expressions-and-statements.md",
-          "line": 1689
+          "line": 1703
         },
         {
           "file": "11-elaboration-and-ir.md",
@@ -15449,7 +15720,7 @@
       "title": "TYP-STO-016",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2298
+        "line": 2300
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15459,7 +15730,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2298
+          "line": 2300
         }
       ]
     },
@@ -15468,7 +15739,7 @@
       "title": "TYP-STO-017",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2339
+        "line": 2341
       },
       "definitionCount": 1,
       "implementation": [],
@@ -15478,7 +15749,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2339
+          "line": 2341
         }
       ]
     },
@@ -16268,7 +16539,7 @@
       "title": "WIT-GRAPH-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2885
+        "line": 2887
       },
       "definitionCount": 1,
       "implementation": [],
@@ -16278,7 +16549,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2885
+          "line": 2887
         }
       ]
     },
@@ -16306,7 +16577,7 @@
       "title": "WIT-MAP-001",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2875
+        "line": 2877
       },
       "definitionCount": 1,
       "implementation": [],
@@ -16316,7 +16587,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2875
+          "line": 2877
         }
       ]
     },
@@ -16325,7 +16596,7 @@
       "title": "WIT-MAP-002",
       "primary": {
         "file": "04-semantic-domains.md",
-        "line": 2880
+        "line": 2882
       },
       "definitionCount": 1,
       "implementation": [],
@@ -16335,7 +16606,7 @@
       "references": [
         {
           "file": "04-semantic-domains.md",
-          "line": 2880
+          "line": 2882
         }
       ]
     },

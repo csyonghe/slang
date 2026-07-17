@@ -32,10 +32,11 @@ text:
   [compatibility ledger](12-compatibility-ledger.md).
 
 This first edition is a formalization foundation for review, not a claim that every existing Slang
-feature is already fully defined. The grammar and core transformation/evidence algebras are concrete;
-rows marked open in chapter 12 and the exhaustive `NodeSchemaRegistry` instance explicitly block
+feature is already fully defined. The grammar, its exhaustive generated parsed-CST production
+schema, and the core transformation/evidence algebras are concrete; rows marked open in chapter 12
+and the remaining preprocessor/AST/semantic portions of `NodeSchemaRegistry` explicitly block
 implementation freeze. The purpose of review is to accept or revise these representations before
-expanding every feature row into generated node descriptors and rule-linked tests.
+expanding every feature row into rule-linked tests.
 
 The existing language reference under [`docs/language-reference`](../language-reference/README.md)
 describes user-facing Slang. The reverse-engineered material under
@@ -58,7 +59,7 @@ them testable. A builtin is not a hidden type-checker branch unless a rule in th
 explicitly classifies it as a primitive.
 
 The specification covers preprocessing only where it affects the lossless token model, source
-provenance, conditional presence, or parsing. Macro replacement rules remain aligned with the
+provenance, conditional activity, or parsing. Macro replacement rules remain aligned with the
 preprocessor reference until they are formalized here. Target layout, optimization, and final code
 emission are downstream of the frontend and out of scope, except for the contract imposed on
 frontend IR.
@@ -67,10 +68,18 @@ frontend IR.
 
 ```text
 SourceView { SourceFileRecord, decoded SourceFileSnapshot, interpretation }
-  -> PhysicalTokenList
-  -> PreprocessorTree + ExpandedTokenView
-  -> LosslessCST { SourceCST, ExpandedGrammarCST, TokenOriginDAG }
-  -> SurfaceAST (from ExpandedGrammarCST)
+  -> TokenList = NodeList<Token | Trivia>
+  -> CSTSnapshot<Lexed> { TokenizedSource(elements: TerminalNode...) }
+  -> initial CSTSnapshot<PreprocessorStructured>
+     { directives, MacroDefinition, TokenPaste, text/inactive regions, ... }
+  -> ordered preprocessing rewrites
+     { PreprocessorState transitions plus structured MacroInvocation/argument fragments }
+  -> PreprocessorExpansionResult { final state, trace, CSTSnapshot<MacroExpanded> }
+     { MacroExpansion, TokenPasteExpansion, IncludeExpansion, ... }
+  -> CSTSnapshot<Parsed>
+     { production-specific NonTerminalNode fields and TerminalNode references }
+     where every generated Token names a CSTRewrite output
+  -> SurfaceAST
   -> ScopedAST
   -> BoundAST
   -> TypedAST
@@ -81,9 +90,10 @@ SourceView { SourceFileRecord, decoded SourceFileSnapshot, interpretation }
 
 Every arrow is a total transformation: valid input produces a value, and invalid input produces a
 value containing explicit error/recovery nodes plus diagnostics. No stage mutates its input. Every
-non-CST node records an `Origin` that identifies the node or source range from which it was
-derived. Synthesized nodes use `Origin::Synthesized`, naming the group, output role, and semantic
-inputs that caused synthesis.
+CST output records a `CSTNodeOrigin` whose rewrite inputs identify predecessor nodes/source, and
+every AST node records an `Origin` that identifies the previous representation from which it was
+derived. Synthesized AST nodes use `Origin::Synthesized`, naming the group, output role, and
+semantic inputs that caused synthesis.
 
 The stages are intentionally different types. A function accepting `TypedExpr` cannot receive a
 `SurfaceExpr`, and an IR lowering function cannot receive a tree that still contains unresolved
@@ -93,10 +103,12 @@ overload sets or implicit conversions.
 
 The following invariants apply throughout this specification.
 
-1. **Losslessness.** Concatenating ordered physical slices reproduces the decoded UTF-8 snapshot;
+1. **Losslessness.** For the authoritative `TokenList` returned by `Lex`, concatenating the physical
+   spellings of ordered `Token | Trivia` elements reproduces the decoded UTF-8 snapshot;
    `SourceFileRecord` separately preserves original encoded/BOM bytes for unmodified identity output. The
-   source CST owns directives and inactive regions; the linked expanded grammar CST owns active
-   syntax, missing tokens, and skipped tokens. Identity formatting uses the source CST.
+   `Lexed` and `PreprocessorStructured` CST snapshots cover directives and inactive regions; the
+   `Parsed` snapshot covers active syntax, missing terminals, and skipped terminals. Token values
+   remain owned by their lists, and identity formatting follows predecessor CST fields.
 2. **Immutability.** Published tokens, CST nodes, AST nodes, types, substitutions, witnesses,
    diagnostics, and task results never change. Caches and scheduler state are not AST fields.
 3. **Explicit semantics.** Resolved declarations, substitutions, receiver conventions, parameter
@@ -114,7 +126,8 @@ The following invariants apply throughout this specification.
    request that query instead of recomputing or repairing the fact.
 9. **Schema visibility.** Every node kind and field is described by the node schema. Generic tools
    can enumerate, compare, serialize, clone, and functionally replace operands without a
-   kind-specific visitor.
+   kind-specific visitor. Every CST non-terminal exposes its terminal and non-terminal
+   constituents as named typed fields; a generic operand list is only a projection of them.
 10. **Rule-to-test traceability.** Every normative rule has a stable identifier and at least one
     positive, negative, boundary, serialization, and recovery test where those categories apply.
 
@@ -124,8 +137,8 @@ The following invariants apply throughout this specification.
 | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | [00 — Terminology and implementation correspondence](00-terminology.md)         | Canonical Slang vocabulary, principled new terms, implementation anchors, and forbidden aliases                               |
 | [01 — Notation and conformance](01-notation.md)                                 | Grammar, algebraic-data-type, judgment, result, and rule-ID notation                                                          |
-| [02 — Lexical and syntactic grammar](02-syntax.md)                              | Source snapshots, tokens, trivia, preprocessing view, grammar, ambiguity, and recovery                                        |
-| [03 — Immutable representations](03-representations.md)                         | CST/AST schemas, provenance, reflection, editing, serialization, and stage invariants                                         |
+| [02 — Lexical and syntactic grammar](02-syntax.md)                              | Source snapshots, tokens, trivia, staged preprocessing/grammar translations, ambiguity, and recovery                          |
+| [03 — Immutable representations](03-representations.md)                         | Terminal/non-terminal CST and AST schemas, rewrite provenance, reflection, editing, serialization, and stage invariants       |
 | [04 — Semantic domains](04-semantic-domains.md)                                 | Names, declarations, types, values, substitutions, decl-refs, facets, and evidence                                            |
 | [05 — Names and declarations](05-names-and-declarations.md)                     | Scope construction, lookup, imports, extensions, redeclaration, and visibility                                                |
 | [06 — Expressions and statements](06-expressions-and-statements.md)             | Expression classifiers, property/subscript reference formation, statements, control context, and constants                    |
@@ -139,7 +152,9 @@ The following invariants apply throughout this specification.
 | [14 — Subtyping, facets, and extensions](14-subtyping-facets-and-extensions.md) | Operational subtype witnesses, generic witness tables, facet routes, extension application, and partial lookup priority       |
 | [15 — Initialization and construction](15-initialization.md)                    | Initialization forms, strategies, aggregate shapes, constructors, definite initialization, and direct-to-destination lowering |
 | [16 — Differentiability](16-differentiability.md)                               | Differential evidence, activity, derivative signatures/providers, interface dispatch, synthesis, and frontend-IR obligations  |
-| [Grammar source](grammar.ebnf)                                                  | Annotated first-edition EBNF used by the CST registry                                                                         |
+| [Grammar source](grammar.ebnf)                                                  | Structural first-edition EBNF baseline paired with the parsed-CST production profile                                          |
+| [CST production profile](cst-production-profile.json)                           | Machine-readable field naming, stable wire-tag policy, category membership, and semantic production overrides                 |
+| [CST production generator](generate-cst-production-schema.py)                   | Validates complete EBNF coverage and emits wire-stable typed product/variant `NodeSchemaRegistry` descriptors                 |
 | [Rule manifest](rule-manifest.json)                                             | Generated machine-readable index of normative rule identities and locations                                                   |
 
 ## What “fully defined” means

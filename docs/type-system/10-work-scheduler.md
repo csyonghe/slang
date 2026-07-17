@@ -14,25 +14,27 @@ state, and cycle detection in one byte on each declaration.
 
 ```text
 IncludeRequestKey = {
-    includingFile: SourceFileId,
-    spelling: Utf8String,
-    searchConfiguration: ContentId<SchemaValue>
+    includeSystemRevision: IncludeSystemRevision,
+    includingView: SourceViewId,
+    request: IncludeRequest
 }
 
-IncludeResolution = Found(SourceFileId) | NotFound
+IncludeResolution = CheckResult<ResolvedInclude>
 
 SourceGraph = {
     documents:
         CanonicallyOrderedMap<SourceFileId, SourceFileSnapshotId>,
     includeResolution:
         CanonicallyOrderedMap<IncludeRequestKey, IncludeResolution>,
-    externalMacroEnvironment: ContentId<SchemaValue>
+    includeSystemRevision: IncludeSystemRevision,
+    initialPreprocessorState: PreprocessorStateId
 }
 
 FrontendOptions = {
     lex: LexOptions,
-    preprocessing: PreprocessorDesc,
-    syntaxFeatures: SyntaxFeatureSet,
+    preprocessing: PreprocessorOptions,
+    grammarVocabulary: GrammarVocabulary,
+    syntaxParseInfos: SyntaxParseInfoSet,
     parsing: ParserOptions,
     semanticOptions: CanonicalArguments
 }
@@ -170,8 +172,9 @@ order observable.
 
 `SCH-QRY-004`: An `EnvironmentRevision` is valid only when all repeated configuration references
 agree exactly: `frontendOptions.lex.languageRules`,
-`frontendOptions.preprocessing.languageRules`, and
-`frontendOptions.syntaxFeatures.languageRules` equal `languageRules`; resolving that rule set yields
+`frontendOptions.preprocessing.languageRules`,
+`frontendOptions.grammarVocabulary.languageRules`, and
+`frontendOptions.syntaxParseInfos.languageRules` equal `languageRules`; resolving that rule set yields
 the same `standardEnvironment`; and the registered standard-environment schema exports the stored
 effect- and capability-universe revisions. Contradictory combinations are rejected during key
 construction, so they cannot create a second semantic configuration or enter the query cache.
@@ -182,7 +185,11 @@ The first implementation must expose at least these independently callable query
 
 | Family                                                            | Representative output                                                                |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `ParseFile`                                                       | `LosslessCST`                                                                        |
+| `LexFile`                                                         | `TokenList`                                                                          |
+| `BuildLexedCST`                                                   | `CSTSnapshot<Lexed>`                                                                 |
+| `StructurePreprocessor`                                           | `CSTSnapshot<PreprocessorStructured>`                                                |
+| `ExpandPreprocessor`                                              | `PreprocessorExpansionResult`                                                        |
+| `ParseFile`                                                       | `CSTSnapshot<Parsed>`                                                                |
 | `BuildSurfaceAST`                                                 | `ASTSnapshot<Surface>`                                                               |
 | `BuildFragmentScopes`                                             | `(ASTSnapshot<Scoped>, FragmentScopeGraph)`                                          |
 | `FreezeDeclIndex`                                                 | `FrozenDeclIndex` (including `FrozenScopeGraph`)                                     |
@@ -259,6 +266,11 @@ DependencyEdge = {
 }
 ```
 
+`SourceGraph.includeResolution` is the frozen backing/cache for the `IncludeSystem` revision named
+by each key, not a second resolution authority. Its key is exactly the normative `ResolveInclude`
+input, including quote/system mode and the including view; lookup failure and diagnostics remain the
+structured `CheckResult` rather than collapsing to an unqualified `NotFound` bit.
+
 Each `ContentId` field names a canonically serialized immutable input graph and carries chapter 1's
 exact discriminator; loading it resolves and verifies the exact bytes, so a digest collision is
 never accepted as equality. The language-rule and standard-environment IDs obey the same rule.
@@ -291,7 +303,7 @@ The initial policy assignment is normative:
 
 | Query kind                                                                                                        | Policy                                                                         | Reason/recovery                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| parse, bind a finite syntax node, check an expression/statement                                                   | `Reject`                                                                       | the source tree is finite; recover at the offending node                                                                                                |
+| parse, bind a finite syntax node, check an expression/statement                                                   | `Reject`                                                                       | the input CST is finite; recover at the offending node                                                                                                  |
 | `DeclareNominalIdentity`                                                                                          | `NominalKnot`                                                                  | publish identity without requesting its definition                                                                                                      |
 | `BuildNominalDefinition`                                                                                          | `Reject` across definition edges                                               | recursive fields refer to nominal identities, not nested definitions                                                                                    |
 | `ExpandTypeAlias`, default generic argument, constant evaluation                                                  | `Reject`                                                                       | these denote finite values; publish an error value                                                                                                      |
@@ -484,7 +496,8 @@ cascades while continuing unrelated work.
 
 The full `EnvironmentRevision` in an execution `QueryKey` is a correctness namespace: it prevents a
 result from being mistaken for one computed in another source/module graph. Cross-revision reuse is
-performed through a separate durable identity and red-green validation, not by weakening that key:
+performed through a separate durable identity and cross-revision validation, not by weakening that
+key:
 
 ```text
 DurableSyntaxLineageKey = {
@@ -498,7 +511,7 @@ DurableSyntaxLineageId = ContentId<DurableSyntaxLineageKey>
 
 DurableSubjectIdentity =
     SourceFileLineage(SourceFileId)
-  | SyntaxLineage(stage: Stage, lineage: DurableSyntaxLineageId,
+  | SyntaxLineage(stage: RepresentationStage, lineage: DurableSyntaxLineageId,
                   derivationRole: ContentId<SchemaValue>)
   | CrossRevisionSemantic(StableSemanticId)
   | SemanticContent(ContentId<SchemaValue>)
@@ -595,10 +608,11 @@ entry without pretending the two execution subjects are equal.
 
 The incremental parser constructs `SubjectLineageMap` from the explicit source change map. A match
 must remain in the same `SourceFileId`, preserve the registered semantic field-role path through
-all surviving ancestors, and be one-to-one in both revisions. Repeated equal green subtrees are
+all surviving ancestors, and be one-to-one in both revisions. Repeated equal immutable CST
+subtrees are
 disambiguated by the nearest surviving ancestor role and occurrence. If those facts admit more than
 one prior node, the current assignment has `prior = None` and receives a new lineage; content hash or source
-offset alone never chooses between duplicates. The initial lineage key records the exact green/AST
+offset alone never chooses between duplicates. The initial lineage key records the exact CST/AST
 anchor, role path, and occurrence that created it, so equality remains collision-safe through
 `ContentId.exactDiscriminator`.
 
@@ -612,8 +626,8 @@ implementation ID match, it aliases the unchanged result under the new execution
 running the query; otherwise it executes normally and records a new entry. Reading a whole graph
 intentionally stamps its root selector, while keyed access stamps only the selected node/edge.
 
-A source edit creates new syntax identities for changed subtrees and reuses unchanged green nodes.
-A prior result fails red-green validation only when:
+A source edit creates new syntax identities for changed subtrees and may structurally share
+unchanged terminal/non-terminal records. A prior result fails cross-revision validation only when:
 
 - one of its recorded direct input values changed;
 - a dependency's semantic result hash changed;
@@ -630,8 +644,8 @@ stamped source value changed. Omitting an observed input is a query-validation f
 filesystem, process, target, or option reads are forbidden.
 
 `SCH-INC-002`: `ContentId.digest` may accelerate stamp lookup but exact discriminator equality
-decides green status. Red-green validation is deterministic and produces the same cache decision
-under any worker count.
+decides reusable status. Cross-revision validation is deterministic and produces the same cache
+decision under any worker count.
 
 `SCH-INC-003`: A reusable query's projection is injective over all semantically distinct
 cross-revision subjects and arguments admitted by that query kind. The validator constructs two
@@ -646,7 +660,7 @@ one-to-one.
 
 `SCH-INC-004`: Each direct read has exactly one selector and observation. Re-evaluating all stored
 selectors in the current environment must reproduce the complete set of direct reads made by a
-green entry; an unregistered ambient read, duplicate `(role, selector)` with conflicting
+reusable entry; an unregistered ambient read, duplicate `(role, selector)` with conflicting
 observations, or selector that resolves outside the current environment is a cache-validation
 failure. Tests cover changed and unchanged documents, individual options, absent graph edges,
 standard-environment items, and repeated identical syntax subtrees.

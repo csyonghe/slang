@@ -14,14 +14,21 @@ ambiguous, the parser produces a named ambiguous CST node and binding resolves i
 ## Inputs and outputs
 
 ```text
-LexPhysical(SourceView, LexOptions)
-    -> CheckResult<PhysicalTokenList>
+Lex(SourceView, LexOptions)
+    -> CheckResult<TokenList>
 
-Preprocess(PhysicalTokenList, IncludeProvider, MacroEnvironment, PreprocessorDesc)
-    -> CheckResult<(PreprocessorTree, ExpandedTokenView)>
+BuildLexedCST(TokenList)
+    -> CSTSnapshot<Lexed>
 
-Parse(ExpandedTokenView, SyntaxFeatureSet, ParserOptions)
-    -> CheckResult<LosslessCST>
+StructurePreprocessor(CSTSnapshot<Lexed>, PreprocessorOptions)
+    -> CheckResult<CSTSnapshot<PreprocessorStructured>>
+
+ExpandPreprocessor(CSTSnapshot<PreprocessorStructured>, IncludeSystem,
+                   PreprocessorState, PreprocessorOptions)
+    -> CheckResult<PreprocessorExpansionResult>
+
+Parse(CSTSnapshot<MacroExpanded>, GrammarVocabulary, SyntaxParseInfoSet, ParserOptions)
+    -> CheckResult<CSTSnapshot<Parsed>>
 
 LexOptions = {
     languageRules: LanguageRuleSetId,
@@ -29,7 +36,7 @@ LexOptions = {
     preserveInvalidTokens: True
 }
 
-PreprocessorDesc = {
+PreprocessorOptions = {
     languageRules: LanguageRuleSetId,
     retainInactiveRegions: True,
     expansionDepthLimit: UInt32,
@@ -37,19 +44,35 @@ PreprocessorDesc = {
     includeDepthLimit: UInt32
 }
 
-SyntaxFeatureId = QualifiedName
+GrammarWordId = QualifiedName
 
-SyntaxFeatureDescriptor = {
-    id: SyntaxFeatureId,
+GrammarWord = {
+    id: GrammarWordId,
     spelling: Utf8String,
-    role: FixedGrammarWord | ContextualGrammarWord | RegisteredGrammarExtension,
-    production: Option<ProductionId>,
+    role: FixedGrammarWord | ContextualGrammarWord,
     rule: RuleId
 }
 
-SyntaxFeatureSet = {
+GrammarVocabulary = {
     languageRules: LanguageRuleSetId,
-    features: CanonicallyOrderedMap<SyntaxFeatureId, SyntaxFeatureDescriptor>,
+    words: CanonicallyOrderedMap<GrammarWordId, GrammarWord>,
+    revision: ContentId<SchemaValue>
+}
+
+SyntaxParseInfoId = QualifiedName
+SyntaxClassId = QualifiedName
+
+SerializedSyntaxParseInfo = {
+    id: SyntaxParseInfoId,
+    spelling: Utf8String,
+    production: ProductionId,
+    syntaxClass: SyntaxClassId,
+    rule: RuleId
+}
+
+SyntaxParseInfoSet = {
+    languageRules: LanguageRuleSetId,
+    entries: CanonicallyOrderedMap<SyntaxParseInfoId, SerializedSyntaxParseInfo>,
     revision: ContentId<SchemaValue>
 }
 
@@ -62,11 +85,38 @@ ParserOptions = {
 }
 ```
 
-Each function is independently callable. `LexPhysical` does not require a name pool or compiler
-session. `Parse` does not receive a semantic visitor, declaration table, or mutable scope.
+`PreprocessorOptions` is intentionally not the current pointer-bearing `PreprocessorDesc`.
+`PreprocessorDesc` remains the public adapter that assembles the pure query: `sink` receives the
+returned diagnostics; `namePool` is replaced by content-identified `PreprocessorName` interning;
+`fileSystem`/`sourceManager`/`includeSystem` become the versioned `IncludeSystem`; `defines` build the
+initial `preprocessor::Environment`; and handler/content-assist callbacks observe the published
+rewrite trace rather than participating in semantics.
 
-All option/feature fields participate in the corresponding query key. `revision` resolves to and
-verifies the exact canonical feature-descriptor bytes under chapter 1's `ContentId` rule; it is not
+The formal `ParserOptions` is the normalized parser-only projection of the existing same-named
+record. Current `enableEffectAnnotations` and `allowGLSLInput` contribute to `LanguageRuleSetId`;
+`isInLanguageServer` contributes to an explicit diagnostic/recovery policy; `ParsingStage` selects
+the parse query; and `CompilerOptionSet` is part of `EnvironmentRevision`. The remaining resource
+and ambiguity controls above are serialized query inputs. No current field is silently discarded or
+read ambiently.
+
+Each function is independently unit-testable from immutable inputs. `Lex` does not require a name
+pool or compiler session. Its product remains exactly the plain `TokenList` of `Token | Trivia`
+values and does not acquire producer metadata. `BuildLexedCST` mechanically creates one terminal
+per list element under a single `TokenizedSource` non-terminal; it does not copy those elements.
+`StructurePreprocessor` recognizes directives, definitions, replacement-list operations,
+conditionals, and text regions without consulting a macro environment. `ExpandPreprocessor` scans
+those regions in source order, recognizes a `MacroInvocation` only against its current immutable
+`PreprocessorState`, and replaces invocation/include occurrences in new snapshots with typed
+predecessor edges. This scan/recognize/expand loop is also used for macro-produced and included
+token streams, so a definition introduced by an include is visible to following parent-file text.
+Included files inherit the same `LexOptions`, and all preprocessing queries require matching
+`languageRules`. `Parse` consumes the active terminal projection of the returned
+`PreprocessorExpansionResult.snapshot` and does not receive a semantic visitor, declaration table,
+or mutable scope.
+
+All option/vocabulary/parse-info fields and `includeSystemRevision(IncludeSystem)` participate in
+the corresponding query key. Both registry revisions resolve to and verify their exact canonical
+entry bytes under chapter 1's `ContentId` rule; neither is
 a bare hash. Resource limits are deterministic semantic recovery inputs, never wall-clock budgets.
 The literal `True` fields state required losslessness rather than caller-selectable modes.
 
@@ -89,33 +139,43 @@ preserving today's semantic offset domain.
 
 ## Token vocabulary
 
-The fixed token-kind vocabulary is:
+The fixed lexical discriminator vocabulary is:
 
 ```text
-special:      Unknown EndOfFile Invalid
-content:      Identifier IntegerLiteral FloatingPointLiteral StringLiteral CharLiteral
-trivia:       WhiteSpace NewLine LineComment BlockComment
-separators:   ; , . .. ... { } [ ] ( ) ? : @ $ $$ # ## :: #?
-operators:    = + - * / % ! ~ << >> == != > < >= <= && || & | ^ ++ --
-compound:     += -= *= /= %= <<= >>= &= |= ^= -> =>
+Token.type special:    Unknown EndOfFile Invalid
+Token.type content:    Identifier IntegerLiteral FloatingPointLiteral StringLiteral CharLiteral
+Token.type separators: ; , . .. ... { } [ ] ( ) ? : @ $ $$ # ## :: #?
+Token.type operators:  = + - * / % ! ~ << >> == != > < >= <= && || & | ^ ++ --
+Token.type compound:   += -= *= /= %= <<= >>= &= |= ^= -> =>
+Trivia.type:           WhiteSpace NewLine LineComment BlockComment LineContinuation
 ```
 
-The physical lexer additionally marks documentation comments with `Trivia.isDocumentation` and
-classifies line continuations as a `Trivia.kind` while retaining the current broad token vocabulary.
-`Unknown` is an internal sentinel; `Invalid` is a physical token with source text and a diagnostic.
+The lexer emits the one flat `TokenList = NodeList<Token | Trivia>` from chapter 3. The established
+`TokenType` values `WhiteSpace`, `NewLine`, `LineComment`, and `BlockComment`, plus the explicit
+`LineContinuation` value, discriminate `Trivia` alternatives in the replacement schema rather than
+ordinary `Token` alternatives. This principled split lets every view share one lossless sequence.
+Documentation comments set `Trivia.isDocumentation`. `Unknown` is an
+internal sentinel; `Invalid` is a source token with physical spelling and a diagnostic.
+
+`LineContinuation` is the `TokenType` of an independently emitted trivia element. A
+backslash-newline absorbed while recognizing one token is instead a line-continuation splice in
+that token's spelling map; it is not a hidden `Trivia` value.
 
 All language words are initially `Identifier` tokens. The parser recognizes fixed and contextual
-spellings through `SyntaxFeatureSet`. Builtin type and function names remain ordinary declarations
+spellings through `GrammarVocabulary`; callback/source-declared syntax is separately provided by
+`SyntaxParseInfoSet`. Builtin type and function names remain ordinary declarations
 in the standard environment.
 
 `LEX-TOK-001`: Longest matching punctuation wins. In a generic closing context, `>>` remains one
-physical/expanded token and is exposed to the grammar CST as two zero-copy
-`ExpandedTokenSliceId` leaves whose spelling ranges partition the parent token. The parent token is
-never mutated.
+`Token` and is exposed to the grammar CST as two zero-copy `TokenSliceId` leaves whose spelling
+ranges partition the parent token. The parent token is never mutated.
 
-`LEX-TOK-002`: Every non-trivia token stores an ordered, non-empty set of physical source pieces and
-a lazily decoded logical spelling/value. Backslash-newline splicing affects the logical spelling
-only; all pieces and intervening trivia remain intact.
+`LEX-TOK-002`: Every non-EOF token returned by `Lex` stores one contiguous physical spelling and its
+logical spelling. Backslash-newline splicing affects the logical spelling only; exact removed
+subranges remain in `Token.removedLineContinuations`. The ordered
+`Token | Trivia` spellings, not a parallel piece table, partition the source. Removed ranges are
+relative to `physicalSpelling`, strictly ordered, disjoint, in bounds, and each spells one accepted
+backslash-newline sequence.
 
 ## Identifiers
 
@@ -135,7 +195,7 @@ an intentional language-version change.
 
 ## Literals
 
-The physical grammar distinguishes spelling from semantic validation:
+The lexical grammar distinguishes spelling from semantic validation:
 
 ```text
 integer-literal ::= decimal-integer integer-suffix?
@@ -156,46 +216,50 @@ selection, and malformed-literal diagnostics are rule-table data generated from 
 Compatibility tokenization accepts an alphanumeric suffix and leaves unsupported-suffix rejection
 to literal checking, matching current source behavior.
 
-`LEX-LIT-001`: The token stores exact spelling, decoded value or decode failure, radix/format, and
-suffix spelling. Numeric negation is a prefix expression, not part of the literal token.
+`LEX-LIT-001`: The token stores exact physical and logical spelling. The pure, memoizable
+`DecodeLiteral(TokenRef, LanguageRuleSetId)` query from chapter 6 produces the decoded value or
+structured failure, exact radix/format, and suffix spelling; those derived facts are not duplicated
+in `Token`. Numeric negation is a prefix expression, not part of the literal token.
 
-`LEX-LIT-002`: Adjacent string literal concatenation is a parser/semantic construct. Each physical
+`LEX-LIT-002`: Adjacent string literal concatenation is a parser/semantic construct. Each source
 literal remains independently addressable with its own spelling and trivia.
 
 ## Trivia ownership
 
-Trivia gaps are defined in chapter 3. Classification rules are:
+Trivia elements occur directly in `TokenList`. Classification rules are:
 
-- horizontal whitespace and other non-newline spacing → `Whitespace`;
-- each source newline sequence → `Newline` with exact raw spelling;
+- horizontal whitespace and other non-newline spacing → `WhiteSpace`;
+- each source newline sequence → `NewLine` with exact physical spelling;
 - backslash followed by a newline sequence → `LineContinuation`;
 - `//` through its terminating newline boundary → `LineComment` plus the separate newline trivia;
 - `/* ... */` → `BlockComment`; comments do not nest in compatibility mode; and
 - a comment matching a versioned documentation marker retains `LineComment`/`BlockComment` and sets
   `isDocumentation=true`.
 
-A `LineContinuation` may be an ordinary inter-token gap item or interstitial trivia inside one
-logical token. For example, an identifier split by backslash-newline owns the token pieces on both
-sides and references the continuation between them. The ordered physical-slice tape still owns each
-byte exactly once; no contiguous token range is invented across the removed newline.
+A `LineContinuation` between logical tokens is a `Trivia` element. When line splicing joins
+characters into one logical token, the continuation instead lies inside that token's contiguous
+physical spelling and its relative range occurs in `removedLineContinuations`; it is not duplicated
+as a top-level `Trivia`. This is the explicit splice-before-tokenization rule, not a second ownership
+representation.
 
-`LEX-TRI-001`: Unterminated block comments produce an `Invalid`/error-bearing comment item spanning
-to EOF and diagnostic `unterminated-block-comment`. The current lexer has a TODO and often relies on
-a later parser error; this is an intentional diagnostic improvement.
+`LEX-TRI-001`: Unterminated block comments produce a `BlockComment` `Trivia` element spanning to EOF
+and diagnostic `unterminated-block-comment`. The current lexer has a TODO and often relies on a
+later parser error; this is an intentional diagnostic improvement.
 
-Documentation attachment is a semantic view over token gaps:
+Documentation attachment is a semantic view over adjacent list elements:
 
 ```text
-LeadingDocumentation(declToken) = maximal documentation-comment group in leadingGap
+LeadingDocumentation(declToken) = maximal documentation-comment group in LeadingTrivia(declToken)
                                   not separated by a blank-line boundary
-TrailingDocumentation(token) = documentation comment in trailingGap on the same logical line
+TrailingDocumentation(token) = documentation comment in TrailingTrivia(token)
+                               on the same logical line
 ```
 
-Storage never moves a comment from one gap to another to implement attachment.
+Attachment never moves, copies, or re-owns a `Trivia` element.
 
 ## Preprocessor syntax
 
-The physical preprocessor tree recognizes these directive spellings:
+The `PreprocessorStructured` CST recognizes these directive spellings:
 
 ```text
 #if #ifdef #ifndef #elif #else #endif
@@ -218,35 +282,311 @@ Atoms are integer literals, parenthesized expressions, `defined`, `__has_feature
 whose replacement is evaluated under preprocessor rules.
 
 ```text
-PpNode = TextRegion
-       | IncludeDirective
-       | DefineDirective
-       | UndefDirective
-       | ConditionalGroup
-       | DiagnosticDirective
-       | LineDirective
-       | PragmaDirective
-       | LanguageDirective
-       | UnknownDirective
+PreprocessorElement = TextRegion
+                    | IncludeDirective
+                    | DefineDirective
+                    | UndefDirective
+                    | ConditionalGroup
+                    | DiagnosticDirective
+                    | LineDirective
+                    | PragmaDirective
+                    | LanguageDirective
+                    | MacroInvocation
+                    | UnknownDirective
 ```
 
-`PP-TREE-001`: All directives, delimiters, line endings, inactive branches, and text regions occur
-exactly once in the physical ownership projection of `PreprocessorTree`.
+`PP-TREE-001`: All directives, macro definitions/invocations, arguments, paste operators,
+delimiters, line endings, inactive branches, and text regions have typed non-terminal structure in
+one or more topologically ordered `CSTSnapshot<PreprocessorStructured>` values. Initial structuring
+is environment-independent; invocation structure is published when the ordered expansion scan can
+resolve it. Every grammar token is reached through a named terminal field. A significant trivia
+element such as a directive line ending may also be referenced by a named terminal. All such
+terminals remain zero-copy references into `TokenList`, which is the sole value owner; other trivia
+is reached through adjacency or an exact range, never an anonymous gap field.
 
-`PP-EXP-001`: Macro expansion produces an origin DAG containing definition token, invocation,
-argument origin, stringize/paste operation, and nested expansion steps. Recursion suppression is an
-explicit expansion decision attached to the invocation.
+`PP-EXP-001`: Every macro-produced `Token` has `CSTRewriteTokenOrigin` naming the exact output of
+one `ExpandMacroDefinitionOp` rewrite. Its `MacroDefinition::Op.opcode` is the established
+`RawSpan`, `ExpandedParam`, `UnexpandedParam`, `StringizedParam`, `TokenPaste`, `BuiltinLine`, or
+`BuiltinFile`, and its dependent input has the same tag. The rewrite has typed inputs for the exact
+`MacroInvocation` non-terminal, replacement-operation non-terminal, argument, and any prior
+expansion output it consumes. The containing
+`MacroExpansion` non-terminal exposes its invocation as `expandedFrom`; a
+`TokenPasteExpansion` exposes the exact earlier `TokenPaste` non-terminal. Recursion suppression is
+an explicit `SuppressedExpansion` decision, not a missing provenance edge or mutable flag on the
+invocation node.
 
-`PP-EXP-002`: Stringization uses the exact physical spelling and standardized whitespace folding
-defined by the preprocessor rule; the physical trivia is not reconstructed from a one-bit flag.
+Stringization and paste use executable spelling functions:
 
-`PP-EXP-003`: Token paste concatenates semantic operand spellings, re-lexes exactly one resulting
-preprocessing token, and records both operand origins. Failure produces an invalid expanded token
-and retains the paste node.
+```text
+stringizePayload(range) =
+    trim leading/trailing Trivia;
+    replace each remaining maximal nonempty Trivia run with one U+0020;
+    concatenate Token.logicalSpelling in order;
+    within StringLiteral and CharLiteral spellings, prefix each '\\' and '"' with '\\'
 
-`PP-INC-001`: Each included file has a separate `SourceFileRecord`, preprocessor tree, and grammar
-CST. The including tree contains an `IncludeEdge`; it does not physically nest the included file's
-tokens into the formatter tree. The expanded semantic view may traverse the edge.
+stringize(range) = '"' + stringizePayload(range) + '"'
+
+pasteSpelling(left, right) =
+    logicalSpelling(left) if present, else ""
+  + logicalSpelling(right) if present, else ""
+
+PasteLexeme = ValidPasteToken(type: TokenType where not isTrivia(type), spelling: Text)
+             | InvalidPasteToken(spelling: Text)
+
+pasteTokens(left, right) = LexPasteSequence(pasteSpelling(left, right))
+```
+
+Comments, newlines, and line continuations are `Trivia` for whitespace folding; a line continuation
+inside a token has already been removed from that token's `logicalSpelling`. The escaping step does
+not decode then re-encode a literal. It scans the exact logical spelling bytes of that token.
+
+`PP-EXP-002`: A stringized output is one `StringLiteral` token whose `logicalSpelling` equals
+`stringize(argumentSpelling(argumentNode))`, where `argumentSpelling` enumerates every `Token |
+Trivia` element in the exact `MacroInvocationArg.writtenRange`. It never reconstructs trivia from
+`AfterWhitespace`, a terminal-only projection, or another one-bit flag. The `StringizedParam`
+opcode input retains that argument node and the exact `MacroStringize` predecessor containing the `#`
+and parameter occurrence.
+
+`LexPasteSequence` is a preprocessing-token lexer, not the lossless source lexer. It emits no EOF or
+`Trivia`. A source-lexer spelling that would begin whitespace, a comment, or another trivia form is
+one `InvalidPasteToken` covering the offending bytes; for example `/ ## *` produces invalid `/*`,
+not `BlockComment` trivia. Materialization turns `ValidPasteToken` into its stated `TokenType` and
+`InvalidPasteToken` into an `Invalid` `Token`; both have `physicalSpelling=None` and receive a
+`TokenTerminalBundle` output of the current `ExpandMacroDefinitionOp(TokenPaste)` rewrite as their
+origin.
+
+`PP-EXP-003`: A token paste uses `pasteTokens`. Zero results are valid exactly when
+`pasteSpelling(left, right) == ""`, which requires both operands to be absent. One valid result is a
+successful paste. Any invalid result or more than one result emits `invalid-token-paste-result` and
+retains the exact materialized sequence for recovery. The `TokenPaste` opcode input records the
+exact earlier `TokenPaste` non-terminal, both optional typed input edges, and `pasteSpelling`; a valid re-lexed token keeps its
+`TokenType`, while a spelling that is not a preprocessing token uses the explicit `Invalid`
+alternative above. Every emitted token has a distinct `CSTRewriteOutput` ordinal of that same
+rewrite, and the wrapping `TokenPasteExpansion.result` field contains those terminal nodes in that
+order.
+
+`PP-EXP-004`: The primary diagnostic anchor of a macro-derived token is the outermost invocation
+name. The complete structured trace retains nested invocation, definition, argument, stringize,
+paste, and physical-spelling ranges as diagnostic notes; choosing the primary range discards none
+of them.
+
+`PP-INC-001`: Each include use has a distinct `SourceView` and its own
+`Lexed -> PreprocessorStructured -> MacroExpanded` CST chain. Repeated uses may share one file
+record and decoded snapshot while retaining distinct views. The including `IncludeExpansion`
+non-terminal refers both to the written `IncludeDirective` predecessor and the included expanded
+root. Each spliced token has a `CSTRewriteTokenOrigin` rooted at that `IncludeExpansion` rewrite, so
+two inclusions of the same snapshot retain distinct include paths. Tooling may parse an included
+view separately; that creates a distinct `CSTSnapshot<Parsed>` without changing either include
+chain.
+
+`PP-INC-002`: Include traversal is a scoped `PreprocessorStep`. It pushes the resolved file's
+`PreprocessorInputFrame`, replays the included unit under the caller's current environment, and pops
+that exact frame. The included unit's resulting macro bindings, `#undef` tombstones,
+`pragmaOnceUniqueIdentities`, loaded source versions, and declared directive state become the state
+for following parent-file text; its conditional and busy-invocation stacks cannot leak. A cyclic
+identity is a failed include, while an ordinary written include guard is evaluated as conditional
+activity rather than a separate suppression mechanism.
+
+## CST production fields
+
+EBNF specifies accepted ordering and repetition; the paired node schema assigns every symbol
+occurrence a stable field role and category. A production is incomplete and cannot generate a
+parser until both parts exist. The checked-in
+[`cst-production-profile.json`](cst-production-profile.json)
+is the compact schema authority paired with [`grammar.ebnf`](grammar.ebnf), and
+[`generate-cst-production-schema.py`](generate-cst-production-schema.py) expands those two inputs
+into the complete production portion of `NodeSchemaRegistry`. It rejects an unrecognized terminal,
+an undefined production reference, an unmatched override selector, an unnamed occurrence, or a
+grammar digest that changed without a corresponding schema review.
+
+The generated schema retains EBNF structure instead of flattening it. `sequence` generates an
+ordered product; `choice` generates one closed variant whose alternatives are products; `optional`
+generates `Option`; `repeat` generates `NodeList`; and `oneOrMore` generates `NonEmpty`. The
+cardinality constructor always wraps the complete child shape. Thus `{ ",", parameter }` is
+`NodeList<{ comma, parameter }>` and can represent only the interleaved source sequence; it is never
+lowered to unrelated `NodeList<comma>` and `NodeList<parameter>` fields. Every leaf has a
+whitespace-independent occurrence identity, terminal/non-terminal sort, symbol constraint,
+source-order position, and field role. The deterministic naming rule covers ordinary productions;
+an explicit override names semantically significant roles or merges mutually exclusive leaves into
+one category-typed field.
+
+The generated representation is:
+
+```text
+GrammarOccurrenceId = (production: ProductionId, path: StructuralEBNFPath)
+GrammarChoiceGroupId = GrammarOccurrenceId
+GrammarQuantifierGroupId = GrammarOccurrenceId
+CSTCategoryId = QualifiedName
+
+CSTVariantTag = { stableName: QualifiedName, wireTag: UInt32 }
+CSTGroupTag = { stableName: QualifiedName, wireTag: UInt32 }
+
+CSTShapeGroup = {
+    stableName: QualifiedName,
+    wireTag: UInt32,
+    field: {
+        name: FieldName,
+        edge: Structural,
+        stages: { Concrete(Parsed) },
+        wire: SerializedField,
+        access: Editable
+    }
+}
+
+CSTTypedReference =
+    Terminal(stage: CSTStage)
+  | Production(stage: CSTStage, production: ProductionId)
+  | Category(stage: CSTStage, category: CSTCategoryId)
+
+CSTProductionOccurrence = {
+    id: GrammarOccurrenceId,
+    leafKind: LiteralTerminal | TokenTerminal | SoftKeywordTerminal | NonTerminal,
+    symbol: Utf8String | ProductionId,
+    sourceOrder: UInt32,
+    variantPath: NodeList<(group: CSTGroupTag, alternative: CSTVariantTag)>,
+    cardinalityPath: NodeList<(group: CSTGroupTag,
+                               kind: Optional | Repeat | OneOrMore)>
+}
+
+CSTProductionFieldDescriptor = FieldDescriptor & {
+    typedReference: CSTTypedReference,
+    sourceOrder: UInt32,
+    occurrences: NonEmpty<CSTProductionOccurrence>
+}
+
+CSTProductionShape =
+    Field(field: FieldName,
+          terminalConstraint: Option<TerminalConstraint>)
+  | Product(NodeList<CSTProductionShape>)
+  | ClosedVariant(CSTShapeGroup,
+        NonEmpty<(tag: CSTVariantTag, value: CSTProductionShape)>)
+  | Optional(CSTShapeGroup, value: CSTProductionShape)
+  | List(CSTShapeGroup, element: CSTProductionShape)
+  | NonEmpty(CSTShapeGroup, element: CSTProductionShape)
+  | OptionalField(sourceGroup: CSTGroupTag, value: Field)
+  | ListField(sourceGroup: CSTGroupTag, element: Field)
+  | NonEmptyField(sourceGroup: CSTGroupTag, element: Field)
+  | Difference(CSTProductionShape, excluded: TerminalConstraint)
+  | SemanticPredicate(GrammarPredicateId)
+
+CSTProductionConstraint =
+    CoPresent(fields: NonEmpty<FieldName>, rule: RuleId)
+
+CSTProductionDescriptor = {
+    production: ProductionId,
+    kind: NodeKind where kind.family = NonTerminalNode,
+    fields: NodeList<CSTProductionFieldDescriptor>,
+    shape: CSTProductionShape,
+    constraints: NodeList<CSTProductionConstraint>,
+    invariants: NodeList<RuleId>
+}
+```
+
+`StructuralEBNFPath` is computed from named `sequence`, `choice`, and quantifier boundaries after
+discarding whitespace and comments. It identifies an occurrence for profile selection; it is not a
+runtime child index. `fields` groups occurrences with the same approved role; the closed `shape`,
+not per-leaf cardinality wrappers, composes those roles into the runtime product/variant type. A
+node is valid against exactly one alternative at every `ClosedVariant`; fields from unselected
+alternatives do not exist in that value. Generic operand enumeration recursively visits the selected
+alternative and each list element's complete product in source order. The registry stores these
+typed descriptors, not the generator's untyped EBNF parse tree.
+
+The typed compilation functions are structural. `compileShape` produces the complete product value
+for a production, choice alternative, or quantifier element; `compileFields` produces the named
+slots directly owned by that product:
+
+```text
+compileShape(s) = ProductKind(compileFields(s))
+
+compileFields(Field(f)) =
+    [FieldSlotKind(name: f, valueKind: descriptor(f).valueKind)]
+compileFields(Product(s...)) = concat(compileFields(s)...)
+compileFields(ClosedVariant(g, (tag_i, s_i)...)) =
+    [FieldSlotKind(name: g.field.name,
+        valueKind: VariantKind(group: CSTGroupTag(g.stableName, g.wireTag),
+            alternatives: (tag_i, compileShape(s_i))...))]
+compileFields(Optional(g, s)) =
+    [FieldSlotKind(name: g.field.name,
+                   valueKind: OptionalKind(compileShape(s)))]
+compileFields(List(g, s)) =
+    [FieldSlotKind(name: g.field.name,
+                   valueKind: ListKind(compileShape(s)))]
+compileFields(NonEmpty(g, s)) =
+    [FieldSlotKind(name: g.field.name,
+                   valueKind: NonEmptyListKind(compileShape(s)))]
+compileFields(OptionalField(_, Field(f))) =
+    [FieldSlotKind(name: f,
+                   valueKind: OptionalKind(descriptor(f).valueKind))]
+compileFields(ListField(_, Field(f))) =
+    [FieldSlotKind(name: f,
+                   valueKind: ListKind(descriptor(f).valueKind))]
+compileFields(NonEmptyField(_, Field(f))) =
+    [FieldSlotKind(name: f,
+                   valueKind: NonEmptyListKind(descriptor(f).valueKind))]
+compileFields(Difference(s, _)) = compileFields(s)
+compileFields(SemanticPredicate(_)) = []
+```
+
+At a product, `NodeFields` contains exactly its direct leaf fields and shape-group fields. A variant
+group contains its tag and only the selected alternative payload; unselected alternatives contribute
+no active fields. A list group contains complete element values. Serialization writes a variant tag
+before its selected payload and writes a list count followed by each complete element product in
+order. Generic reflection follows the same recursion, so `{ ",", parameter }` enumerates
+`comma[0], parameter[0], comma[1], parameter[1], ...`; it cannot expose separately editable parallel
+lists. An exact reviewed override may replace a source group with named category/optional fields,
+as `IfStatement` does, but must state the equivalent co-presence invariant.
+
+The emitted JSON is a `NodeSchemaRegistry` fragment with a chapter-3-compatible
+`SchemaVersion { major, minor }`, typed `cstCategories`, `grammarProductions`, and
+`cstProductionDescriptors`. Every category/production kind, field, choice/quantifier group, and
+variant alternative carries a non-zero stable wire tag. Tags are the big-endian UInt32 prefix of
+SHA-256 over the versioned namespace, tag domain, and stable semantic name; an explicit profile
+override may pin a reviewed value. Zero is reserved, and generation rejects a collision instead of
+probing for a different value. Renaming a published semantic role or changing the derivation
+namespace requires a schema-version change and an explicit migration; adding an unrelated
+production cannot renumber existing tags.
+
+For example, the exact override for `if-statement` generates:
+
+```text
+IfStatement = {
+    ifKeyword: TerminalNodeId<Parsed>,
+    leftParenthesis: TerminalNodeId<Parsed>,
+    conditionExpr: ExprCSTNodeId<Parsed>,
+    rightParenthesis: TerminalNodeId<Parsed>,
+    trueBranch: StmtCSTNodeId<Parsed>,
+    elseKeyword: Option<TerminalNodeId<Parsed>>,
+    falseBranch: Option<StmtCSTNodeId<Parsed>>
+}
+```
+
+The schema constrains `ifKeyword`/`elseKeyword` to identifier terminals with those logical
+spellings, constrains the parentheses to `LParent`/`RParent`, and requires
+`isSome(elseKeyword) = isSome(falseBranch)`. The generic operand sequence is the flattening of these
+fields in displayed order. It is not separately stored. Chapter 3 defines the stage-indexed node,
+snapshot, rewrite, and reflection domains that carry this product.
+
+`IfLetBinding` implements `ExprCSTCategory` for the purpose of `conditionExpr`, but its
+production is admitted only in that contextual position; it is not added to the general
+`expression` production. CST category membership describes a typed field contract, not unrestricted
+grammar reachability.
+
+`PAR-CST-001`: For every leaf occurrence in every `grammar.ebnf` production, generation yields
+exactly one named terminal or non-terminal field occurrence. No delimiter, separator, operator, or
+keyword leaf is elided. Two leaves may feed one field only when the profile explicitly proves that
+they occupy different alternatives of the same `choice` and gives their common CST category. The
+generated grouped shape, not an independently stored child list, is the source of generic operand
+order and optional/repeated co-presence constraints. A choice has exactly one selected tagged
+alternative. A repeated product is one ordered list of product values; parallel lists for its
+component fields are not a conforming representation.
+
+`PAR-CST-002`: The profile pins the exact digest of the grammar's canonical UTF-8/LF text, so
+checkout line-ending policy is not a schema change. Changing that canonical grammar requires a
+schema version change and comparison of the old and new generated descriptors. A published field name may
+remain unchanged or be covered by an explicit `SchemaMigrationDescriptor.fieldRemaps` entry; a
+collision suffix or structural-path shift may not silently rename it. The profile override is the
+authority for preserving a semantic role when grammar structure changes. Published kind, field,
+group, and alternative wire tags obey the same no-reuse rule.
 
 ## Surface grammar
 
@@ -331,7 +671,7 @@ From lowest to highest:
 | postfix        | call, index, member, generic application, postfix operators | left                                                   |
 
 `PAR-EXP-001`: Operator spellings resolve through the standard environment after parsing. Parsing
-constructs an operator application syntax node and does not select a builtin or user declaration.
+constructs an operator-application CST non-terminal and does not select a builtin or user declaration.
 
 ## Named ambiguities
 
@@ -345,9 +685,10 @@ AmbiguousTypeOrValueGenericArgument
 AmbiguousModernOrTraditionalParameter
 ```
 
-Each node owns the shared expanded-token range once and stores non-owning alternative parse
-descriptors over that range. Alternatives may refer to token IDs and child ranges, but are not
-green subtrees in the ownership projection and cannot duplicate leaves.
+Each ambiguity node owns one primary ordered terminal projection and stores typed alternative
+non-terminal references over those same terminals. Every alternative has the named fields of its
+production; equal terminals are shared by reference. Alternative edges are excluded from the
+primary concrete-order projection and therefore cannot duplicate formatting output.
 
 `PAR-AMB-001`: Modern Slang resolves an ambiguity by syntax, dialect, and language version only.
 Legacy HLSL compatibility may request name-classification facts during the later
@@ -359,22 +700,28 @@ ambiguity diagnostic instead of using declaration order accidentally.
 
 ### Generic closing tokens
 
-The parser may view physical `>>` as two closers when inside generic arguments. The first slice
-covers the first spelling byte and owns no unique trivia; the second covers the second byte and
-exposes the parent token's trailing gap. In expression shift context the same token is one
-`>>` leaf.
+The parser may view a `>>` token as two closers when inside generic arguments. The first terminal
+node refers to a `TokenSlice` covering the first spelling byte and owns no trivia; the second refers
+to a slice covering the second byte. Any `TrailingTrivia(parent)` remains an adjacency view after
+the unsplit parent token. In expression shift context the same token is one whole-token terminal.
 
 ### Syntax declarations
 
-The grammar is parameterized by an immutable `SyntaxFeatureSet`. Builtin entries corresponding to
-today's `g_parseSyntaxEntries` are versioned standard-environment data.
+The fixed/contextual grammar is parameterized by immutable `GrammarVocabulary`. The separate
+`SyntaxParseInfoSet` contains builtin entries corresponding to
+today's `g_parseSyntaxEntries` are versioned standard-environment data. A
+`SerializedSyntaxParseInfo` is the immutable/callback-free form of the existing `SyntaxParseInfo`;
+its `syntaxClass` retains the established `SyntaxClass` classification. A source `SyntaxDecl`
+remains a declaration and contributes an entry when its compatibility scope is active; none of
+these terms is renamed to a generic “syntax feature.”
 
 Source-defined `syntax` declarations are an unresolved compatibility feature. The proposed safe
 model is:
 
 1. `syntax` declarations always parse using fixed grammar;
-2. `BuildSyntaxEnvironment` creates a persistent environment for subsequent declaration ranges;
-3. compatibility parsing may interpret an identifier through that environment; and
+2. binding a `SyntaxDecl` functionally extends `SyntaxParseInfoSet` for subsequent declaration
+   ranges;
+3. compatibility parsing may interpret an identifier through that set; and
 4. modern mode restricts aliases to fixed parse shapes or rejects them.
 
 This preserves a testable transformation and makes order-dependence explicit. The ledger must close
@@ -390,13 +737,16 @@ Every production declares:
 - a synchronization set; and
 - whether nested delimiters are balanced during skipping.
 
-Recovery emits only:
+Recovery emits only these terminal/non-terminal forms:
 
 ```text
-MissingToken(expected, anchor, rule)
-SkippedTokens(tokens, rule)
-UnexpectedConstruct(node, expectedCategory, rule)
+RecoverMissing(expected, anchor) -> MissingTerminal
+RecoverSkipped(tokens) -> SkippedTokens
+RecoverUnexpected(node, expectedCategory) -> UnexpectedConstruct
 ```
+
+The enclosing `CSTRewrite.rule` supplies `rule`; the recovery node/terminal exposes these arguments
+as read-only rewrite projections rather than storing a second copy.
 
 `PAR-REC-001`: A recovery action must consume a token, insert a missing token, or return to a caller
 that will do so. Progress is a structural invariant; there is no global “advance after 64 tries”
@@ -405,17 +755,19 @@ escape hatch.
 `PAR-REC-002`: A missing closer is inserted before a token in the production's follow set. A real
 unexpected closer is never consumed as the missing closer of another delimiter level.
 
-`PAR-REC-003`: Skipped tokens remain in source order under the smallest enclosing syntax node whose
+`PAR-REC-003`: Skipped tokens remain in source order under the smallest enclosing CST non-terminal whose
 recovery rule consumed them.
 
-`PAR-REC-004`: At EOF, every open delimiter produces one missing-token node and related opening
-origin. Recovery terminates in time linear in remaining token count for a fixed grammar.
+`PAR-REC-004`: At EOF, every open delimiter produces one `MissingTerminal` with a rewrite input
+that reaches the related opening terminal. Recovery terminates in time linear in remaining token
+count for a fixed grammar.
 
 ## CST-to-surface normalization
 
 Parsing does not perform semantic desugaring. In particular:
 
-- `if (let ...)` remains `IfLetSyntax`; it is not immediately rewritten into temporaries;
+- `if (let ...)` remains an `IfStatement` whose `conditionExpr` is `IfLetBinding`; CST-to-Surface
+  does not immediately rewrite it into temporaries;
 - cbuffer/tbuffer syntax remains a dedicated surface declaration rather than parser-synthesized
   struct/wrapper/variable declarations;
 - default interface methods remain their written generic shape and are never reparsed from copied
@@ -423,25 +775,29 @@ Parsing does not perform semantic desugaring. In particular:
 - declaration/expression ambiguities remain explicit until binding; and
 - function bodies have immutable CST roots, whether parsed eagerly or on demand.
 
-`PAR-NRM-001`: CST-to-SurfaceAST may remove punctuation from structural fields, but every output node
-has `Parsed(cstId)` provenance and every written distinction needed by diagnostics remains a field
-or is reachable from its CST.
+`PAR-NRM-001`: CST-to-SurfaceAST may remove punctuation from AST structural fields, but every output
+node has `Parsed(cstId: CSTNodeId<Parsed>)` provenance and every written distinction needed by
+diagnostics remains a named field or is reachable through CST rewrite predecessors.
 
 ## Machine-checkable completeness
 
-The eventual grammar/schema source generates token enums, syntax feature tables, CST kinds, parser
-production IDs, reflection metadata, documentation tables, and test skeletons. CI checks:
+The eventual grammar/schema source generates token enums, `GrammarVocabulary` and
+`SyntaxParseInfoSet` tables, stage-indexed
+non-terminal kinds, typed terminal/non-terminal field products, parser production IDs, reflection
+metadata, documentation tables, and test skeletons. CI checks:
 
 1. every token kind is classified by the lexical schema;
 2. every builtin syntax spelling maps to a grammar production or declared extension hook;
 3. every parser spelling and dialect/version gate maps back to the grammar;
-4. every CST kind has a production/recovery constructor;
-5. every grammar alternative has positive and recovery witnesses;
-6. undeclared FIRST/FOLLOW conflicts and backtracking fail generation; and
-7. differential parsing covers repository `.slang`, standard-module, prelude, and test sources.
+4. every non-terminal kind has a production/transformation/recovery constructor;
+5. every terminal and non-terminal occurrence in every production has one named, typed field;
+6. every grammar alternative has positive and recovery witnesses;
+7. undeclared FIRST/FOLLOW conflicts and backtracking fail generation; and
+8. differential parsing covers repository `.slang`, standard-module, prelude, and test sources.
 
-The required properties are exact physical-token concatenation, identity-format round trip, no
-token loss on invalid input, full/incremental parse equivalence, and CST serialization stability.
+The required properties are exact ordered `Token | Trivia` physical-spelling concatenation from the
+authoritative lexed `TokenList`, identity-format round trip, no token loss on invalid input,
+full/incremental parse equivalence, and CST serialization stability.
 
 ## Current implementation evidence
 

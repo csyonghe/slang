@@ -111,9 +111,12 @@ TestSourceFixture = {
 }
 
 TestSource::fromBytes(bytes, encoding) -> TestSourceFixture
-TestTokens::fromKinds(...) -> PhysicalTokenList
-TestCST::sourceNode(kind, physicalSlices...) -> SourceGreenNode
-TestCST::grammarNode(kind, expandedTokens...) -> GrammarGreenNode
+TestTokens::fromElements(Token | Trivia...) -> TokenList
+TestTokens::view(TokenList, TokenListSelection) -> TokenListView
+TestCST::terminal<S>(value, origin) -> TerminalNode<S>
+TestCST::nonTerminal<S, K>(kind, namedFields, origin) -> NonTerminalNode<S, K>
+TestCST::rewrite(rule, typedOperation) -> CSTRewrite
+TestCST::snapshot<S>(root, terminals, nonTerminals, predecessors...) -> CSTSnapshot<S>
 TestAST<S>::node(kind, fields...) -> ASTSnapshot<S>
 TestSemantics::type(...), decl(...), scope(...), witness(...)
 FakeQueryContext::given(key, result)
@@ -137,7 +140,9 @@ supply small fakes:
 | Subject                      | Mocked dependencies                                                                                          |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | lexical classification       | source snapshot and language options                                                                         |
-| parser production            | token cursor, syntax feature set, recovery sink                                                              |
+| preprocessor structuring     | `CSTSnapshot<Lexed>`, `PreprocessorOptions`, rewrite publisher                                               |
+| macro/include expansion      | structured CST, `PreprocessorState`, fake versioned `IncludeSystem`, paste lexer, rewrite publisher          |
+| parser production            | terminal reader over `ActiveTokenView`, `GrammarVocabulary`, `SyntaxParseInfoSet`, recovery/rewrite sink     |
 | lookup                       | immutable scope graph, facet provider, access predicate                                                      |
 | facet closure/priority       | typed aggregate relations, witness-route provider, extension applicability, priority proofs                  |
 | visibility                   | declaration facts, module/container relation, extension target equality                                      |
@@ -167,45 +172,185 @@ Required direct lexer/CST suites include:
 - every token kind and invalid-token path;
 - every literal base, suffix, separator, escape, raw string delimiter, and overflow boundary;
 - whitespace, newline convention, line continuation, ordinary/doc comments, and malformed comments;
-- logical tokens with discontinuous physical pieces around line continuations;
-- exact source partition and identity-format round trip;
-- leading/trailing shared trivia-gap access;
-- BOM, decoded encodings, source maps, and `#line` logical locations;
-- macro argument expansion, recursion suppression, stringization, paste, variadics, includes, and
-  nested origin chains;
+- logical tokens whose contiguous physical spelling records exact removed line-continuation ranges;
+- rejection of absent physical spelling with nonempty continuation ranges and of copied spelling
+  whose continuation metadata is dropped, reordered, overlapping, or out of bounds;
+- exact flat `Token | Trivia` source partition and identity-format round trip;
+- token-only, trivia-only, semantic, markup, and active-token view projection, composition,
+  stable `(list, index)` identity, immutability, and serialization;
+- `TokenSpan` empty/end/bounds behavior and selected-index-to-base-index resolution under every
+  filter, plus rejection of incomplete or wrong-list `TokenActivityMap` values;
+- `TokenReader` `peekToken`/`advanceToken`/`isAtEnd` behavior, `ParsingCursor` restore on the same
+  view, rejection across different views, and rejection of any trivia-containing view;
+- contextual `tokenFlags` at list start, after whitespace/comments/newlines/line continuations, at
+  EOF, and after sharing the same token into a differently contextualized list;
+- adjacency-derived leading/trailing/documentation trivia with no stored gap authority;
+- BOM, decoded encodings, source maps, `#line` logical locations, and rejection of self/descendant
+  `SourceView` predecessor anchors;
+- active versus inactive `#line`, macro-expanded line operands, final interpreted-view construction,
+  and `BuiltinLine`/`BuiltinFile` observation of the exact logical-location state without a lex-time
+  directive prescan;
+- `BuildLexedCST` bijection with its exact `TokenList`, plus
+  `StructurePreprocessor`/`ExpandPreprocessor` rejection of snapshots paired with the wrong
+  view/options/state or include-system revision, including inherited child options;
+- total stage-specific `terminalKind`/`terminalClass` round trips for every admitted terminal value,
+  including rejection of an ID or record whose cached kind disagrees with its value class;
+- zero-width `MacroInvocationArg` and grammar-production rewrites with exact `Empty` anchors,
+  distinguishing `Before`, `After`, `EndOfInput`, and `SourceAnchor` and rejecting a fabricated
+  consumed terminal;
+- literal decoding as a pure `(TokenRef, LanguageRuleSetId)` query, including every radix/format,
+  suffix, escape failure, macro-pasted spelling, and cache-key distinction;
+- direct-source, replacement-body, repeated-parameter-occurrence, prescanned-argument,
+  unexpanded-argument, and nested macro CST rewrite chains plus `BusyMacro` suppression linked to
+  the exact blocking invocation;
+- nested macro-output recognition where `PreserveTerminal(..., PreprocessorStructured)` bridges
+  each terminal to the new stage while its `TokenOrigin` remains the earlier macro output, rejecting
+  a direct wrong-stage origin binding and any non-terminal or bare source-range preserve input;
+- direct active/inactive `TextRegion` token and trivia terminals bridged into the `MacroExpanded`
+  primary list in exact interleaved order, with unchanged token origins/trivia values, correct
+  activity, and no accidental directive-terminal leakage into active views;
+- `Suppressed` and recovered `Failed` macro outcomes whose verbatim tokens are produced by the exact
+  `ReplayMacroInvocationResult` projection, preserving each token value/origin while giving each new
+  terminal its replay origin; interleaved nested/recovery outputs must reproduce the rescan trace,
+  and a missing, duplicate, reordered, anonymous, or mismatched-decision replay is rejected;
+- `FunctionLike` including zero parameters, `ObjectLike`, and source-less `BuiltinObjectLike`
+  definitions; named, named-variadic, and `...`/`__VA_ARGS__` parameters; every legal and illegal
+  `MacroDefinition::Opcode`/`MacroDefinition::Op` pair; name/field/argument-map invariants;
+  the definition distinction between `#define F(x)` and object-like `#define F (x)`; accepted trivia
+  between a resolved function-like invocation name and `(`; cross-definition rewrite rejection; and
+  source-token/output spelling equality;
+- stringization from exact argument `Token | Trivia`; token paste with two/one/zero/invalid operands,
+  chained `X ## Y ## Z`, an empty middle operand, and trivia-like `/ ## *`; variadics,
+  `BuiltinLine`/`BuiltinFile`, includes, and synthesized tokens;
+- traversed (including a macro-produced child token), `#pragma once`-suppressed, pre-resolution
+  failed, and `Failed(Cycle, error)` include edges with no fabricated view/list, including rejection
+  of a traversed include back to an ancestor expanded snapshot and rejection of wrong directive,
+  predecessor, initiating-range, included-root, or resolved-identity links;
+- traversed-include `includedInputs` equality with `IncludedContentView`'s active non-EOF terminal
+  projection; interleaved `tokenResult`/`triviaResult` output reconstruction; token
+  type/logical-spelling/physical-spelling/continuation copying; exact trivia copying; and retention
+  of the child EOF without inserting it into the parent list, rejecting wrong count, order, input,
+  class, or output metadata;
+- ordered state replay where an include defines or undefines `M` before a parent-file use, an
+  inactive definition does not mutate the environment, conditional/busy/input stacks push and pop
+  without leakage, pragma-once identities and loaded source versions propagate, and identical text
+  is recognized differently under two immutable `PreprocessorState` values;
+- deterministic physical-source, invocation, definition, primary-anchor, and full-trace provenance
+  projections, including left/right branch preorder and first-visit deduplication; exact
+  `CSTProvenanceTrace` closure/role equations; DAG acyclicity; and copy/serialization round trips;
 - active and inactive conditional regions;
-- source-tree/preprocessor-root identity, expanded-token origin DAGs, and grammar/source ownership
-  bijections;
-- whole and sliced `>>` expanded-token coverage;
+- exact initial `Lexed -> PreprocessorStructured`, dynamically recognized structured-fragment,
+  and final `MacroExpanded -> Parsed` predecessor links; per-token rewrite roots; lexed and
+  macro-expanded primary terminal-projection coverage bijections; structured-stage predecessor-list
+  retention without duplicate trivia terminals; and parsed active-token coverage;
+- a `TokenizedSource` whose terminal fields are in one-to-one list order with every `Token | Trivia`
+  element, and rejection of an anonymous/parallel child authority;
+- `DefineDirective`, `MacroDefinition`, parameter/argument clause and comma-tail nodes,
+  `MacroInvocation`, `MacroInvocationArg`, and `TokenPaste` non-terminals with all
+  keyword/operator/delimiter/separator terminals in named fields and exact interleaved operand order;
+- `MacroExpansion`, chained `TokenPasteExpansion`, and `IncludeExpansion` nodes whose
+  `expandedFrom` fields reach the exact predecessor non-terminal and whose ordered `result` fields
+  agree with the rewrite outputs;
+- whole and sliced `>>` token coverage, including exact `SplitToken` predecessor, partition, and
+  output-ordinal validation;
 - every grammar production in isolation;
+- every EBNF choice as one closed, wire-tagged variant with exactly one selected alternative, never
+  as a product that requires every alternative's fields;
+- every repeated sequence as one ordered list of element products, including delimiter/value pairs,
+  never as parallel component lists;
+- `IfStatement` with exact `ifKeyword`, `leftParenthesis`, `conditionExpr`, `rightParenthesis`,
+  `trueBranch`, optional `elseKeyword`, and optional `falseBranch` fields; wrong keyword,
+  delimiter, category, or unmatched else-pair rejection; and equality between generic operand
+  enumeration and typed field order;
 - property/subscript accessor blocks containing `constref`, `ref`, and both spellings; normalization
   to distinct `AccessorRole.RefAccessor(ReadAccess)`/`Ref(ReadWriteAccess)` keys; exact-role duplicate
   diagnostics; and round trips preserving declaration order without using that order as identity;
 - disambiguation of unbracketed accessor `constref`, parameter `__constref`, and receiver
   `[constref]`, including recovery at each production boundary and CST-to-Surface normalization;
 - each ambiguous CST form and its later binding resolution;
-- every production recovery set, missing token, skipped token, and progress guarantee; and
-- incremental reparse subtree reuse.
+- every production recovery set, missing terminal, skipped-token non-terminal, unexpected
+  construct, field/kind mismatch rejection, and progress guarantee;
+- `CSTCursor` parent/path/range behavior for repeated or shared-equal node records; and
+- incremental reparse sharing without conflating distinct occurrences.
 
-The parser has two generated completeness tests:
+The parser/preprocessor schema has three generated completeness tests:
 
-1. every `CSTKind` must be constructible by at least one grammar production or recovery rule;
-2. every grammar production must have at least one positive token sequence and one generated
-   single-token deletion/insertion recovery case.
+1. every `NonTerminalKind<S>` at every `CSTStage` must be constructible by at least one lexical,
+   preprocessing, expansion, grammar, or recovery rule;
+2. every terminal/non-terminal occurrence in every production must have a unique field name,
+   declared cardinality/category, and generated source-order position; and
+3. every grammar production must have at least one positive token sequence and one generated
+   single-terminal deletion/insertion recovery case.
+
+The second test is executable now:
+
+```text
+python docs/type-system/generate-cst-production-schema.py
+```
+
+The command parses the EBNF, validates its pinned canonical UTF-8/LF digest and terminal vocabulary,
+resolves every explicit selector, generates every typed production shape, and checks the exact
+seven-field `IfStatement` contract. It also has executable sentinels proving that `declaration` is a
+closed variant and that the repeated suffix of `dotted-name` is a list of ordered
+`{ dot, identifier }` products. Generation validates the `{ major, minor }` schema version, derives
+non-zero wire tags for every kind/field/group/alternative, and rejects tag collisions. `--emit`
+writes the complete `NodeSchemaRegistry` fragment to standard output; `--production if-statement`
+emits one descriptor for focused review and unit-test fixtures.
 
 ## Schema and immutable representation tests
 
 Generated tests iterate every node descriptor and verify:
 
 - typed fields and generic fields enumerate identical values;
-- structural/semantic/provenance edge filters are correct;
+- every parsed production's `NonTerminalFields` matches `compileShape(descriptor.shape)`, with
+  products in descriptor order, exactly one selected variant tag/payload, explicit optional
+  presence, and complete repeated-product elements;
+- recursive CST serialization and generic traversal agree at every product/variant/optional/list
+  boundary, including `comma[0], argument[0], comma[1], argument[1]` rather than parallel lists;
+- every `CSTCategoryDescriptor` accepts exactly its registered production members and cannot be
+  constructed as a concrete occurrence, including a production in multiple categories and
+  rejection of non-injective `grammarProductions` kinds;
+- `nodes[production.kind]` equals the descriptor generated from `compileShape`, direct group fields
+  are the sole serialized authority, and every nested leaf uses the exact generated
+  `CSTShapeProjectedField` and `projectedCSTFieldKind`;
+- `NodeKindValue` checks exact, acyclic `baseKind`, and category-membership cases; abstract category
+  and terminal-family kinds never enter `stageKinds` or acquire constructors;
+- `terminalKinds` is total and injective for each stage's admitted `TerminalClass` values, and its
+  generated inverse rejects the wrong family or stage;
+- each CST non-terminal's generic operands are derived exactly from its named structural fields,
+  with no anonymous child list or omitted punctuation terminal;
+- structural/alternative/semantic/provenance edge filters are correct;
+- `withCSTField` requires a rule, creates a `FunctionalCSTEdit` predecessor edge, and leaves the old
+  snapshot byte-identical; `replacementOf` round trips scalars, CST/schema references, products,
+  variants, optionals, lists, non-empty lists, and maps without hiding node inputs; its canonical
+  replacement distinguishes different edits; origin and rewrite-projected fields are read-only,
+  and preserving the old origin while changing a field is rejected;
+- non-root `withCSTField` edits remain reachable from the returned root after canonical reindexing;
+  identity edits update every intentional alias, while `withCSTCursorField` clones/rewires only the
+  selected alternative occurrence;
 - `withField` creates a new node and leaves the old snapshot byte-identical;
 - invalid field kinds, presence, or collection shapes fail before publication;
 - generic rewrite identity preserves structural hashes;
 - serialization round trips every optional/variant field;
+- `DerivedField`, `CSTShapeProjectedField`, and `CSTRewriteProjectedField` each expose their complete
+  declared dependency class; rewrite output projections reconstruct from serialized
+  `outputBindings` and reject the wrong operation/path/class;
 - unknown optional fields survive schema-version round trips; and
 - unknown required fields fail atomically, forward/SCC graph references round trip, and golden files
   migrate through every supported wire version;
+- every staged CST rewrite round trips with its predecessor snapshot IDs and rejects forward,
+  dangling, wrong-role, wrong-stage, or cyclic provenance inputs; output resolution also rejects an
+  unknown port, wrong output class, or ordinal at/above the declared dynamic count;
+- snapshot output bindings reject a missing/duplicate inverse, wrong local node, wrong
+  terminal-class/non-terminal-kind, mismatched token/terminal origins, or ambiguous predecessor
+  realization; `resolveOutput` returns the exact bound occurrence;
+- canonical CST snapshot encoding omits its own ID, uses unique local indices with matching
+  terminal-kind/non-terminal-kind tags, gives equivalent trees built in different allocation or
+  scheduler orders the same ID, and rejects unreachable records, a wrong root class, or
+  noncanonical array order;
+- atomic preprocessor transitions replay their typed effect exactly; scoped macro/include steps
+  require matching enter/leave effects, a valid nested state chain, and only the declared outward
+  state changes;
 - copy/share counts and snapshot lifetime do not affect equality or serialization.
 
 Every node kind receives a minimal valid fixture. This is type coverage independent of which

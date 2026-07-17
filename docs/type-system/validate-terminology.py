@@ -2,9 +2,10 @@
 """Reject replaced semantic vocabulary in the frontend specification.
 
 The terminology chapter is the sole alias registry and is intentionally excluded. All other
-Markdown files are checked with ASCII identifier boundaries so canonical compounds such as
-``ParamPassingMode`` and ``StorageAccessMode`` do not accidentally match their replaced suffixes.
-The validator is deterministic and uses only the Python standard library.
+Markdown files and the machine-readable grammar/CST-schema sources are checked with ASCII
+identifier boundaries so canonical compounds such as ``ParamPassingMode`` and
+``StorageAccessMode`` do not accidentally match their replaced suffixes. The validator is
+deterministic and uses only the Python standard library.
 """
 
 from __future__ import annotations
@@ -19,6 +20,11 @@ from typing import Pattern
 TYPE_SYSTEM_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = TYPE_SYSTEM_DIR.parent.parent
 TERMINOLOGY_CHAPTER = "00-terminology.md"
+MACHINE_READABLE_SPEC_FILES = (
+    "cst-production-profile.json",
+    "generate-cst-production-schema.py",
+    "grammar.ebnf",
+)
 
 IDENTIFIER_LEFT = r"(?<![A-Za-z0-9_])"
 IDENTIFIER_RIGHT = r"(?![A-Za-z0-9_])"
@@ -93,20 +99,133 @@ FORBIDDEN_TERMS = (
         re.compile(r"(?<![A-Za-z])places?(?![A-Za-z])"),
     ),
     ForbiddenTerm(
-        "PhysicalTokenTape",
-        "PhysicalTokenList",
-        _schema_root("PhysicalTokenTape"),
+        "retired PhysicalToken-derived schema",
+        "Token / PhysicalTokenView",
+        re.compile(
+            rf"{IDENTIFIER_LEFT}PhysicalToken"
+            rf"(?!View{IDENTIFIER_RIGHT})"
+            rf"[A-Za-z0-9_]*{IDENTIFIER_RIGHT}"
+        ),
+    ),
+    ForbiddenTerm(
+        "retired ExpandedToken-derived schema",
+        "Token with TokenOriginId / ActiveTokenView",
+        _schema_root("ExpandedToken"),
+    ),
+    ForbiddenTerm(
+        "PhysicalSlice", "Token / Trivia physicalSpelling", _schema_root("PhysicalSlice")
+    ),
+    ForbiddenTerm("TriviaRange", "TokenListRange", _schema_root("TriviaRange")),
+    ForbiddenTerm("BoundaryToken", "EndOfFile Token", _schema_root("BoundaryToken")),
+    ForbiddenTerm("leadingGap", "LeadingTrivia", _schema_root("leadingGap")),
+    ForbiddenTerm("trailingGap", "TrailingTrivia", _schema_root("trailingGap")),
+    ForbiddenTerm(
+        "interstitialTrivia",
+        "Token.removedLineContinuations",
+        _schema_root("interstitialTrivia"),
+    ),
+    ForbiddenTerm(
+        "StartOfLogicalLine", "AtStartOfLine", _schema_root("StartOfLogicalLine")
+    ),
+    ForbiddenTerm("TriviaKind", "Trivia.type: TokenType", _schema_root("TriviaKind")),
+    ForbiddenTerm("Whitespace-derived identifier", "WhiteSpace", _schema_root("Whitespace")),
+    ForbiddenTerm("Newline-derived identifier", "NewLine", _schema_root("Newline")),
+    ForbiddenTerm(
+        "Trivia.kind field",
+        "Trivia.type",
+        re.compile(rf"{IDENTIFIER_LEFT}Trivia\.kind{IDENTIFIER_RIGHT}"),
+    ),
+    ForbiddenTerm(
+        "PpMacroDefinition", "MacroDefinition", _schema_root("PpMacroDefinition")
+    ),
+    ForbiddenTerm("PpInvocation", "MacroInvocation", _schema_root("PpInvocation")),
+    ForbiddenTerm(
+        "MacroParameter schema root",
+        "MacroDefinition::Param / MacroDefinitionParam",
+        _schema_root("MacroParameter"),
+    ),
+    ForbiddenTerm(
+        "MacroArgument schema root",
+        "MacroInvocation::Arg / MacroInvocationArg",
+        _schema_root("MacroArgument"),
+    ),
+    ForbiddenTerm(
+        "MacroEnvironment schema root",
+        "preprocessor::Environment",
+        _schema_root("MacroEnvironment"),
+    ),
+    ForbiddenTerm(
+        "PreprocessorConditionalFrame schema root",
+        "preprocessor::Conditional",
+        _schema_root("PreprocessorConditionalFrame"),
+    ),
+    ForbiddenTerm("IncludeProvider", "IncludeSystem", _schema_root("IncludeProvider")),
+    ForbiddenTerm(
+        "PresenceConditionMap", "TokenActivityMap", _schema_root("PresenceConditionMap")
+    ),
+    ForbiddenTerm("IsPresent", "IsActive", _schema_root("IsPresent")),
+    ForbiddenTerm(
+        "SyntaxFeatureSet", "SyntaxParseInfoSet", _schema_root("SyntaxFeatureSet")
+    ),
+    ForbiddenTerm(
+        "SyntaxFeatureDescriptor",
+        "SerializedSyntaxParseInfo",
+        _schema_root("SyntaxFeatureDescriptor"),
+    ),
+    ForbiddenTerm("Lexeme", "Token", _schema_root("Lexeme")),
+    ForbiddenTerm(
+        "frontend DiagnosticSeverity schema root",
+        "Severity (DiagnosticSeverity is the LSP wire enum)",
+        _schema_root("DiagnosticSeverity"),
+    ),
+    ForbiddenTerm("TokenTape", "TokenList", _schema_root("TokenTape")),
+    ForbiddenTerm(
+        "preprocessing origin map",
+        "per-token TokenOrigin / physicalSpellingSources",
+        re.compile(
+            r"(?<![A-Za-z])preprocessing[ -]+origin[ -]+map(?![A-Za-z])",
+            re.IGNORECASE,
+        ),
+    ),
+    ForbiddenTerm(
+        "PreprocessingOriginMap",
+        "TokenOrigin",
+        _schema_root("PreprocessingOriginMap"),
     ),
     ForbiddenTerm(
         "token tape phrase",
-        "physical token list",
+        "TokenList",
         re.compile(r"(?<![A-Za-z])token[ -]+tape(?![A-Za-z])", re.IGNORECASE),
     ),
+    ForbiddenTerm("LosslessCST", "CSTSnapshot<S>", _schema_root("LosslessCST")),
+    ForbiddenTerm(
+        "color-based CST node identifier",
+        "TerminalNode / NonTerminalNode / CSTCursor",
+        re.compile(
+            rf"{IDENTIFIER_LEFT}(?:SourceGreen|GrammarGreen|GreenNode|RedNode|RedCSTNode)"
+            rf"[A-Za-z0-9_]*{IDENTIFIER_RIGHT}"
+        ),
+    ),
+    ForbiddenTerm(
+        "color-based CST node phrase",
+        "terminal/non-terminal CST vocabulary",
+        re.compile(
+            r"(?<![A-Za-z])(?:source[ -]+green|grammar[ -]+green|green[ -]+(?:node|tree|subtree)|"
+            r"red[ -]+node|red[ -]+green)(?![A-Za-z])",
+            re.IGNORECASE,
+        ),
+    ),
+    ForbiddenTerm("SourceCSTKind", "NonTerminalKind<S>", _schema_root("SourceCSTKind")),
+    ForbiddenTerm("bare CSTKind", "NonTerminalKind<S>", _exact_identifier("CSTKind")),
+    ForbiddenTerm("PreprocessorTree", "CSTSnapshot<PreprocessorStructured>", _schema_root("PreprocessorTree")),
+    ForbiddenTerm("MacroExpansionStep", "CSTRewrite.operation", _schema_root("MacroExpansionStep")),
+    ForbiddenTerm("MacroTokenOrigin", "CSTRewriteTokenOrigin", _schema_root("MacroTokenOrigin")),
+    ForbiddenTerm("IncludedTokenOrigin", "CSTRewriteTokenOrigin", _schema_root("IncludedTokenOrigin")),
     ForbiddenTerm("TokenKind", "TokenType", _schema_root("TokenKind")),
     ForbiddenTerm("FileId", "SourceFileId", _schema_root("FileId")),
     ForbiddenTerm(
         "bare SnapshotId",
-        "ASTSnapshotId / SemanticSnapshotId / SourceFileSnapshotId",
+        "CSTSnapshotId / ASTSnapshotId / SemanticSnapshotId / SourceFileSnapshotId",
         _exact_identifier("SnapshotId"),
     ),
     ForbiddenTerm("AstKind", "SyntaxNode kind", _schema_root("AstKind")),
@@ -542,7 +661,10 @@ def main() -> int:
         for path in TYPE_SYSTEM_DIR.glob("*.md")
         if path.name != TERMINOLOGY_CHAPTER
     )
-    for path in markdown_files:
+    checked_files = markdown_files + [
+        TYPE_SYSTEM_DIR / name for name in MACHINE_READABLE_SPEC_FILES
+    ]
+    for path in checked_files:
         with path.open("r", encoding="utf-8") as stream:
             for line_number, line in enumerate(stream, start=1):
                 for term in FORBIDDEN_TERMS:
@@ -569,7 +691,7 @@ def main() -> int:
         print(f"terminology validation failed with {len(findings)} finding(s)")
         return 1
 
-    print(f"terminology validation passed for {len(markdown_files)} Markdown file(s)")
+    print(f"terminology validation passed for {len(checked_files)} specification file(s)")
     return 0
 
 
