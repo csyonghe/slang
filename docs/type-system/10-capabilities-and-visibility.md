@@ -283,7 +283,7 @@ value does contribute.
 naming the nominal type. Layout or specialization consumers receive those facts as
 `OpaqueSemanticDependency` entries in a module artifact.
 
-`VIS-TYPE-004`: `ComputeEffectiveVisibility` is the policy-homogeneous query named by chapter 10.
+`VIS-TYPE-004`: `ComputeEffectiveVisibility` is the policy-homogeneous query named by chapter 11.
 For an SCC of structurally exposed semantic values, it starts every value at `Public` and
 repeatedly meets the visibility of its direct declaration references and current dependency
 approximations. This is the `GreatestFixpoint` over `Private < Internal < Public`; publication is
@@ -354,7 +354,7 @@ ExtensionVisibilityLimit(ext) = meetVisibility(
 `VIS-EXT-001`: An extension member cannot be more visible than
 `ExtensionVisibilityLimit(ext)`. A public extension member therefore cannot make an internal
 target type or a private constraint observable. Extension import reachability remains an
-independent applicability premise from chapter 5.
+independent applicability premise from chapter 6.
 
 `VIS-EXT-002`: Private access granted by an extension is based on normalized target owner as
 defined above. It does not make the extension or its members reachable from modules that did not
@@ -693,7 +693,7 @@ It may contain negative tests. `EffectiveConformanceContract.availability`, call
 ordinary requirements, and closed `ConcreteAvailability` requirements remain positive
 `CapabilitySet` values.
 
-`CAP-REG-002`: Chapter 8's `ConditionalRequirementWitnessAt<K, S>` guards are canonical predicates intersected
+`CAP-REG-002`: Chapter 9's `ConditionalRequirementWitnessAt<K, S>` guards are canonical predicates intersected
 with the conformance's positive availability formula. Guards must be disjoint or carry equivalent
 evidence on their overlap, and their union must cover that availability. Complement used to split
 overlap does not become a negative conformance contract.
@@ -833,7 +833,7 @@ complete product rather than copying just its requirement or proof.
 validated `ConcreteAvailabilitySet`; it is never synthesized from the callable's declared,
 inferred, or effective ordinary capability contract. Candidate selection copies all of the set's
 sources into `ProvenConcreteAvailability` and proves its combined requirement under the exact
-symbolic region; `None` yields `NoConcreteAvailability`. Chapter 8's
+symbolic region; `None` yields `NoConcreteAvailability`. Chapter 9's
 `ConcreteAvailabilityCompatibilityProof` is a different proof: its two nested region proofs share
 the requirement-match region and use the two optional sets after `totalConcreteAvailability`. It
 therefore proves that both the requirement and implementation are available throughout that
@@ -866,7 +866,7 @@ CapabilityRequirementProvenance = {
 }
 ```
 
-`EffectiveCallableContract` is the single schema defined in chapter 4. Its `signature` field is a
+`EffectiveCallableContract` is the single schema defined in chapter 5. Its `signature` field is a
 `CallableSignatureId`, preserving parameter-slot identity, and its capability fields are closed
 `CapabilitySet` values for one complete specialization. A generic declaration stores the
 corresponding declared/inferred `CapabilityRequirement` schemes until substitution closes them.
@@ -890,7 +890,7 @@ Arguments inside one `[require(a, b, ...)]` attribute denote `requireAll(a, b, .
 Requirements contributed by lexically enclosing declarations denote `requireAll` constraints.
 Thus an incompatible parent/local combination is `FalseFormula`, not an instruction to preserve
 the local target alternative. This is a proposed principled change from current
-`nonDestructiveJoin` behavior and requires a compatibility decision in chapter 12.
+`nonDestructiveJoin` behavior and requires a compatibility decision in chapter 13.
 
 An unconstrained declaration has `declared(d) = TrueFormula`. A declaration is **constrained** when
 it has either an explicit local origin or at least one inherited origin; inherited constraints are
@@ -1053,10 +1053,10 @@ retains its stable declaration identity, so `InferCapabilities` follows the call
 pre-inference ordinary projection is `TrueFormula`.
 
 `CAP-CON-006`: Lookup and overload resolution use only the sources in `concreteAvailability` as
-callable capability-applicability predicates. A successful candidate stores chapter 4's complete
+callable capability-applicability predicates. A successful candidate stores chapter 5's complete
 `CapabilitySelectionAt<Published>` with the exact region proof or explicit
 `NoConcreteAvailability`. Local requirement matching compares both pre-inference fields under
-chapter 8's distinct proof families; extension applicability likewise filters only on concrete
+chapter 9's distinct proof families; extension applicability likewise filters only on concrete
 sources. Every selected call records exactly one keyed use for `inferredCapabilities`. None of these
 queries discovers local ordinary requirements by checking a candidate body; capability inference
 follows the selected declaration identity and post-inference validation rejects a false declared
@@ -1158,7 +1158,7 @@ truth.
 
 `CAP-INF-004`: An unreferenced source declaration does not contribute merely because it shares a
 scope. Synthesized declarations contribute only when the synthesis rule makes them part of the
-declaration's signature, body, witness map, or emitted `IRReadyAST`.
+declaration's signature, body, witness map, or emitted `IRReady` node.
 
 `CAP-INF-005`: Constructing a typed local call and resolving its overload set requires callable
 signatures, the pre-inference ordinary requirement, and optional concrete availability only.
@@ -1224,7 +1224,7 @@ R_i entails I_i
 I_i may satisfy ordinary requirement R_i
 ```
 
-This implication produces chapter 8's `InferredCapabilityCompatibilityObligation` and is validated
+This implication produces chapter 9's `InferredCapabilityCompatibilityObligation` and is validated
 against the implementation's effective ordinary requirement after local inference. It is not a
 selection-availability proof and does not inspect the current world assumption.
 
@@ -1239,7 +1239,7 @@ C satisfies totalConcreteAvailability(I_a, U)
 I_a may satisfy R_a throughout C
 ```
 
-The conclusion is retained as chapter 8's `ConcreteAvailabilityCompatibilityProof` with both
+The conclusion is retained as chapter 9's `ConcreteAvailabilityCompatibilityProof` with both
 original options and two exact `CapabilityRegionAvailabilityProof` values. Across a conditional
 witness map, the guarded regions must cover the requirement's availability domain, so an
 implementation may be narrower globally only when other guarded satisfactions cover the remaining
@@ -1613,7 +1613,7 @@ conjunction, `unionWith` approximates disjunction, and `nonDestructiveJoin` pres
 alternatives. The new names above state the logic rather than the storage mutation.
 
 Before accepting this chapter, differential tests must resolve these explicit compatibility
-questions in chapter 12:
+questions in chapter 13:
 
 1. whether enclosing/local capability attributes use strict logical conjunction or preserve
    incompatible local target alternatives;

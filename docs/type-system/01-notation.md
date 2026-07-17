@@ -115,17 +115,18 @@ CanonicalSetInclusionProof<T> = {
     superset: CanonicalFiniteSet<T>
 }
 
-ExampleExpr<S> = VarExpr<S>(name: Name)
-               | InvokeExpr<S>(callee: Expr<S>, arguments: NodeList<Argument<S>>)
+ExampleExpr<F> = VarExpr<F>(name: Name)
+               | InvokeExpr<F>(callee: Expr<F>, arguments: NodeList<Argument<F>>)
 ```
 
 `ExampleExpr` is notation for this example sum, not an AST kind. Its alternatives deliberately use
 the established `VarExpr` and `InvokeExpr` node names; the complete `Expr` registry is defined by
 the syntax schema rather than this illustrative fragment.
 
-`S` is a representation stage. A field ending in `Id` is a stable identity, not an owning pointer.
-`NodeRef<S, K>` is a reference to a node of stage `S` and kind family `K` in the same immutable
-snapshot. `ExternalRef` identifies a node in a dependency snapshot by content hash and exported ID.
+`F` is a node-local representation form. A field ending in `Id` is a stable identity, not an owning
+pointer. `ASTNodeId<F, K>` is a reference to a node of form `F` and kind family `K` in one
+heterogeneous immutable semantic snapshot. It does not assert the form of any other node.
+`ExternalRef` identifies a node in a dependency snapshot by content hash and exported ID.
 
 Product fields are named. Positional interpretation of a heterogeneous product is forbidden even
 when the physical storage uses an operand array.
@@ -245,11 +246,11 @@ CheckResult<T> =
 ```
 
 `Disable` is the result of diagnostic policy and never appears in a `DiagnosticKey`. `Internal`
-records a compiler invariant/infrastructure failure rather than a source-language error; chapter 10
+records a compiler invariant/infrastructure failure rather than a source-language error; chapter 11
 captures it as an execution failure, not a serialized language diagnostic.
 
-Dependency blocking and cancellation are execution states of the scheduler in chapter 10, not
-semantic `CheckResult` alternatives and never values in a published AST snapshot.
+Dependency blocking and cancellation are execution states of the scheduler in chapter 11, not
+semantic `CheckResult` alternatives and never values in a published `SemanticSnapshot`.
 `Recovered` contains a structurally valid value of the requested type. Recovery values carry an
 `ErrorId`, so later rules suppress diagnostics caused by the same root error without treating the
 value as semantically valid.
@@ -296,7 +297,9 @@ x ≡ y  iff  canon(x) structurally-equals canon(y)
 Scheduler, synthesis, and builtin-rule inputs use one closed, versioned key algebra:
 
 ```text
-AnyNodeId = exists S: Stage . NodeId<S>
+AnyASTNodeId<F> = exists K . ASTNodeId<F, K>
+AnyASTNodeId = exists F . AnyASTNodeId<F>
+AnyNodeId = CST(AnyCSTNodeId) | AST(AnyASTNodeId)
 SchemaValue = exists K: registered semantic NodeKind . Value<K>
 
 ContentId<T> = {
@@ -376,16 +379,20 @@ the implementation must not use it as a scheduler lattice.
 ## Provenance
 
 Every AST or semantic transformation output carries one of the following. Concrete-syntax
-translations carry the stage-indexed `CSTNodeOrigin` and `CSTRewrite` records defined in chapter 3.
+translations carry the direct `CSTNodeOrigin` records defined in chapter 3; a transformation is a
+function or query and is not stored as a separate operation object.
 
 ```text
 ModuleInterfaceContentId = ContentId<SchemaValue>
+ModuleDeclOutlineInterfaceId = ContentId<ModuleDeclOutlineInterface>
 
 Origin =
-    Parsed(cst: CSTNodeId<Parsed>)
-  | Derived(previous: AnyNodeId, rule: RuleId)
+    ConcreteSyntax(cst: AnyCSTNodeId)
+  | PriorAST(previous: AnyASTNodeId, rule: RuleId)
   | Synthesized(group: SynthesisKey, outputRole: SynthesisOutputRole,
                 causes: NonEmpty<StableSemanticId>)
+  | ImportedDeclOutline(module: ModuleDeclOutlineInterfaceId,
+                        outline: ExportedDeclOutlineId)
   | Imported(module: ModuleInterfaceContentId, exported: ExportedId)
   | Recovery(source: SourceRange, error: ErrorId)
 
@@ -401,7 +408,7 @@ accidentally recurse through the entire history of a node.
 Each language feature is specified using this template:
 
 1. **Syntax** — productions and contextual-keyword rules.
-2. **Representation** — CST and every AST-stage shape.
+2. **Representation** — CST and every node-local AST-form shape.
 3. **Static semantics** — premises, output value, and diagnostics.
 4. **Elaboration** — all implicit behavior made explicit.
 5. **Interactions** — generics, interfaces, capabilities, visibility, and errors.

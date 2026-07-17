@@ -15,11 +15,10 @@ state, and cycle detection in one byte on each declaration.
 ```text
 IncludeRequestKey = {
     includeSystemRevision: IncludeSystemRevision,
-    includingView: SourceViewId,
-    request: IncludeRequest
+    request: IncludeSystemRequest
 }
 
-IncludeResolution = CheckResult<ResolvedInclude>
+IncludeResolution = IncludeSystemResult
 
 SourceGraph = {
     documents:
@@ -27,7 +26,11 @@ SourceGraph = {
     includeResolution:
         CanonicallyOrderedMap<IncludeRequestKey, IncludeResolution>,
     includeSystemRevision: IncludeSystemRevision,
-    initialPreprocessorState: PreprocessorStateId
+    builtinMacroProviderRevision: BuiltinMacroProviderRevision,
+    preprocessorFeatureSetRevision: PreprocessorFeatureSetRevision,
+    preprocessorDirectiveProviderRevision: PreprocessorDirectiveProviderRevision,
+    moduleResolutionRevision: ModuleResolutionRevision,
+    preprocessorSeed: PreprocessorPersistentStateId
 }
 
 FrontendOptions = {
@@ -74,7 +77,8 @@ QueryKey = {
     environment: EnvironmentRevision
 }
 
-DependencyRole = SignatureOf | LookupIn | TypeOf | ConstraintOf | WitnessFor |
+DependencyRole = DeclOutlineOf | ImportOutlineOf | ScopeWiringOf | ParseOf | IdentityOf |
+                 SignatureOf | LookupIn | TypeOf | ConstraintOf | WitnessFor |
                  CapabilityOf | BodyOf | LoweredFormOf | Other(FieldName)
 
 DependencyKey = {
@@ -104,7 +108,7 @@ query implementation does not change the kind and is tracked by the cache implem
 `QueryKey` and `DurableQueryIdentity` store the same registered kind, so an implementation enum,
 function address, or registration order can never become query identity.
 
-`ExpressionCheckContext` and `StatementCheckContext` are defined once in chapter 6. They are
+`ExpressionCheckContext` and `StatementCheckContext` are defined once in chapter 7. They are
 immutable, canonically serialized values, and their IDs are mandatory key arguments for expression
 and statement queries; a syntax-node ID alone does not determine a checked result. The surrounding
 `environment` key field supplies the source revision, language/options revision, target-independent
@@ -133,6 +137,15 @@ QueryContext = {
     request<K, V>(key: K) -> Need<V>,
     source(id: SourceFileSnapshotId) -> SourceFileSnapshot,
     standardEnvironment(id: StandardEnvironmentId) -> SchemaValue,
+    includeSystem(revision: IncludeSystemRevision) -> IncludeSystem,
+    builtinMacroProvider(
+        revision: BuiltinMacroProviderRevision) -> BuiltinMacroProvider,
+    preprocessorFeatureSet(
+        revision: PreprocessorFeatureSetRevision) -> PreprocessorFeatureSet,
+    preprocessorDirectiveProvider(
+        revision: PreprocessorDirectiveProviderRevision) -> PreprocessorDirectiveProvider,
+    moduleResolutionProvider(
+        revision: ModuleResolutionRevision) -> ModuleResolutionProvider,
     options() -> FrontendOptions,
     cancellation() -> CancellationToken
 }
@@ -144,6 +157,11 @@ CancellationObservation = ContinueExecution | CancellationRequested
 
 pollCancellation(CancellationToken) -> CancellationObservation
 ```
+
+These provider handles are execution capabilities, not schema data. Each revision is part of the
+environment, every provider request/result is recorded as a dependency observation, and no handle
+address is hashed, serialized, or compared. A fake context supplies a request-to-result map at the
+named revision; an unconfigured request fails the unit test.
 
 `CancellationToken` belongs to the scheduler invocation, not the language model. It is shareable
 among worker tasks but has no structural fields, canonical encoding, equality, hash, or serialized
@@ -172,12 +190,25 @@ order observable.
 
 `SCH-QRY-004`: An `EnvironmentRevision` is valid only when all repeated configuration references
 agree exactly: `frontendOptions.lex.languageRules`,
-`frontendOptions.preprocessing.languageRules`,
-`frontendOptions.grammarVocabulary.languageRules`, and
-`frontendOptions.syntaxParseInfos.languageRules` equal `languageRules`; resolving that rule set yields
-the same `standardEnvironment`; and the registered standard-environment schema exports the stored
-effect- and capability-universe revisions. Contradictory combinations are rejected during key
-construction, so they cannot create a second semantic configuration or enter the query cache.
+`frontendOptions.grammarVocabulary.languageRules`,
+`frontendOptions.syntaxParseInfos.languageRules`, and
+`resolve(sourceGraph.preprocessorSeed).directiveState.languageRules` equal `languageRules`;
+resolving that rule set yields the same `standardEnvironment`; and the registered
+standard-environment schema exports the stored effect- and capability-universe revisions.
+`sourceGraph.moduleResolutionRevision` is also the revision supplied to every
+`ResolveImportOutlines` dependency in that environment. Contradictory combinations are rejected
+during key construction, so they cannot create a second semantic configuration or enter the query
+cache.
+
+Every `ExpandPreprocessor` key supplies the exact include-system, builtin-macro, feature-set, and
+registered-directive revisions stored in its `SourceGraph`; each provider handle obtained from the
+`QueryContext` must serve that revision. The initial persistent state is a value input, not an
+implicit fifth provider.
+
+`SCH-QRY-005`: `BuildLexedCST` is keyed by both the exact `TokenListId` and `LexicalContextId`.
+The resolved context names the `SourceViewId` and `LexOptions` that produced the list; every
+successor CST retains that context. Reusing equal token bytes under another source view or lexical
+option set therefore cannot alias the query.
 
 ## Core query families
 
@@ -188,15 +219,24 @@ The first implementation must expose at least these independently callable query
 | `LexFile`                                                         | `TokenList`                                                                          |
 | `BuildLexedCST`                                                   | `CSTSnapshot<Lexed>`                                                                 |
 | `StructurePreprocessor`                                           | `CSTSnapshot<PreprocessorStructured>`                                                |
+| `BuildPreprocessorPersistentState`                                | `PreprocessorPersistentState`                                                        |
 | `ExpandPreprocessor`                                              | `PreprocessorExpansionResult`                                                        |
-| `ParseFile`                                                       | `CSTSnapshot<Parsed>`                                                                |
-| `BuildSurfaceAST`                                                 | `ASTSnapshot<Surface>`                                                               |
-| `BuildFragmentScopes`                                             | `(ASTSnapshot<Scoped>, FragmentScopeGraph)`                                          |
-| `FreezeDeclIndex`                                                 | `FrozenDeclIndex` (including `FrozenScopeGraph`)                                     |
+| `ParseDecls`                                                      | `DeclParseResult`                                                                    |
+| `ResolveImportOutlines`                                           | `ImportResolutionIndex`                                                              |
+| `WireLookupScopes`                                                | `ScopeWiring`                                                                        |
+| `ParseAndCheckExpression`                                         | `CheckedExpressionContent`                                                           |
+| `ParseAndCheckStatement`                                          | `CheckedStatementContent`                                                            |
+| `ParseAndCheckDeclHeader`                                         | `CheckedDeclHeaderContent`                                                           |
+| `CheckExpressionPrefix`                                           | `CheckedExpressionContent`                                                           |
+| `ClassifyGenericApplicationHead`                                  | `GenericHeadClassification`                                                          |
+| `BuildRedeclarationKey`                                           | `RedeclarationKey`                                                                   |
+| `GroupRedeclarations`                                             | `RedeclarationPartition`                                                             |
+| `ResolveLogicalDecl`                                              | `DeclId`                                                                             |
 | `ClassifyModifiers`                                               | `CheckedModifierSet`                                                                 |
 | `BindDeclHeader`                                                  | `DeclHeader`                                                                         |
+| `GetGenericBinder`                                                | `Option<GenericBinder>`                                                              |
 | `LookupName` / `LookupMember`                                     | `LookupResult`                                                                       |
-| `DeclareNominalIdentity` / `BuildNominalDefinition`               | `DeclId` / `NodeRef<Typed, Decl>`                                                    |
+| `DeclareNominalIdentity` / `BuildNominalDefinition`               | `DeclId` / `NominalDefinition`                                                       |
 | `ExpandTypeAlias` / `CanonicalizeStructuralType`                  | `TypeId`                                                                             |
 | `BuildCallableSignature`                                          | `CallableSignature`                                                                  |
 | `InferGenericArguments`                                           | `GenericSolution`                                                                    |
@@ -217,7 +257,7 @@ The first implementation must expose at least these independently callable query
 | `PublishPhysicalProjectionSemanticResults`                        | `PhysicalProjectionSemanticResultSnapshotId`                                         |
 | `ResolveOverloadableResultAuthorityAt<S>`                         | `CallableResultAuthorityId`                                                          |
 | `BuildTypedCall` / `BuildSelectedSurfaceTypedCallAt<S>`           | `TypedCallAt<S>`                                                                     |
-| `CheckStatement(node, StatementCheckContextId)`                   | `NodeRef<Typed, Stmt>`                                                               |
+| `CheckStatement(node, StatementCheckContextId)`                   | `ASTNodeId<Typed, Stmt>`                                                             |
 | `BuildInitializationModel` / `ResolveInitialization`              | `InitializationModel` / `InitializationResult`                                       |
 | `ComputeFacets`                                                   | `FacetSet`                                                                           |
 | `DeclareWitnessTableIdentity`                                     | `WitnessTableId`                                                                     |
@@ -240,9 +280,64 @@ The first implementation must expose at least these independently callable query
 | `DeclareIRSymbol`                                                 | `IRSymbolDecl`                                                                       |
 | `LowerIRDefinition`                                               | `IRDefinition`                                                                       |
 
-Small primitives such as argument mapping, candidate comparison, unification, capability
-implication, and visibility meet are pure library functions below query granularity. They remain
-directly unit-testable without a scheduler.
+`ParseDecls`, `ResolveImportOutlines`, and `WireLookupScopes` establish only declaration hierarchy,
+direct-generic markers, imported `GenericPresence`, and lexical lookup entry positions. They do not
+produce a separately scope-indexed AST, bind every name, or check every header. Import resolution
+may request only a `ModuleDeclOutlineInterface` through the revisioned `ModuleResolutionProvider`;
+requesting the module's checked interface would introduce the parse/header dependency it is meant
+to avoid. After these products exist, parsing and checking are one demand-driven query graph:
+
+```text
+ParseAndCheckExpression(content: UnparsedContentId,
+                        entry: ScopePosition,
+                        context: ExpressionCheckContextId,
+                        scopes: ScopeWiringId,
+                        disambiguation: SyntaxDisambiguationProvider)
+    -> QueryStep<CheckedExpressionContent>
+
+ParseAndCheckStatement(content, entry, context, scopes, disambiguation)
+    -> QueryStep<CheckedStatementContent>
+
+ParseAndCheckDeclHeader(subject: DeclHeaderFineParseSubject,
+                        disambiguation: SyntaxDisambiguationProvider)
+    -> QueryStep<CheckedDeclHeaderContent>
+
+CheckExpressionPrefix(request: ExpressionPrefixRequest,
+                      disambiguation: SyntaxDisambiguationProvider)
+    -> QueryStep<CheckedExpressionContent>
+```
+
+For expression and statement queries, the supplied `entry` equals
+`ScopeWiring.contentEntryPositions[content]`, and its scope belongs to `scopes`; together with the
+content's exact token range these values form the immutable `FineParseSubject`. A declaration
+header uses the exact `DeclHeaderFineParseSubject` validated by `REP-PAR-009`, including its
+declaration-group binding ordinal and structural header parts. An identifier followed by `<` may request
+`ClassifyGenericApplicationHead(PostfixHeadSyntaxKey(subject, headRange), entry, scopes, context)`;
+a value-member base requests `CheckExpressionPrefix` with a strict subrange of that subject. An
+expression, statement, or header query may request its corresponding `ParseAndCheck` query for
+unmaterialized content. These edges are ordinary scheduler dependencies, so parsing and checking
+interleave at node granularity without an ambient semantic visitor. A parser result records every
+requested semantic dependency in its query key/edge set, making the same syntax under a different
+scope or check context a distinct query. A blocked dependency publishes no partial CST, AST node,
+or scope fragment; reevaluation restarts from the immutable subject.
+
+Every fine parse/check result carries a `ScopeWiringPublication`. Its `input` is the exact wiring
+named by the query; its optional `LocalScopeWiringFragment` is validated with
+`ExtendScopeWiring(input, fragment)`; and the resulting complete wiring must equal `output`.
+Source-ordered sibling queries explicitly thread that `output` into the next sibling. The
+declaration-outline wiring is never mutated, and task completion order cannot change which
+preceding local declarations are visible.
+
+`SCH-QRY-006`: `ParseAndCheckExpression`, `ParseAndCheckStatement`, and
+`ParseAndCheckDeclHeader` are composite producers only for their parsed fragment and scope
+publication. Their embedded typed expression, typed statement, or `DeclHeader` is the exact result
+of the canonical `CheckExpression`, `CheckStatement`, or `BindDeclHeader` dependency. A composite
+query may not reconstruct, copy, or publish a second authority for that semantic fact.
+
+Small primitives such as `BeginPreprocessorUnit`, `EndPreprocessorUnit`, `ExtendScopeWiring`,
+argument mapping, candidate comparison, unification, capability implication, and visibility meet
+are pure library functions below query granularity. They remain directly unit-testable without a
+scheduler.
 
 ## Dependency discovery
 
@@ -268,8 +363,21 @@ DependencyEdge = {
 
 `SourceGraph.includeResolution` is the frozen backing/cache for the `IncludeSystem` revision named
 by each key, not a second resolution authority. Its key is exactly the normative `ResolveInclude`
-input, including quote/system mode and the including view; lookup failure and diagnostics remain the
-structured `CheckResult` rather than collapsing to an unqualified `NotFound` bit.
+input, including quote/system mode and the including view. Lookup failure remains a typed
+`IncludeSystemResult`, from which preprocessing constructs its structured diagnostic, rather than
+collapsing to an unqualified boolean or fabricating a source view.
+
+`SourceGraph.preprocessorSeed` resolves to the reusable `PreprocessorPersistentState` supplied to
+the primary unit. `ExpandPreprocessor` obtains its transient entry state only through
+`BeginPreprocessorUnit(unit, seed)` and publishes both the exact exit state and
+`EndPreprocessorUnit(unit, exit)` result. Input, conditional, and busy stacks are therefore never
+stored in the graph seed or reconstructed by caller convention. A caller that intentionally chains
+translation units names the preceding result's `finalPersistentState` as the next unit's seed.
+
+`ResolveImportOutlines` sends each `ImportDeclOutline` to the `ModuleResolutionProvider` under
+`SourceGraph.moduleResolutionRevision`. Its total `ImportResolutionIndex` contains a typed entry for
+every source import and only the selected `ModuleDeclOutlineInterface` projections. Provider object
+identity, loading order, and a checked `ModuleInterfaceContentId` are forbidden dependencies.
 
 Each `ContentId` field names a canonically serialized immutable input graph and carries chapter 1's
 exact discriminator; loading it resolves and verifies the exact bytes, so a digest collision is
@@ -303,7 +411,10 @@ The initial policy assignment is normative:
 
 | Query kind                                                                                                        | Policy                                                                         | Reason/recovery                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| parse, bind a finite syntax node, check an expression/statement                                                   | `Reject`                                                                       | the input CST is finite; recover at the offending node                                                                                                  |
+| `ParseDecls`, `ResolveImportOutlines`, `WireLookupScopes`, `ParseAndCheck*`, or `CheckExpressionPrefix`           | `Reject`                                                                       | concrete ranges and outline interfaces are finite; semantic parse dependencies cross typed query edges, and prefix recursion must use a strict subrange |
+| `GroupRedeclarations` / `ResolveLogicalDecl`                                                                      | `NominalKnot`                                                                  | allocate stable logical identities for one same-name seed, then publish its complete partition atomically                                               |
+| `BuildRedeclarationKey` / `BindDeclHeader` / `GetGenericBinder`                                                   | `Reject` across definition edges                                               | recursive references cross `DeclId`; no query observes a partial key, header, binder, default argument, or constraint set                               |
+| check an expression/statement                                                                                     | `Reject`                                                                       | recover at the finite offending syntax node; lookup, signature, and conformance dependencies use their own policies                                     |
 | `DeclareNominalIdentity`                                                                                          | `NominalKnot`                                                                  | publish identity without requesting its definition                                                                                                      |
 | `BuildNominalDefinition`                                                                                          | `Reject` across definition edges                                               | recursive fields refer to nominal identities, not nested definitions                                                                                    |
 | `ExpandTypeAlias`, default generic argument, constant evaluation                                                  | `Reject`                                                                       | these denote finite values; publish an error value                                                                                                      |
@@ -511,7 +622,7 @@ DurableSyntaxLineageId = ContentId<DurableSyntaxLineageKey>
 
 DurableSubjectIdentity =
     SourceFileLineage(SourceFileId)
-  | SyntaxLineage(stage: RepresentationStage, lineage: DurableSyntaxLineageId,
+  | SyntaxLineage(domain: RepresentationDomain, lineage: DurableSyntaxLineageId,
                   derivationRole: ContentId<SchemaValue>)
   | CrossRevisionSemantic(StableSemanticId)
   | SemanticContent(ContentId<SchemaValue>)
@@ -601,9 +712,10 @@ CachedQueryEntry = {
 
 Every query kind registers total `projectDurableSubject` and `projectDurableArguments` functions, or
 is explicitly non-reusable. `CrossRevisionSemantic` accepts only identity alternatives whose exact
-encoding excludes `RevisionId`, `SourceFileSnapshotId`, and `NodeId`; revision-local syntax and staged
-AST subjects must use `SyntaxLineage`. A syntax-to-AST transform inherits the matched CST lineage and
-adds its stage plus exact derivation role. Thus a new snapshot-local `NodeId` can find a prior cache
+encoding excludes `RevisionId`, `SourceFileSnapshotId`, and `NodeId`; revision-local syntax and
+node-local AST-form subjects must use `SyntaxLineage`. A syntax-to-AST transform inherits the
+matched CST lineage and adds its `NodeForm` plus exact derivation role. Thus a new snapshot-local
+`NodeId` can find a prior cache
 entry without pretending the two execution subjects are equal.
 
 The incremental parser constructs `SubjectLineageMap` from the explicit source change map. A match
@@ -670,14 +782,35 @@ standard-environment items, and repeated identical syntax subtrees.
 A query implementation test supplies an in-memory `QueryContext` whose dependency map is explicit:
 
 ```text
+FakeParseAndCheckContext {
+    ClassifyGenericApplicationHead(
+        PostfixHeadSyntaxKey(subject, rangeOf("Vector")),
+        position, wiring, expressionContext)
+        -> GenericHead(genericCandidates=[Vector], otherCandidates=[])
+    CheckExpressionPrefix(
+        ExpressionPrefixRequest(subject, rangeOf("value.member"), expressionContext))
+        -> success(checkedPrefix)
+}
+
+FakeModuleResolutionProvider(revision) {
+    resolveImport(request("math"))
+        -> success(ResolvedImportedModule(math, outlineInterfaceId, outlineInterface))
+}
+
 FakeContext {
     BuildCallableSignature(f) -> success((int) -> float)
-    LookupName(scope, "f") -> success([f])
+    LookupName(wiring, scope, position, "f") -> success([f])
     PlanCoercion(int, int) -> identity
 }
 ```
 
-The test invokes `ResolveOverload` directly and asserts the exact `OverloadResult`, requested dependency
+The fine-parser test invokes `ParseAndCheckExpression` on `Vector<int>` and asserts that `<` is the
+generic-application terminal because of the exact classification dependency; changing the mock to
+`NonGenericHead` or `UnresolvedHead` asserts the relational, blocked, or explicit-recovery forms.
+A member-head test asserts the exact strict-subrange `CheckExpressionPrefix` request. The import
+test invokes `ResolveImportOutlines` with the fake provider and asserts both the selected
+`ModuleDeclOutlineInterfaceId` and the absence of any checked-module-interface request. The overload
+test invokes `ResolveOverload` directly and asserts the exact `OverloadResult`, requested dependency
 keys, provenance rules, and diagnostics. Separate scheduler tests use artificial integer lattices
 and dependency graphs; they do not need Slang AST nodes.
 
@@ -695,6 +828,32 @@ Required scheduler unit suites include:
 - acyclic unbounded key growth and deterministic semantic resource ceilings;
 - identical expression nodes under distinct `ExpressionCheckContextId` values;
 - identical statement nodes under distinct `StatementCheckContextId` values;
+- `BuildLexedCST` keys differing only by `LexicalContextId`, plus rejection of a lexical context
+  whose view/options did not produce the supplied token list;
+- `BuildPreprocessorPersistentState`, `BeginPreprocessorUnit`, and `EndPreprocessorUnit` round trips,
+  including proof that a persistent seed contains no transient stack and that the next unit receives
+  only the preceding `finalPersistentState`;
+- declaration-outline parsing that retains exact active/deferred `UnparsedContent`, maximal
+  `InactiveContent`, and direct C-style `DeclGroup` binding/name fields;
+- `ResolveImportOutlines` with resolved, failed, ambiguous, blocked, and stale-revision provider
+  results, stable `ExportedDeclOutlineId` values, a total per-source-import map, and no checked module
+  interface dependency;
+- `WireLookupScopes` producing exact `DirectGenericMarker`/`GenericPresence` and content-entry lookup
+  facts without requesting a checked header;
+- the same `UnparsedContent` under distinct `ScopeWiringId`/entry positions producing distinct
+  `ParseAndCheckExpression` keys;
+- distinct `DeclHeaderFineParseSubject` binding ordinals in one C-style `DeclGroup` producing
+  distinct header keys while sharing the one declaration-specifier syntax owner;
+- `CheckExpressionPrefix` accepting only strict subranges, rejecting equal-range recursion, and
+  restarting from the same `FineParseSubject` after a blocked dependency without publishing partial
+  syntax, AST, or scope state;
+- `ExtendScopeWiring` conflict cases and `ScopeWiringPublication` chains whose output becomes the
+  next source-order sibling's input independently of task completion order;
+- composite parse/check results embedding the exact canonical `CheckExpression`, `CheckStatement`,
+  or `BindDeclHeader` dependency result, with an injected second producer rejected;
+- generic-application versus relational-operator parsing under generic, non-generic, unresolved,
+  and mixed generic/non-generic candidate classifications;
+- one blocked redeclaration seed leaving an unrelated name's identity/header queries runnable;
 - deterministic initialization-model/strategy enumeration and rejected nested-plan cycles;
 - cancellation and restart;
 - incremental invalidation by result hash; and
@@ -707,16 +866,16 @@ total ordering:
 
 | Current `DeclCheckState` | Replacement facts                                                       |
 | ------------------------ | ----------------------------------------------------------------------- |
-| `ReadyForParserLookup`   | `ScopedDeclStub` available to compatibility parsing                     |
+| `ReadyForParserLookup`   | `ParserDeclStub` installed in immutable `ScopeWiring`                   |
 | `ModifiersChecked`       | `CheckedModifierSet`                                                    |
-| `ScopesWired`            | `ScopeGraphFragment`                                                    |
-| `SignatureChecked`       | bound header plus provisional signature facts                           |
+| `ScopesWired`            | `ScopeWiringPublication` with an optional `LocalScopeWiringFragment`    |
+| `SignatureChecked`       | `DeclHeader` plus provisional signature facts                           |
 | `ReadyForReference`      | redeclaration group and exported `DeclRef` identity                     |
 | `ReadyForLookup`         | class-base, interface-refinement, facet-route closure, and member index |
 | `ReadyForConformances`   | witness-table identities and immutable keyed definitions                |
 | `TypesFullyResolved`     | canonical associated/member types                                       |
 | `AttributesChecked`      | checked attribute values                                                |
-| `DefinitionChecked`      | typed/elaborated body                                                   |
+| `DefinitionChecked`      | independently checked body and requested elaboration facts              |
 | `CapabilityChecked`      | inferred and validated capability formula                               |
 
 There is no rule that every declaration must pass through these facts in table order. Each query

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": {
+    "major": 1,
+    "minor": 0
+  },
+  "grammar": "decl-outline-grammar.ebnf",
+  "grammarSha256": "df09ff98f68de914bc51b434997d3e5b1a912e7fd848bddf02a1e9022e57d9e5",
+  "grammarNamespace": "slang.declOutline",
+  "stage": "DeclParsed",
+  "validationSentinels": ["fallbackDeclBindings"],
+  "wireTags": {
+    "algorithm": "sha256-domain-prefix-u32be-v1",
+    "namespace": "slang.frontend.decl-outline-cst-production.v1",
+    "reserved": [0],
+    "collisionRule": "reject",
+    "overrides": {
+      "nodeKinds": {},
+      "fields": {},
+      "groups": {},
+      "alternatives": {}
+    }
+  },
+  "productionKind": {
+    "algorithm": "hyphenated-lower-to-upper-camel-v1",
+    "overrides": {
+      "outline-unit": "DeclOutlineRoot",
+      "outline-unparsed-content": "UnparsedContentNode",
+      "outline-recovered-declaration": "DeclOutlineRecovery"
+    }
+  },
+  "fieldNaming": {
+    "algorithm": "source-ordered-leaf-role-v1",
+    "collisionRule": "append-one-based-occurrence-from-second-use",
+    "softKeywordRule": "logical-spelling-lower-camel-plus-Keyword",
+    "literalRoles": {
+      ",": "comma",
+      ".": "dot",
+      ";": "semicolon",
+      "::": "scope",
+      "[": "leftBracket",
+      "]": "rightBracket",
+      "{": "leftBrace",
+      "}": "rightBrace"
+    },
+    "terminalRoles": {
+      "CST_ELEMENT": "element",
+      "END_OF_FILE": "endOfFile",
+      "IDENTIFIER": "identifier",
+      "INACTIVE_ELEMENT": "inactiveElement",
+      "STRING_LITERAL": "stringLiteral",
+      "TOKEN": "token",
+      "TRIVIA": "trivia"
+    }
+  },
+  "categoryMembership": {
+    "DeclOutlineCSTCategory": [
+      "outline-import-declaration",
+      "outline-namespace-declaration",
+      "outline-aggregate-declaration",
+      "outline-interface-declaration",
+      "outline-extension-declaration",
+      "outline-buffer-declaration",
+      "outline-callable-declaration",
+      "outline-property-declaration",
+      "outline-variable-declaration",
+      "outline-type-alias-declaration",
+      "outline-associated-declaration",
+      "outline-syntax-declaration",
+      "outline-explicit-generic-declaration",
+      "outline-empty-declaration",
+      "outline-fallback-declaration",
+      "outline-recovered-declaration"
+    ],
+    "DeclModifierOutlineCSTCategory": [
+      "outline-attribute-modifier",
+      "outline-keyword-modifier"
+    ],
+    "UnparsedContentCSTCategory": ["outline-unparsed-content"],
+    "InactiveContentCSTCategory": ["outline-inactive-content"],
+    "CStyleDeclaratorCSTCategory": [
+      "outline-c-style-variable-declarator",
+      "outline-c-style-function-declarator"
+    ],
+    "CStyleInlineTypeSpecifierCSTCategory": [
+      "outline-c-style-inline-type-specifier"
+    ]
+  },
+  "derivedViews": [
+    {
+      "stableName": "slang.declOutline.declOutlineIndex",
+      "sourceCategory": "DeclOutlineCSTCategory",
+      "valueKind": "DeclOutline",
+      "rule": "REP-PAR-008"
+    },
+    {
+      "stableName": "slang.declOutline.inactiveContentIndex",
+      "sourceCategory": "InactiveContentCSTCategory",
+      "valueKind": "InactiveContent",
+      "rule": "PAR-OUT-006"
+    }
+  ],
+  "productionOverrides": {
+    "outline-import-declaration": {
+      "fields": [
+        {
+          "name": "importKeyword",
+          "baseType": "TerminalNodeId<{stage}>",
+          "merge": "exclusiveAlternatives",
+          "select": [
+            { "kind": "soft", "symbol": "import", "ordinal": 1 },
+            { "kind": "soft", "symbol": "__import", "ordinal": 1 }
+          ]
+        }
+      ]
+    },
+    "outline-c-style-variable-declarator": {
+      "fields": [
+        {
+          "name": "name",
+          "baseType": "TerminalNodeId<{stage}>",
+          "select": [{ "kind": "token", "symbol": "IDENTIFIER", "ordinal": 1 }]
+        }
+      ]
+    },
+    "outline-c-style-function-declarator": {
+      "fields": [
+        {
+          "name": "name",
+          "baseType": "TerminalNodeId<{stage}>",
+          "select": [{ "kind": "token", "symbol": "IDENTIFIER", "ordinal": 1 }]
+        }
+      ]
+    },
+    "outline-c-style-inline-type-specifier": {
+      "fields": [
+        {
+          "name": "name",
+          "baseType": "TerminalNodeId<{stage}>",
+          "select": [{ "kind": "token", "symbol": "IDENTIFIER", "ordinal": 1 }]
+        }
+      ]
+    }
+  }
+}

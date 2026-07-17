@@ -25,6 +25,14 @@ class _WireTags:
     """Derive stable non-zero UInt32 tags and reject every domain-local collision."""
 
     def __init__(self, profile: dict[str, Any]):
+        grammar_namespace = profile["grammarNamespace"]
+        if (
+            not isinstance(grammar_namespace, str)
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", grammar_namespace)
+            is None
+        ):
+            raise GrammarError("grammarNamespace must be a qualified schema name")
+        self.grammar_namespace = grammar_namespace
         config = profile["wireTags"]
         if config["algorithm"] != "sha256-domain-prefix-u32be-v1":
             raise GrammarError(f"unknown wire-tag algorithm {config['algorithm']!r}")
@@ -259,21 +267,36 @@ def _validate_schema_version(value: Any) -> dict[str, int]:
     return value
 
 
+def _validate_stage(value: Any) -> str:
+    """Validate the CSTStage name supplied by the production profile."""
+
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value) is None:
+        raise GrammarError("stage must be a CSTStage identifier")
+    return value
+
+
+def _stage_namespace(stage: str) -> str:
+    """Return the stable-name namespace component for one CST stage."""
+
+    return stage[:1].lower() + stage[1:]
+
+
 def _production_id(
-    production: str, schema_version: dict[str, int]
+    production: str, schema_version: dict[str, int], grammar_namespace: str
 ) -> dict[str, Any]:
     return {
         "grammarVersion": schema_version,
-        "qualifiedName": f"slang.surface.{production}",
+        "qualifiedName": f"{grammar_namespace}.{_lower_camel_words(production)}",
     }
 
 
 def _production_kind(
     production: str,
     kind_name: str,
+    stage: str,
     tags: _WireTags,
 ) -> dict[str, Any]:
-    stable_name = f"slang.cst.parsed.{kind_name}"
+    stable_name = f"slang.cst.{_stage_namespace(stage)}.{kind_name}"
     return {
         "family": "NonTerminalNode",
         "wireTag": tags.get("nodeKinds", stable_name),
@@ -282,7 +305,7 @@ def _production_kind(
 
 
 def _field_name(production: str, name: str, tags: _WireTags) -> dict[str, Any]:
-    stable_key = f"slang.surface.{production}.{name}"
+    stable_key = f"{tags.grammar_namespace}.{production}.{name}"
     return {
         "text": name,
         "wireTag": tags.get("fields", stable_key),
@@ -293,11 +316,12 @@ def _group_name(
     production: str,
     path: str,
     role: str,
+    stage: str,
     tags: _WireTags,
     include_field: bool = False,
     field_text: str | None = None,
 ) -> dict[str, Any]:
-    stable_name = f"slang.surface.{production}.{path}.{role}"
+    stable_name = f"{tags.grammar_namespace}.{production}.{path}.{role}"
     wire_tag = tags.get("groups", stable_name)
     result = {
         "stableName": stable_name,
@@ -309,7 +333,7 @@ def _group_name(
         result["field"] = {
             "name": _field_name(production, field_text, tags),
             "edge": "Structural",
-            "stages": [{"concrete": "Parsed"}],
+            "domains": [{"concrete": stage}],
             "wire": "SerializedField",
             "access": "Editable",
         }
@@ -446,10 +470,22 @@ def _default_base_name(occurrence: dict[str, Any], profile: dict[str, Any]) -> s
     return _lower_camel_words(symbol.replace("-", "_"))
 
 
-def _default_base_type(occurrence: dict[str, Any]) -> str:
+def _default_base_type(occurrence: dict[str, Any], stage: str) -> str:
     if occurrence["leafKind"] != "nonterminal":
-        return "TerminalNodeId<Parsed>"
-    return f"NonTerminalNodeId<Parsed, Production({occurrence['symbol']})>"
+        return f"TerminalNodeId<{stage}>"
+    return f"NonTerminalNodeId<{stage}, Production({occurrence['symbol']})>"
+
+
+def _resolve_base_type(base_type: str, stage: str) -> str:
+    """Substitute the profile stage into an explicitly reviewed field type."""
+
+    try:
+        result = base_type.format(stage=stage)
+    except (KeyError, ValueError) as error:
+        raise GrammarError(f"invalid CST field baseType template {base_type!r}") from error
+    if "{stage}" in result:
+        raise GrammarError(f"unresolved stage in CST field baseType {base_type!r}")
+    return result
 
 
 def _make_field(
@@ -480,12 +516,13 @@ def _make_field(
 def _node_kind_for_field_type(
     base_type: str,
     kind_overrides: dict[str, str],
+    stage: str,
     tags: _WireTags,
 ) -> dict[str, Any]:
     """Map a generated typed reference to the NodeKind constraint used on the wire."""
 
-    if base_type == "TerminalNodeId<Parsed>":
-        stable_name = "slang.cst.parsed.TerminalNode"
+    if base_type == f"TerminalNodeId<{stage}>":
+        stable_name = f"slang.cst.{_stage_namespace(stage)}.TerminalNode"
         return {
             "family": "TerminalNode",
             "wireTag": tags.get("nodeKinds", stable_name),
@@ -495,22 +532,22 @@ def _node_kind_for_field_type(
     if production:
         name = production.group(1)
         return _production_kind(
-            name, kind_overrides.get(name, _upper_camel(name)), tags
+            name, kind_overrides.get(name, _upper_camel(name)), stage, tags
         )
     category = {
-        "ExprCSTNodeId<Parsed>": "ExprCSTCategory",
-        "StmtCSTNodeId<Parsed>": "StmtCSTCategory",
-        "DeclCSTNodeId<Parsed>": "DeclCSTCategory",
+        f"ExprCSTNodeId<{stage}>": "ExprCSTCategory",
+        f"StmtCSTNodeId<{stage}>": "StmtCSTCategory",
+        f"DeclCSTNodeId<{stage}>": "DeclCSTCategory",
     }.get(base_type)
     if category is None:
         raise GrammarError(f"cannot compile CST field type {base_type!r} to NodeKindValue")
-    return _category_kind(category, tags)
+    return _category_kind(category, stage, tags)
 
 
-def _category_kind(category: str, tags: _WireTags) -> dict[str, Any]:
+def _category_kind(category: str, stage: str, tags: _WireTags) -> dict[str, Any]:
     """Return the abstract non-terminal base kind for one typed CST category."""
 
-    stable_name = f"slang.cst.parsed.category.{category}"
+    stable_name = f"slang.cst.{_stage_namespace(stage)}.category.{category}"
     return {
         "family": "NonTerminalNode",
         "wireTag": tags.get("nodeKinds", stable_name),
@@ -519,27 +556,29 @@ def _category_kind(category: str, tags: _WireTags) -> dict[str, Any]:
 
 
 def _typed_reference(
-    base_type: str, schema_version: dict[str, int]
+    base_type: str, schema_version: dict[str, int], stage: str, tags: _WireTags
 ) -> dict[str, Any]:
     """Emit the closed typed-reference alternative that the generated accessor exposes."""
 
-    if base_type == "TerminalNodeId<Parsed>":
-        return {"kind": "Terminal", "stage": "Parsed"}
+    if base_type == f"TerminalNodeId<{stage}>":
+        return {"kind": "Terminal", "stage": stage}
     production = re.search(r"Production\(([^)]+)\)", base_type)
     if production:
         return {
             "kind": "Production",
-            "stage": "Parsed",
-            "production": _production_id(production.group(1), schema_version),
+            "stage": stage,
+            "production": _production_id(
+                production.group(1), schema_version, tags.grammar_namespace
+            ),
         }
     category = {
-        "ExprCSTNodeId<Parsed>": "ExprCSTCategory",
-        "StmtCSTNodeId<Parsed>": "StmtCSTCategory",
-        "DeclCSTNodeId<Parsed>": "DeclCSTCategory",
+        f"ExprCSTNodeId<{stage}>": "ExprCSTCategory",
+        f"StmtCSTNodeId<{stage}>": "StmtCSTCategory",
+        f"DeclCSTNodeId<{stage}>": "DeclCSTCategory",
     }.get(base_type)
     if category is None:
         raise GrammarError(f"unknown CST typed reference {base_type!r}")
-    return {"kind": "Category", "stage": "Parsed", "category": category}
+    return {"kind": "Category", "stage": stage, "category": category}
 
 
 def _decorate_field(
@@ -547,6 +586,7 @@ def _decorate_field(
     field: dict[str, Any],
     kind_overrides: dict[str, str],
     schema_version: dict[str, int],
+    stage: str,
     tags: _WireTags,
 ) -> dict[str, Any]:
     """Emit one occurrence-role descriptor with all generic schema policies explicit."""
@@ -556,7 +596,7 @@ def _decorate_field(
         variant_path = []
         for guard in occurrence["choiceGuards"]:
             path = guard["group"].split("#", 1)[1]
-            group = _group_name(production, path, "choice", tags)
+            group = _group_name(production, path, "choice", stage, tags)
             variant_path.append(
                 {
                     "group": group,
@@ -571,7 +611,7 @@ def _decorate_field(
             cardinality_path.append(
                 {
                     "group": _group_name(
-                        production, path, quantifier["kind"], tags
+                        production, path, quantifier["kind"], stage, tags
                     ),
                     "kind": quantifier["kind"],
                 }
@@ -590,12 +630,14 @@ def _decorate_field(
         "name": _field_name(production, field["name"], tags),
         "valueKind": {
             "nodeKindValue": _node_kind_for_field_type(
-                field["baseType"], kind_overrides, tags
+                field["baseType"], kind_overrides, stage, tags
             )
         },
-        "typedReference": _typed_reference(field["baseType"], schema_version),
+        "typedReference": _typed_reference(
+            field["baseType"], schema_version, stage, tags
+        ),
         "edge": "Structural",
-        "stages": [{"concrete": "Parsed"}],
+        "domains": [{"concrete": stage}],
         "wire": "SerializedField",
         "access": "Editable",
         "sourceOrder": field["sourceOrder"],
@@ -604,7 +646,10 @@ def _decorate_field(
 
 
 def _assign_fields(
-    production: str, occurrences: list[dict[str, Any]], profile: dict[str, Any]
+    production: str,
+    occurrences: list[dict[str, Any]],
+    profile: dict[str, Any],
+    stage: str,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Assign every leaf exactly one field, applying explicit semantic overrides first."""
 
@@ -638,7 +683,13 @@ def _assign_fields(
                 if item["id"] in assignments:
                     raise GrammarError(f"{item['id']} is assigned to two fields")
                 assignments[item["id"]] = field_spec["name"]
-            fields.append(_make_field(field_spec["name"], field_spec["baseType"], selected))
+            fields.append(
+                _make_field(
+                    field_spec["name"],
+                    _resolve_base_type(field_spec["baseType"], stage),
+                    selected,
+                )
+            )
         if override.get("exact") and len(assignments) != len(occurrences):
             missing = [item["id"] for item in occurrences if item["id"] not in assignments]
             raise GrammarError(f"exact override for {production} omits {missing}")
@@ -651,7 +702,7 @@ def _assign_fields(
         base_counts[base] += 1
         name = base if base_counts[base] == 1 else f"{base}{base_counts[base]}"
         assignments[item["id"]] = name
-        fields.append(_make_field(name, _default_base_type(item), [item]))
+        fields.append(_make_field(name, _default_base_type(item, stage), [item]))
 
     names = [field["name"] for field in fields]
     if len(names) != len(set(names)):
@@ -665,6 +716,7 @@ def _render_shape(
     expression: dict[str, Any],
     assignments: dict[str, str],
     field_names: dict[str, dict[str, Any]],
+    stage: str,
     tags: _WireTags,
 ) -> dict[str, Any]:
     """Compile EBNF to a closed product/sum/cardinality algebra.
@@ -689,6 +741,7 @@ def _render_shape(
             production,
             path,
             role,
+            stage,
             tags,
             include_field=True,
             field_text=field_text,
@@ -761,6 +814,7 @@ def _exact_override_shape(
     production: str,
     fields: list[dict[str, Any]],
     field_names: dict[str, dict[str, Any]],
+    stage: str,
     tags: _WireTags,
 ) -> dict[str, Any]:
     """Compile a reviewed exact product override such as the requested IfStatement shape."""
@@ -781,7 +835,7 @@ def _exact_override_shape(
             value = {
                 "kind": wrapper,
                 "group": _group_name(
-                    production, group_path, quantifier["kind"], tags
+                    production, group_path, quantifier["kind"], stage, tags
                 ),
                 "value" if wrapper == "OptionalField" else "element": value,
             }
@@ -820,13 +874,14 @@ def _validate_override_constraints(
     return result
 
 
-def generate() -> dict[str, Any]:
+def generate(profile_path: Path = PROFILE_PATH) -> dict[str, Any]:
     """Build the complete machine-readable production schema and enforce coverage laws."""
 
-    profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
     schema_version = _validate_schema_version(profile["schemaVersion"])
+    stage = _validate_stage(profile["stage"])
     tags = _WireTags(profile)
-    grammar_path = ROOT / profile["grammar"]
+    grammar_path = profile_path.parent / profile["grammar"]
     # The grammar is textual schema input. Hash its canonical UTF-8/LF form so a checkout's
     # platform line-ending policy cannot masquerade as a language-schema change.
     grammar_text = grammar_path.read_text(encoding="utf-8")
@@ -852,18 +907,19 @@ def generate() -> dict[str, Any]:
     production_map = []
     terminal_occurrence_count = 0
     nonterminal_occurrence_count = 0
+    sentinels = set(profile.get("validationSentinels", []))
     for production, expression in productions.items():
         occurrences, _, _ = _enumerate_occurrences(production, expression)
-        fields, assignments = _assign_fields(production, occurrences, profile)
-        if production == "if-statement":
+        fields, assignments = _assign_fields(production, occurrences, profile, stage)
+        if production == "if-statement" and "ifStatementExactFields" in sentinels:
             expected_if_fields = [
-                ("ifKeyword", "TerminalNodeId<Parsed>"),
-                ("leftParenthesis", "TerminalNodeId<Parsed>"),
-                ("conditionExpr", "ExprCSTNodeId<Parsed>"),
-                ("rightParenthesis", "TerminalNodeId<Parsed>"),
-                ("trueBranch", "StmtCSTNodeId<Parsed>"),
-                ("elseKeyword", "Option<TerminalNodeId<Parsed>>"),
-                ("falseBranch", "Option<StmtCSTNodeId<Parsed>>"),
+                ("ifKeyword", f"TerminalNodeId<{stage}>"),
+                ("leftParenthesis", f"TerminalNodeId<{stage}>"),
+                ("conditionExpr", f"ExprCSTNodeId<{stage}>"),
+                ("rightParenthesis", f"TerminalNodeId<{stage}>"),
+                ("trueBranch", f"StmtCSTNodeId<{stage}>"),
+                ("elseKeyword", f"Option<TerminalNodeId<{stage}>>"),
+                ("falseBranch", f"Option<StmtCSTNodeId<{stage}>>"),
             ]
             actual_if_fields = [
                 (field["name"], field["effectiveType"]) for field in fields
@@ -874,11 +930,13 @@ def generate() -> dict[str, Any]:
                     f"actual {actual_if_fields}"
                 )
         node_kind_name = kind_overrides.get(production, _upper_camel(production))
-        node_kind = _production_kind(production, node_kind_name, tags)
-        production_id = _production_id(production, schema_version)
+        node_kind = _production_kind(production, node_kind_name, stage, tags)
+        production_id = _production_id(
+            production, schema_version, profile["grammarNamespace"]
+        )
         decorated_fields = [
             _decorate_field(
-                production, field, kind_overrides, schema_version, tags
+                production, field, kind_overrides, schema_version, stage, tags
             )
             for field in fields
         ]
@@ -888,9 +946,11 @@ def generate() -> dict[str, Any]:
         }
         override = profile.get("productionOverrides", {}).get(production, {})
         shape = (
-            _exact_override_shape(production, fields, field_names, tags)
+            _exact_override_shape(production, fields, field_names, stage, tags)
             if override.get("exact")
-            else _render_shape(production, expression, assignments, field_names, tags)
+            else _render_shape(
+                production, expression, assignments, field_names, stage, tags
+            )
         )
         constraints = _validate_override_constraints(production, fields, profile)
         compiled_constraints = [
@@ -926,38 +986,123 @@ def generate() -> dict[str, Any]:
     # never become a product with every alternative required, and a repeated delimiter/value pair
     # must never become parallel delimiter/value lists.
     by_name = {item["debugName"]: item for item in generated}
-    if by_name["declaration"]["shape"]["kind"] != "ClosedVariant":
-        raise GrammarError("root choice did not compile to ClosedVariant")
-    dotted_shape = by_name["dotted-name"]["shape"]
-    dotted_tail = dotted_shape["elements"][1]
-    if not (
-        dotted_tail["kind"] == "List"
-        and dotted_tail["element"]["kind"] == "Product"
-        and len(dotted_tail["element"]["elements"]) == 2
-    ):
-        raise GrammarError(
-            "repeated dotted-name suffix did not compile to List<Product<dot, identifier>>"
+    known_sentinels = {
+        "declarationChoice",
+        "dottedNameTail",
+        "fallbackDeclBindings",
+        "ifStatementExactFields",
+    }
+    unknown_sentinels = sentinels - known_sentinels
+    if unknown_sentinels:
+        raise GrammarError(f"unknown validation sentinels: {sorted(unknown_sentinels)}")
+    if "declarationChoice" in sentinels:
+        if by_name["declaration"]["shape"]["kind"] != "ClosedVariant":
+            raise GrammarError("root choice did not compile to ClosedVariant")
+    if "dottedNameTail" in sentinels:
+        dotted_shape = by_name["dotted-name"]["shape"]
+        dotted_tail = dotted_shape["elements"][1]
+        if not (
+            dotted_tail["kind"] == "List"
+            and dotted_tail["element"]["kind"] == "Product"
+            and len(dotted_tail["element"]["elements"]) == 2
+        ):
+            raise GrammarError(
+                "repeated dotted-name suffix did not compile to List<Product<dot, identifier>>"
+            )
+    if "fallbackDeclBindings" in sentinels:
+        fallback_symbols = {
+            occurrence["symbol"]
+            for field in by_name["outline-fallback-declaration"]["fields"]
+            for occurrence in field["occurrences"]
+            if occurrence["leafKind"] == "nonterminal"
+        }
+        expected_declarators = {
+            "outline-c-style-variable-declarator",
+            "outline-c-style-function-declarator",
+        }
+        if not expected_declarators <= fallback_symbols:
+            raise GrammarError(
+                "fallback declaration no longer structurally contains both C-style "
+                "declarator alternatives"
+            )
+        for production in sorted(expected_declarators):
+            name_fields = [
+                field
+                for field in by_name[production]["fields"]
+                if field["name"]["text"] == "name"
+            ]
+            if len(name_fields) != 1 or not (
+                name_fields[0]["typedReference"]["kind"] == "Terminal"
+                and len(name_fields[0]["occurrences"]) == 1
+                and name_fields[0]["occurrences"][0]["symbol"] == "IDENTIFIER"
+            ):
+                raise GrammarError(
+                    f"{production} must expose its selected IDENTIFIER as one direct name field"
+                )
+        category_members = set(
+            profile["categoryMembership"].get("CStyleDeclaratorCSTCategory", [])
         )
-    if_shape = by_name["if-statement"]["shape"]
-    if not (
-        if_shape["kind"] == "Product"
-        and [
-            element.get("field", {}).get("text")
-            if element["kind"] == "Field"
-            else element.get("value", {}).get("field", {}).get("text")
-            for element in if_shape["elements"]
+        if category_members != expected_declarators:
+            raise GrammarError(
+                "CStyleDeclaratorCSTCategory must contain exactly the two fallback declarators"
+            )
+        specifier_symbols = {
+            occurrence["symbol"]
+            for field in by_name["outline-c-style-declaration-specifiers"]["fields"]
+            for occurrence in field["occurrences"]
+            if occurrence["leafKind"] == "nonterminal"
+        }
+        if "outline-c-style-inline-type-specifier" not in specifier_symbols:
+            raise GrammarError(
+                "fallback declaration specifiers no longer admit an inline type declaration"
+            )
+        inline_name_fields = [
+            field
+            for field in by_name["outline-c-style-inline-type-specifier"]["fields"]
+            if field["name"]["text"] == "name"
         ]
-        == [
-            "ifKeyword",
-            "leftParenthesis",
-            "conditionExpr",
-            "rightParenthesis",
-            "trueBranch",
-            "elseKeyword",
-            "falseBranch",
-        ]
-    ):
-        raise GrammarError("IfStatement compiled product no longer has the exact seven fields")
+        if len(inline_name_fields) != 1 or not (
+            len(inline_name_fields[0]["occurrences"]) == 1
+            and inline_name_fields[0]["occurrences"][0]["symbol"] == "IDENTIFIER"
+            and any(
+                quantifier["kind"] == "optional"
+                for quantifier in inline_name_fields[0]["occurrences"][0]["cardinalityPath"]
+            )
+        ):
+            raise GrammarError(
+                "inline C-style type specifier must expose its optional identifier alternatives "
+                "as one direct name field"
+            )
+        inline_category = set(
+            profile["categoryMembership"].get(
+                "CStyleInlineTypeSpecifierCSTCategory", []
+            )
+        )
+        if inline_category != {"outline-c-style-inline-type-specifier"}:
+            raise GrammarError(
+                "CStyleInlineTypeSpecifierCSTCategory must contain exactly its inline production"
+            )
+    if "ifStatementExactFields" in sentinels:
+        if_shape = by_name["if-statement"]["shape"]
+        if not (
+            if_shape["kind"] == "Product"
+            and [
+                element.get("field", {}).get("text")
+                if element["kind"] == "Field"
+                else element.get("value", {}).get("field", {}).get("text")
+                for element in if_shape["elements"]
+            ]
+            == [
+                "ifKeyword",
+                "leftParenthesis",
+                "conditionExpr",
+                "rightParenthesis",
+                "trueBranch",
+                "elseKeyword",
+                "falseBranch",
+            ]
+        ):
+            raise GrammarError("IfStatement compiled product no longer has the exact seven fields")
     category_descriptors = []
     for category, members in profile["categoryMembership"].items():
         if len(members) != len(set(members)):
@@ -968,12 +1113,36 @@ def generate() -> dict[str, Any]:
         category_descriptors.append(
             {
                 "category": category,
-                "kind": _category_kind(category, tags),
+                "kind": _category_kind(category, stage, tags),
                 "members": [
-                    _production_id(member, schema_version) for member in sorted(members)
+                    _production_id(
+                        member, schema_version, profile["grammarNamespace"]
+                    )
+                    for member in sorted(members)
                 ],
             }
         )
+
+    derived_view_descriptors = []
+    known_categories = set(profile["categoryMembership"])
+    seen_view_names: set[str] = set()
+    for view in profile.get("derivedViews", []):
+        required = {"stableName", "sourceCategory", "valueKind", "rule"}
+        if set(view) != required:
+            raise GrammarError(
+                f"derived view must have exactly {sorted(required)}, got {sorted(view)}"
+            )
+        if view["stableName"] in seen_view_names:
+            raise GrammarError(f"duplicate derived view {view['stableName']}")
+        seen_view_names.add(view["stableName"])
+        if view["sourceCategory"] not in known_categories:
+            raise GrammarError(
+                f"derived view {view['stableName']} names unknown category "
+                f"{view['sourceCategory']}"
+            )
+        if not all(isinstance(view[key], str) and view[key] for key in required):
+            raise GrammarError(f"derived view {view['stableName']} has an empty field")
+        derived_view_descriptors.append(dict(view))
 
     production_kind_names = [item["kind"]["stableName"] for item in generated]
     duplicate_kind_names = sorted(
@@ -984,14 +1153,26 @@ def generate() -> dict[str, Any]:
             "grammar production kinds must be injective: "
             f"{duplicate_kind_names}"
         )
+    production_id_names = [
+        item["production"]["qualifiedName"] for item in generated
+    ]
+    duplicate_production_ids = sorted(
+        name for name, count in Counter(production_id_names).items() if count != 1
+    )
+    if duplicate_production_ids:
+        raise GrammarError(
+            "normalized grammar production IDs must be injective: "
+            f"{duplicate_production_ids}"
+        )
     tags.finish()
 
     return {
         "schemaKind": "NodeSchemaRegistryFragment",
         "schemaVersion": schema_version,
-        "stage": profile["stage"],
+        "stage": stage,
         "grammar": profile["grammar"],
         "grammarSha256": digest,
+        "grammarNamespace": profile["grammarNamespace"],
         "wireTagPolicy": {
             key: profile["wireTags"][key]
             for key in ("algorithm", "namespace", "reserved", "collisionRule")
@@ -1003,9 +1184,11 @@ def generate() -> dict[str, Any]:
         },
         "registryFragment": {
             "version": schema_version,
+            "domain": {"concrete": stage},
             "cstCategories": category_descriptors,
             "grammarProductions": production_map,
             "cstProductionDescriptors": generated,
+            "derivedViews": derived_view_descriptors,
         },
     }
 
@@ -1023,10 +1206,19 @@ def main() -> int:
     parser.add_argument(
         "--production", help="emit one generated production descriptor as JSON"
     )
+    parser.add_argument(
+        "--profile",
+        default=str(PROFILE_PATH),
+        help="production profile path (defaults to cst-production-profile.json)",
+    )
     args = parser.parse_args()
+    profile_path = Path(args.profile)
+    if not profile_path.is_absolute():
+        cwd_candidate = Path.cwd() / profile_path
+        profile_path = cwd_candidate if cwd_candidate.exists() else ROOT / profile_path
     try:
-        schema = generate()
-    except (GrammarError, KeyError, TypeError) as error:
+        schema = generate(profile_path)
+    except (GrammarError, KeyError, TypeError, OSError, json.JSONDecodeError) as error:
         print(f"CST production schema validation failed: {error}", file=sys.stderr)
         return 1
     if args.production:

@@ -19,15 +19,16 @@ ElaboratedNode = SyntaxNode<Elaborated>
 IRReadyNode      = SyntaxNode<IRReady>
 
 ElaborateNode : TypedNode -> CheckResult<ElaboratedNode>
-LowerToIRReadyAST   : ElaboratedNode -> CheckResult<IRReadyNode>
+LowerNodeToIRReady : ElaboratedNode -> CheckResult<IRReadyNode>
 LowerToIR     : IRReadyDecl -> CheckResult<FrontendIRFragment>
 ```
 
-These aliases range over the complete registered node set at exactly one representation stage.
-They are not a common mutable base class and do not erase stage from `NodeId<S>`. Expression,
+These aliases range over the complete registered node set at exactly one node-local form.
+They are not a common mutable base class and do not erase form from `ASTNodeId<F, K>`. Expression,
 statement, and declaration aliases below further restrict the registered kind through the schema's
-`baseKind` chain. Consequently, only the named transformations above can change a node's stage;
-chapter 3's generic immutable rewrite API remains stage-preserving.
+`baseKind` chain. Consequently, only the named transformations above can change a node's form;
+chapter 3's generic immutable edit API remains form-preserving. This says nothing about the form of
+any other node in the semantic snapshot.
 
 `ELB-001`: Every implicit runtime operation in a typed node becomes an explicit elaborated node.
 
@@ -36,9 +37,9 @@ synthesis key returns the same synthesized declaration ID.
 
 `ELB-003`: Elaboration never edits the declaration container that caused it. Generated declarations
 and all semantic facts they make visible are returned in one `SynthesisGroup` and merged into the
-next immutable module snapshot atomically.
+semantic snapshot atomically.
 
-Chapter 8 is the sole schema authority for `SynthesisKey`, output identities,
+Chapter 9 is the sole schema authority for `SynthesisKey`, output identities,
 `SemanticDependency`, `SynthesisGroupDraft`, and `SynthesisGroup`. All declarations, conformance
 identities, finalized requirement maps, and rewritten uses in a group
 validate together. Publication either installs the whole group or installs none of it. Builder-only
@@ -129,7 +130,7 @@ TypedCallResultProvenanceAt<S: WitnessTableState> =
   | PointerLikeCallResult(TypedCallPointerLikeResultAt<S>)
 
 TypedCallAt<S: WitnessTableState> = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     dispatch: CallableDispatch<S>,
     signature: CallableSignature,
     resultAuthority: CallableResultAuthorityId,
@@ -174,7 +175,7 @@ AccessorReferenceResultInstantiationInputAt<S: WitnessTableState> = {
     contract: AccessorReferenceResultContractId,
     invocationIdentity: AccessorInvocationIdentity,
     invocationSite: SemanticOperationSiteAssignment,
-    call: NodeId<Typed>,
+    call: AnyASTNodeId<Typed>,
     subject: CallableContractSubject,
     signature: CallableSignatureId,
     sources: CapturedStorageSources,
@@ -221,7 +222,7 @@ SelectedSurfaceCallInputAt<S: WitnessTableState> = {
 ConstructionCallInput = SelectedSurfaceCallInputAt<Construction>
 
 BuildSelectedSurfaceTypedCallAt<S>(
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     input: SelectedSurfaceCallInputAt<S>,
     contractContext: ContractSelectionContext)
     -> CheckResult<TypedCallAt<S>>
@@ -393,7 +394,7 @@ aliasClassProvenance(SharedAlias(p)) = p
 aliasClassProvenance(UnknownAlias) = UnknownAliasRoot
 
 StorageAccessOperand =
-    TypedInput(node: NodeId<Typed>, type: TypeId, category: ValueCategory)
+    TypedInput(node: AnyASTNodeId<Typed>, type: TypeId, category: ValueCategory)
   | AdapterInput(role: AdapterSourceRole,
                  type: TypeId,
                  category: AdapterInputCategory)
@@ -460,7 +461,7 @@ AbstractAccessorInvocationAt<S: WitnessTableState> = {
 }
 
 Explicit reference formation does not inhabit `AbstractAccessorRole`. It owns the separate
-`ReferenceAccessorPlanAt<S>` from chapter 6, so no ordinary getter/setter access recipe can be
+`ReferenceAccessorPlanAt<S>` from chapter 7, so no ordinary getter/setter access recipe can be
 retagged as a ref accessor.
 
 StorageAccessStepRecord<S: WitnessTableState> = {
@@ -680,7 +681,7 @@ parallel table is serialized.
 `ELB-ACC-002`: Every successfully initialized materialized temporary has exactly one
 `DestroyTemporary` carrying its descriptor's byte-identical `DestructionExecutionAt<S>` on every
 exit selected by its `CompletionCondition`. A failed `InitializeTemporary` executes only the
-chapter 15 exceptional cleanup and never activates the outer destruction obligation.
+chapter 16 exceptional cleanup and never activates the outer destruction obligation.
 For every descriptor `d`, `d.site = d.initialization.site`,
 `d.identity = d.initialization.identity = temporaryStorageIdentity(d.site.site)`, and
 `d.alias = ExactAliasRoot(temporaryStorageAliasRoot(d.identity))`. Thus neither plan ordinals nor
@@ -731,7 +732,7 @@ obligation requires that exact existing `PhysicalStorage`. An accessor-produced 
 setter/write-back, temporary, or nonidentity conversion satisfies either physical mode.
 `WriteAbstractBack` remains available only to the separately specified abstract `OutMode` and
 `InOutMode` policies. This is the elaboration invariant corresponding to `TYP-ACC-005`,
-`TYP-ACC-007`, and the chapter 7 physical-mode rules.
+`TYP-ACC-007`, and the chapter 8 physical-mode rules.
 
 `ELB-ACC-008`: `ResolveAbstractStorageThroughReference` is the closed lowering hook for an ordinary
 read/write fallback already selected by `PlanStorageAccessAt<S>`; it is not a physical-parameter
@@ -878,7 +879,7 @@ derivation equal the checked certificate. Every typed captured source is replace
 `IRReadyValueId` produced by the capture environment, and every formal-to-source projection becomes a
 `IRReadyCallOperandProjection` naming the corresponding IRReady call operand and expansion path. Neither
 `AccessorHandleResultProof`, `AccessorReferenceResultCertificate`, `CapturedStorageSources`, nor a
-`NodeId<Typed>` is retained transitively. The wrapper preserves the already handle-shaped normal
+`AnyASTNodeId<Typed>` is retained transitively. The wrapper preserves the already handle-shaped normal
 result without re-executing or reclassifying it.
 `InvokeReferenceAccessor` returns that wrapper under its stored `AccessorHandleAdmissionProof`;
 `InvokeReferenceAccessorThenRegistered` feeds the wrapper to one `IRReadyRegisteredHandleTransform`.
@@ -1206,12 +1207,12 @@ CaptureLayout = {
 }
 
 ForwardedCaptureIdentity = {
-    parentLambda: NodeId<Typed>,
+    parentLambda: AnyASTNodeId<Typed>,
     parentCapture: CaptureIdentity
 }
 
 CaptureIdentity = {
-    lambda: NodeId<Typed>,
+    lambda: AnyASTNodeId<Typed>,
     source: DeclRef | ReceiverCapture | ForwardedCaptureIdentity
 }
 
@@ -1243,7 +1244,7 @@ chains cannot alias accidentally.
 an enclosing proof only when both endpoint IDs remain exactly equal.
 
 Unqualified `CallableValue`/`CallableDispatch` mean the `<Published>` forms. Generated bodies may
-use `<Construction>` only inside the draft/synthesis scope defined in chapter 8; atomic freeze
+use `<Construction>` only inside the draft/synthesis scope defined in chapter 9; atomic freeze
 rewrites every operational reference before an `ElaboratedCall` or IR node is published.
 
 Binding discovers only which lexical declarations are free. Capture order is the lexical order of
@@ -1252,7 +1253,7 @@ is explicit in `source`. Capture mode and lifetime are inferred from the typed u
 properties; they cannot be decided from a merely bound body. A non-copyable value cannot silently
 become a by-value capture, and a borrowing/ref capture must carry a lifetime proof that covers every
 lambda-environment use. Whether escaping borrowed captures are supported is an explicit language
-decision in chapter 12.
+decision in chapter 13.
 
 `CaptureSet.order` is a duplicate-free bijection onto `byIdentity` keys in that semantic order;
 `CaptureLayout.order` is byte-identical and is a duplicate-free bijection onto `fields` keys. The
@@ -1287,7 +1288,7 @@ LambdaSynthesisResult = LambdaSynthesisResultAt<Published>
 The rewritten body replaces each captured reference with a field access through the explicit
 receiver. The lambda expression becomes an elaborated construction of
 `synthesis.environmentType` from the values in `synthesis.layout.order`. No `LambdaExpr`
-reaches `IRReadyAST`.
+reaches an `IRReady` node.
 
 `SYN-LAM-001`: Free-variable discovery reads a bound body; capture-mode analysis reads the typed
 body. Both return immutable data and neither inserts fields while walking.
@@ -1317,7 +1318,7 @@ declaration nesting.
 
 The result solver combines the contextual expected result, every reachable `return`, the
 fall-through result (`VoidType` when permitted), `BottomType` paths, and recovery expressions using
-the join rules in chapter 6. A captureless lambda may additionally elaborate to a static thunk when
+the join rules in chapter 7. A captureless lambda may additionally elaborate to a static thunk when
 a raw function type is expected; a capturing lambda is never silently converted to a raw function
 pointer. The thunk and any lambda-environment declarations belong to the same atomic
 `SynthesisGroup`.
@@ -1325,7 +1326,7 @@ pointer. The thunk and any lambda-environment declarations belong to the same at
 ## Interface requirement synthesis
 
 Conformance checking first produces the authoritative kind-indexed `RequirementMatch<K>` from
-chapter 8 for every
+chapter 9 for every
 `RequirementKey<K>`. The payload/proof shapes are parallel to `RequirementWitness<K>`: an
 associated type carries a `TypeId` plus constraint proofs, a callable carries a canonical
 declaration plus a signature proof, an accessor aggregate carries a role-keyed accessor map, a
@@ -1335,7 +1336,7 @@ constant carries a checked value, and a nested conformance carries an
 `Exact` and `OptionalAbsent` never create code. `Adaptable` creates an adapter; `Defaulted` and
 `Builtin` create code only when their typed plans declare generated output roles. Callable adapters
 use exactly `RequirementWitnessSynthesisPlan<CallableKind>` and default matching uses
-`DefaultUsePlan<K, Construction>` from chapter 8. Its `ParameterCorrespondence`
+`DefaultUsePlan<K, Construction>` from chapter 9. Its `ParameterCorrespondence`
 maps requirement slots (including receiver and pack expansions) to independently keyed
 implementation slots; the keys are not compared for equality. Its parameter access plans consume
 requirement-call arguments and produce implementation-call arguments, its result conversion maps
@@ -1361,7 +1362,7 @@ constructor; they do not share a large branch that mutates arbitrary AST fields.
 
 ## Other desugarings
 
-The initial `IRReadyAST` has these explicit rewrites:
+The `IRReady` node family has these explicit forms:
 
 | Typed/elaborated form            | IRReady form                                                    |
 | -------------------------------- | --------------------------------------------------------------- |
@@ -1380,13 +1381,13 @@ The initial `IRReadyAST` has these explicit rewrites:
 | target/stage switch              | conditional IRReady regions with capability presence formulas   |
 | compile-time loop/pack expansion | explicit expansion nodes or materialized sequence after solving |
 
-Desugaring order is defined by dependencies between rewrite queries, not by a mutable visitor's
-incidental traversal. A rewrite consumes only the node forms listed in its input schema and produces
-a strictly later IRReady form, preventing rewrite loops.
+Desugaring order is defined by dependencies between lowering queries, not by a mutable visitor's
+incidental traversal. A lowering query consumes only the node forms listed in its input schema and
+produces the declared later form, preventing query cycles from masquerading as progress.
 
-## `IRReadyAST`
+## IR-ready node forms
 
-`IRReadyAST` is deliberately small:
+The `IRReady` node family is deliberately small:
 
 ```text
 IRReadyExpr = Constant | PhysicalStorage(IRReadyPhysicalStorage) |
@@ -1609,7 +1610,7 @@ IRReadyWitnessOperation =
                               interface: InterfaceInstanceKey)
 
 IRReadyValueKey = {
-    producer: NodeId<IRReady>,
+    producer: AnyASTNodeId<IRReady>,
     resultOrdinal: UInt32,
     shape: IRReadyValueShape
 }
@@ -1697,7 +1698,7 @@ CallRegion = {
 }
 ```
 
-Chapter 15 is the sole schema authority for `IRReadyInitialization` and its selected plan-step
+Chapter 16 is the sole schema authority for `IRReadyInitialization` and its selected plan-step
 alternatives; the `Initialize` case above does not erase them to a generic construct flag. Its
 recovery alternative is tooling-only and is not a successful initialization operation.
 
@@ -1711,7 +1712,7 @@ structured control remains where useful, but its exit and cleanup behavior is ex
 applications, implicit receivers, unplanned conversions, raw lambdas, and incomplete
 `RequirementDictionary` values.
 
-`ELB-IRDY-002`: `LowerToIRReadyAST` first lowers every access plan's preparation in order, then dispatches
+`ELB-IRDY-002`: `LowerNodeToIRReady` first lowers every access plan's preparation in order, then dispatches
 on its closed terminal. `PassArgument` contributes the named runtime argument and its completion
 steps to the enclosing call or registered-operation region. `YieldStorageRead` produces the named
 IRReady value directly; it does not synthesize a call region for a physical load. `CompleteStorageWrite`
@@ -1723,7 +1724,7 @@ result's explicit `evaluation` to exactly one IRReady producer in its stored ord
 completion behavior remains hidden inside a call opcode or inferred from the consuming syntax.
 
 Lowering an abstract `OutMode`/`InOutMode` temporary creates one `IRReadyTemporaryStorage` whose
-descriptor is byte-identical to the access-plan descriptor and whose chapter 15 initialization is
+descriptor is byte-identical to the access-plan descriptor and whose chapter 16 initialization is
 the descriptor's exact plan application. This IRReady node projects that application's unique
 `CreatePlanStorage` transition rather than allocating a second object. The nested IRReady
 initialization owns pre-checkpoint exceptional cleanup; only its normal checkpoint produces the
@@ -1773,7 +1774,8 @@ ordinary storage fallback and physical-parameter preparation cannot be interchan
 `ELB-IRDY-003`: `IRReadyValueId = ContentId(IRReadyValueKey)` under chapter 1's exact encoding.
 Resolving the producer node must find `resultOrdinal` and the identical stored result shape. Two
 results of one node, or equal-shaped results of different nodes, therefore remain distinct without
-allocation-order identity. Every IRReady operand resolves in the containing immutable IRReady snapshot.
+allocation-order identity. Every IRReady operand resolves in the containing heterogeneous immutable
+`SemanticSnapshot` and names a node or value whose schema admits the required IR-ready form.
 
 `ELB-IRDY-004`: Resolving `IRReadyCallContract.effective` yields an effective contract whose
 signature equals `contract.signature`. Resolving that signature yields exactly the keys in
@@ -1865,7 +1867,7 @@ the typed application. `output.storage.path` is
 alternative; `IRReadyPhysicalStorage` cannot reconstruct a dynamic index from its path. The closed IRReady
 physical-storage provenance relation resolves the base `IRReadyValueId` to exactly
 `output.inputStorage`; matching only its `IRReadyPhysicalStorageShape` is insufficient. Neither the node
-nor any transitive static proof field contains `NodeId<Typed>`, `TypedExpr`, or an index-recovery
+nor any transitive static proof field contains `AnyASTNodeId<Typed>`, `TypedExpr`, or an index-recovery
 recipe.
 
 `IRReadyRegisteredPhysicalProjection.runtimeOperands` has exactly the domain of `inputShapes` and
@@ -1920,7 +1922,7 @@ executable authority.
 ## Frontend IR contract
 
 `FrontendIRFragment` separates symbol declarations from definitions. Lowering is a pure query over
-`IRReadyAST` and imported semantic interfaces. Fragments are merged by declaring every stable symbol in
+`IRReady` declarations and imported semantic interfaces. Fragments are merged by declaring every stable symbol in
 canonical order first, then attaching definitions; mutual recursion and generated forward
 references therefore never depend on fragment completion order.
 
@@ -2742,7 +2744,7 @@ instructions used directly by this frontend subset have these exact operand sequ
 | `IRPoison`                         | no operands; diagnostic/tooling recovery only                                 |
 
 Other actual opcodes admitted to frontend IR are selected by a registered schema that declares
-their operands, results, and effects. Chapter 15 defines `InitializationInstSemanticPlan`; chapter
+their operands, results, and effects. Chapter 16 defines `InitializationInstSemanticPlan`; chapter
 16 defines `DerivativeSelectionInstSemanticPlan`. They are sidecar plans, not opcode alternatives.
 Every instruction has exactly one entry in `IRControlFlowGraph.semanticMetadata`, including the
 all-`None` entry. The map key and `entry.instruction` both equal the instruction ID. Validation
@@ -2986,7 +2988,7 @@ Resolving `c.contract` yields `c.signature`, its declared referent, and the five
 Replaying those rules against the exact captured SSA values and projections in `c.sources` yields
 the address space, mutability, lifetime, alias, and source provenance recorded in `c.derivation`, and combining them
 with the contract's result type, kind, referent, and access yields exactly `c.result`. No validation
-step consults a typed AST node. The certificate sidecar therefore authenticates a proof-carrying
+step consults a typed node. The certificate sidecar therefore authenticates a proof-carrying
 result already created by the call; it never creates provenance by reclassification.
 For `FreshAccessorAlias`,
 `c.derivation.alias.invocationIdentity = Some(c.invocationIdentity)`, and replay derives the exact
@@ -2999,7 +3001,7 @@ used as a replacement seed, so moving or deduplicating instructions cannot chang
 `TemporaryStorageIdentity` is copied from the authenticated application site and its alias is
 exactly `ExactAliasRoot(temporaryStorageAliasRoot(d.identity))`; no IRReady/IR instruction identity or
 raw `StableSemanticId` may replace it.
-An instruction carrying `InitializeTemporaryInstPlan(i)` is the normal-checkpoint marker for the exact chapter 15
+An instruction carrying `InitializeTemporaryInstPlan(i)` is the normal-checkpoint marker for the exact chapter 16
 application in `i.application`: it has that temporary as its sole operand and no result, and is
 dominated by the complete lowered initialization-recipe instructions. Every exceptional exit before the
 marker executes the application's stored cleanup and cannot reach outer destruction. Before the
@@ -3212,7 +3214,7 @@ nested-conformance metadata retain `SomeInterfaceRequirementKey`, while runtime 
 derived `RuntimeInterfaceRequirementKey`. Missing entries are a IRReady validation error, not a null IR
 operand.
 
-`IR-005`: Lowering a recovered IRReady error, including chapter 15's
+`IR-005`: Lowering a recovered IRReady error, including chapter 16's
 `RecoveryInitializationStep(error)`, produces a typed recovery placeholder only in
 diagnostic/tooling mode. It emits the existing `IRPoison` opcode with
 `metadata.recoveryError = Some(error)` and contributes no

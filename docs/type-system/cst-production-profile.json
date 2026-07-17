@@ -4,8 +4,14 @@
     "minor": 0
   },
   "grammar": "grammar.ebnf",
-  "grammarSha256": "8bbd5bf6f43e2143fff653f4a395a9e98e81eae73c87038067d9d9a8371476d5",
+  "grammarSha256": "4278d65076ac835febba66881daa2e25d3af9b605f09ed1862758d65ab60cadc",
+  "grammarNamespace": "slang.surface",
   "stage": "Parsed",
+  "validationSentinels": [
+    "declarationChoice",
+    "dottedNameTail",
+    "ifStatementExactFields"
+  ],
   "wireTags": {
     "algorithm": "sha256-domain-prefix-u32be-v1",
     "namespace": "slang.frontend.cst-production.v1",
@@ -103,17 +109,17 @@
       "fields": [
         {
           "name": "ifKeyword",
-          "baseType": "TerminalNodeId<Parsed>",
+          "baseType": "TerminalNodeId<{stage}>",
           "select": [{ "kind": "soft", "symbol": "if", "ordinal": 1 }]
         },
         {
           "name": "leftParenthesis",
-          "baseType": "TerminalNodeId<Parsed>",
+          "baseType": "TerminalNodeId<{stage}>",
           "select": [{ "kind": "literal", "symbol": "(", "ordinal": 1 }]
         },
         {
           "name": "conditionExpr",
-          "baseType": "ExprCSTNodeId<Parsed>",
+          "baseType": "ExprCSTNodeId<{stage}>",
           "merge": "exclusiveAlternatives",
           "select": [
             { "kind": "nonterminal", "symbol": "expression", "ordinal": 1 },
@@ -122,24 +128,24 @@
         },
         {
           "name": "rightParenthesis",
-          "baseType": "TerminalNodeId<Parsed>",
+          "baseType": "TerminalNodeId<{stage}>",
           "select": [{ "kind": "literal", "symbol": ")", "ordinal": 1 }]
         },
         {
           "name": "trueBranch",
-          "baseType": "StmtCSTNodeId<Parsed>",
+          "baseType": "StmtCSTNodeId<{stage}>",
           "select": [
             { "kind": "nonterminal", "symbol": "statement", "ordinal": 1 }
           ]
         },
         {
           "name": "elseKeyword",
-          "baseType": "TerminalNodeId<Parsed>",
+          "baseType": "TerminalNodeId<{stage}>",
           "select": [{ "kind": "soft", "symbol": "else", "ordinal": 1 }]
         },
         {
           "name": "falseBranch",
-          "baseType": "StmtCSTNodeId<Parsed>",
+          "baseType": "StmtCSTNodeId<{stage}>",
           "select": [
             { "kind": "nonterminal", "symbol": "statement", "ordinal": 2 }
           ]

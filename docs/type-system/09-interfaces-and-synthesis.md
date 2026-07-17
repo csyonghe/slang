@@ -3,7 +3,7 @@
 This chapter defines checked interface declarations as typed requirement sets and conformance as immutable,
 proof-carrying evidence. It is normative for requirement identity, requirement matching, associated
 type projection, defaults, conformance discovery, and synthesis. Existential representation and
-calls are elaborated in chapter 11, but the evidence they consume is defined here.
+calls are elaborated in chapter 12, but the evidence they consume is defined here.
 
 The central invariant is that a conformance is not a boolean. It is a typed graph whose entries say
 how one particular type satisfies every requirement occurrence of one particular specialized
@@ -14,7 +14,7 @@ interface. The graph is keyed by semantic identity, never by source or storage p
 An interface declaration checks to an `InterfaceDecl<Typed>`. Using a generic interface with
 canonical arguments creates an `InterfaceInstanceKey`:
 
-`GenericConditionSet` is chapter 4's canonical-constraint-set alias; this chapter does not define a
+`GenericConditionSet` is chapter 5's canonical-constraint-set alias; this chapter does not define a
 second condition representation.
 
 ```text
@@ -53,7 +53,7 @@ InterfaceInheritanceClause = {
 }
 ```
 
-`InterfaceInstanceKey` has the single authoritative schema in chapter 4. It is canonical after
+`InterfaceInstanceKey` has the single authoritative schema in chapter 5. It is canonical after
 applying defaults and solving the interface binder. A
 source spelling with unresolved, ill-kinded, or residual arguments produces an error instance and
 cannot identify a successful conformance.
@@ -659,19 +659,19 @@ RecoveryWitness<K> = {
 ## Callable certificates and adapter endpoints
 
 The schemas above compose the type, conversion, effect, capability, and access-plan domains from
-chapters 4, 7, 9, and 11. They do not introduce alternative equality, coercion, or passing
+chapters 5, 8, 10, and 12. They do not introduce alternative equality, coercion, or passing
 algorithms. Every proof is an endpoint certificate revalidated against those canonical domains.
 Unqualified direct-witness, compatibility-proof, adapter-plan, and access-plan-binding names mean
 their `<Published>` forms; construction matching uses the explicitly staged forms.
 
 `IFC-CALL-001`: `CanonicalFieldEquality<T>` is valid exactly when `left` and `right` are equal under
-`T`'s declared canonical equality. Chapter 1 owns `CanonicalSetInclusionProof<T>`, and chapter 9
+`T`'s declared canonical equality. Chapter 1 owns `CanonicalSetInclusionProof<T>`, and chapter 10
 owns `CapabilityImplicationProof`; their validators replay exact endpoints rather than trusting
 the stored record. A `ConditionalFieldEquality` may exclude a field only when its registered
 language rule says that field does not participate in the current relation.
 
 `IFC-CALL-002`: `FuncTypeEqualityProof` loads its two `CallableSignature` values and their
-chapter 4 `FuncType` values. Its correspondence IDs must equal the proof endpoints. The binder
+chapter 5 `FuncType` values. Its correspondence IDs must equal the proof endpoints. The binder
 proof compares alpha-normalized binders and constraints; the receiver proof covers both absence or
 every present receiver field; parameter proofs cover every expanded slot exactly once at the stored
 ordinals; result and error `TypeEqualityProof` endpoints equal the stored function fields; and
@@ -690,7 +690,7 @@ ordinary parameter must map once unless a distinct adapter rule explicitly consu
 receiver; every implementation input must have one source. Requirement and implementation
 `ParameterKey` values identify endpoints and are never compared for equality with one another.
 
-A `StorageAccessPlanBinding` gives chapter 11's otherwise expression-local `StorageAccessPlan` explicit adapter
+A `StorageAccessPlanBinding` gives chapter 12's otherwise expression-local `StorageAccessPlan` explicit adapter
 endpoints. Its source role denotes a formal thunk input, thrown error, or named synthesized value;
 its target resolves to the implementation receiver/parameter or handler parameter. The endpoint
 types and target mode must agree with the corresponding signature fields. `AdapterInputCategory`
@@ -707,12 +707,12 @@ exists until a call binds that thunk. Physical and abstract promises are disjoin
 | `ConstRefMode(r)` | `PhysicalStorageArgument` from an `AdapterPhysicalStorage` whose `AdapterStorageObligation` is `instantiatePhysicalStorageRequirement(target.mode, lifetime)` with read access; no conversion, temporary, getter, write-back, or category erasure |
 | `RefMode(r)`      | `PhysicalStorageArgument` whose `AdapterStorageObligation` is `instantiatePhysicalStorageRequirement(target.mode, lifetime)` with read-write access; no hidden copy/write-back                                                                    |
 
-`IFC-CALL-004`: Validating a `StorageAccessPlanBinding` symbolically executes its chapter 11 preparation,
+`IFC-CALL-004`: Validating a `StorageAccessPlanBinding` symbolically executes its chapter 12 preparation,
 `PassArgument` terminal, and completion steps. A `YieldStorageRead` or `CompleteStorageWrite`
 terminal is invalid in an adapter call binding. `plan.operands[input]` must be an
 `AdapterInput(source.role, source.type, source.category)`; that named operand is the plan's only
 entry for this formal source, and every preparation path starts from it. Every nested
-`ConversionPlan` composes by its chapter 7 source/target fields; physical-location, temporary,
+`ConversionPlan` composes by its chapter 8 source/target fields; physical-location, temporary,
 alias, and
 lifetime IDs are balanced; the `PassArgument` payload obeys the table; and post-call conversions return
 to the original abstract source storage under the declared completion condition. Receiver bindings
@@ -789,10 +789,10 @@ contracts' fields byte-for-byte, both nested proofs use its exact region, and th
 the totalized options. All effect and capability endpoints use their respective one common universe.
 
 For a validated check, the effective-contract ID must belong to the stored implementation subject
-and signature. `EffectCompatibilityProof.effectiveEffects` equals chapter 4's
+and signature. `EffectCompatibilityProof.effectiveEffects` equals chapter 5's
 `effectiveEffects(contract)` and either the allowance is inferred or the stored subset proof shows
 the effective set is allowed.
-`InferredCapabilityCompatibilityProof.effectiveInferredCapabilities` equals chapter 9's
+`InferredCapabilityCompatibilityProof.effectiveInferredCapabilities` equals chapter 10's
 `effectiveCapabilities(contract)`, and its proof endpoints are `required.inferredCapabilities` and
 that effective requirement wrapped as `Closed(effectiveInferredCapabilities)`. The pre-inference,
 effective, and concrete-availability proofs have different endpoints and cannot be swapped.
@@ -800,7 +800,7 @@ effective, and concrete-availability proofs have different endpoints and cannot 
 `IFC-CALL-007`: `CallableContractAdapterProof.adapterSelection.signature` equals the required
 signature. Its selection effects are the canonical union of the implementation selection effects,
 all access/result/error conversion effects, and any handler effects. Its
-`inferredCapabilities` is chapter 9's `requireAll` of the implementation's ordinary requirement,
+`inferredCapabilities` is chapter 10's `requireAll` of the implementation's ordinary requirement,
 `operationInferredCapabilities`, and handler ordinary requirements. Its `concreteAvailability` is
 `None` when every contributing optional set is absent; otherwise it is one
 `ConcreteAvailabilitySet` whose sources are the canonical union of all present implementation,
@@ -852,7 +852,7 @@ getter-only abstract storage, wrong address space, forbidden physical source pro
 
 An accessor map is keyed by `AccessorRole`; an implementation cannot satisfy a setter because it
 happened to occupy the second declaration slot. `RuntimeInterfaceRequirementKey` carries that role through
-runtime dispatch and contract obligations. Callable signatures use chapter 4's explicit receiver
+runtime dispatch and contract obligations. Callable signatures use chapter 5's explicit receiver
 and parameter modes. Dispatch selection is not part of a function type; it is evidence in a
 selected callable or elaborated call.
 
@@ -948,7 +948,7 @@ keys are not compared for equality across declarations: requirement and implemen
 
 A requirement declaration ID is not sufficient identity. An inherited requirement can be reached
 through different specializations and through multiple arms of a diamond. The semantic key retains
-that transport path. Chapter 4 is the schema authority for `RefinementStepKey` and
+that transport path. Chapter 5 is the schema authority for `RefinementStepKey` and
 `RequirementKey<K>`; this chapter defines the slot that consumes them:
 
 ```text
@@ -1087,7 +1087,7 @@ selects one or diagnoses ambiguity.
 `IFC-CON-001`: Publishing a `WitnessTableIdentity` publishes no positive proof that the target
 conforms. A table-backed witness can discharge a constraint, pack an existential, or dispatch only
 after its required definition is validated. Bound parameters, specializations, keyed lookups, and
-existential extractions are positive witness values under their own chapter 14 constructors; they
+existential extractions are positive witness values under their own chapter 15 constructors; they
 do not require manufacturing a new `WitnessTableDefinition`.
 
 `IFC-CON-002`: The identity/definition records form an immutable graph. Serialization permits
@@ -1366,7 +1366,7 @@ validates `ConcreteAvailabilityCompatibilityProof` from the optional pre-inferen
 active requirement-match region; concrete availability is not body-inferred, does not become
 pending, and is not substituted for the ordinary compatibility obligation.
 
-`IFC-MAT-007`: Effect checking uses the parallel chapter 4 split. Local matching compares only
+`IFC-MAT-007`: Effect checking uses the parallel chapter 5 split. Local matching compares only
 `selectionEffects` with the requirement's `EffectAllowance` and stores a
 `PendingLocal(RequirementEffectCompatibilityObligation)` in the contract proof. After
 `InferEffects` stabilizes, conformance validation produces `ValidatedLocal`; imported candidates
@@ -1475,7 +1475,7 @@ in `RequirementWitness<K>`.
 
 ## Associated type projections
 
-Chapter 4 is the sole authority for `Type::AssociatedTypeProjection`. Its `witness` field is the
+Chapter 5 is the sole authority for `Type::AssociatedTypeProjection`. Its `witness` field is the
 stable operational proof term used to reach the requirement. The containing `CanonicalTypeRecord`
 carries the exact frozen definition resolutions needed by that term in its dependency sidecar.
 Two environments may select different bound, specialized, lookup, or table witness terms for the
@@ -1586,7 +1586,7 @@ identical evidence on their overlap and must cover the conformance's availabilit
 `LookupSubtypeWitness` for that key. Diamond base paths therefore remain distinguishable even when
 their nested witness graphs share storage.
 
-`WIT-ALG-005`: `ConditionalRequirementWitness` is a canonical partition over chapter 9's full
+`WIT-ALG-005`: `ConditionalRequirementWitness` is a canonical partition over chapter 10's full
 `BooleanCapabilityPredicate` domain, not the positive requirement-formula domain. Normalization may
 therefore split overlaps using complement, merges adjacent/equivalent evidence regions, removes
 unsatisfiable regions, and sorts by canonical predicate then evidence identity. A consumer supplies
@@ -1915,7 +1915,7 @@ preallocated identity is not productive.
 `IFC-CYCLE-003`: Default and generated method bodies may recursively call through a witness whose
 resolution contains a scoped `OperationalWitnessTableRef` after the identity is allocated; such
 body-call edges are operational and do not enter the proof SCC. Their capability/effect inference
-follows chapter 10's fixpoint policy over construction-stage witness-use edges.
+follows chapter 11's fixpoint policy over construction-stage witness-use edges.
 
 `IFC-CYCLE-004`: Per-root budgets limit semantic term growth as well as SCC iteration. A chain such
 as successively generated `I<F<T>>`, `I<F<F<T>>>`, ... receives one deterministic resource-cycle

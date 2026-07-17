@@ -14,7 +14,7 @@ P; Σ; Γ; Δ; C; κ ⊢ s ⇝ s' ! ε ⇒ F ▷ D
 `expected` is `NoExpectation` or an `ExpectedType` with a coercion site and origin. `ε` is an effect
 set. `c` is the expression's `Classifier`; `e' : τ @ q` is the value-only shorthand for
 `e' :: ValueClassifier(τ, q)`. `F` is a flow summary. Capabilities directly used by a node are
-recorded alongside its typed result and later accumulated by chapter 9.
+recorded alongside its typed result and later accumulated by chapter 10.
 
 ```text
 ExpectedType = {
@@ -160,13 +160,21 @@ distinct from strings even if their decoded payload is one scalar.
 
 ## Names and declaration references
 
-Binding has already produced a `BoundName`:
+Name lookup is part of the expression-checking query. It is not a preceding whole-tree pass:
 
 ```text
-BoundName = Resolved(use)    typeOf(use.target) = (τ,q)
------------------------------------------------------- EXP-NAME-001
-Γ ⊢ BoundName ⇝ DeclRefExpr(use) : τ @ q
+scopeAt(syntax, ScopeWiring) = position
+LookupName(position, syntax.name, mask, environment) = candidates
+SelectNameUse(candidates, expectedContext) = use
+typeOf(use.target) = (τ, q)
+---------------------------------------------------------------- EXP-NAME-001
+Γ ⊢ CheckNameExpr(syntax) ⇝ DeclRefExpr(use) : τ @ q
 ```
+
+`LookupName` may request logical declaration identity or checked header facts from the scheduler.
+Member-expression checking first checks its base and then invokes `LookupMember` with that checked
+type. Blocking either dependency blocks the expression query; no deferred-member placeholder is
+published as a successfully checked tree.
 
 An overload set checks to `OverloadClassifier` only in a context that will resolve it, such as a call,
 explicit function-value conversion, or generic application. Using it as an ordinary value produces
@@ -221,14 +229,14 @@ type checker does not walk declaration parents to calculate it ad hoc.
 ## Type expressions
 
 ```text
-Γ; Δ ⊢ te ⇝ (expr: NodeRef<Typed, Expr>, semanticType: τ: TypeId)
+Γ; Δ ⊢ te ⇝ (expr: ASTNodeId<Typed, Expr>, semanticType: τ: TypeId)
               :: KindClassifier(TypeKind)
 ```
 
 Identifier/member/generic applications at type level use the same bound declaration identities and
 substitution algebra as value expressions, but their classifier is a kind. Array counts and generic
 value arguments invoke constant evaluation. Intersection types use the canonical set rules in
-chapter 4.
+chapter 5.
 
 `TYP-EXPR-001`: A value-classified term in required type position produces `expected-type`; a
 type-classified term in ordinary value position produces `expected-value`. No `TypeType` coercion
@@ -273,7 +281,7 @@ temporary but cannot clone a side-effecting base/index expression.
 
 `EXP-STO-007`: `isPhysicalStorage` is derived from the `StorageRef` alternative. Assignment and
 write-back may target an `AbstractStorage` through a setter plan, but physical-operand argument passing and fresh
-initialization storage require `PhysicalStorage` and the proof defined in chapter 4. A setter does not
+initialization storage require `PhysicalStorage` and the proof defined in chapter 5. A setter does not
 manufacture that proof. A mode-specific reference accessor may instead be invoked and explicitly
 dereferenced to construct a distinct physical endpoint under `EXP-REF-004`.
 
@@ -307,7 +315,7 @@ second time.
 uses a getter when present and may use a ref-accessor call plus explicit internal dereference only
 under the named language fallback. `WriteValueAccess` carries the already checked source,
 conversion, and completion condition and analogously uses a setter before its named ref-accessor
-fallback. Parameter-mode planning is not a storage-access intent; chapter 7's `PlanArgumentAccess`
+fallback. Parameter-mode planning is not a storage-access intent; chapter 8's `PlanArgumentAccess`
 owns the parameter type, structural domain/access mode, adaptation, invocation environment,
 abstract-mode materialization/write-back, or `PhysicalParameterBindingProofAt<S>`. Explicit reference
 formation is likewise not a storage-access intent: it uses `CheckReferenceFormationAt<S>` and a
@@ -346,7 +354,7 @@ physical result, no successor, and nonthrowing; a throwing registered surface is
 `EXP-MEM-006`: An expected physical mode does not change intrinsic member/subscript checking. A
 stored field, registered physical projection, builtin physical subscript, or explicit dereference
 may remain `PhysicalStorage` and qualify directly. A property or declared subscript remains
-`AbstractStorage`; chapter 7 may select only its exact `referenceAccessors[mode.access]` entry and the
+`AbstractStorage`; chapter 8 may select only its exact `referenceAccessors[mode.access]` entry and the
 dedicated invocation/dereference plan. Getter/setter availability, ordinary read fallback, value
 conversion, and temporary materialization are irrelevant to this selection. The original property
 remains abstract in the selected typed call.
@@ -465,7 +473,7 @@ BuiltinPhysicalProjectionApplication =
     BuiltinPhysicalProjectionApplicationAt<Published>
 
 BuiltinPhysicalProjectionRequest = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     site: PhysicalProjectionSiteAssignment,
     operation: BuiltinPhysicalProjectionOperation,
     base: TypedExpr,
@@ -607,7 +615,7 @@ RegisteredPhysicalProjectionApplication =
     RegisteredPhysicalProjectionApplicationAt<Published>
 
 RegisteredPhysicalProjectionRequest = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     site: PhysicalProjectionSiteAssignment,
     registration: RegisteredDataOperationRegistration,
     base: Option<TypedExpr>,
@@ -648,7 +656,7 @@ RegisteredPhysicalProjectionValidationResultAt<S: WitnessTableState> =
         failure: RegisteredPhysicalProjectionValidationFailure)
 
 ReferenceFormationRequest = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     syntax: ExplicitReferenceSyntax,
     operand: TypedExpr,
     context: ExpressionCheckContextId
@@ -721,7 +729,7 @@ AccessorReferenceResultInstantiationProof = {
 AccessorReferenceResultCertificate = {
     contract: AccessorReferenceResultContractId,
     invocationIdentity: AccessorInvocationIdentity,
-    call: NodeId<Typed>,
+    call: AnyASTNodeId<Typed>,
     subject: CallableContractSubject,
     signature: CallableSignatureId,
     expectedReferent: TypeId,
@@ -757,14 +765,14 @@ ReferenceDataOperationControlProof = {
 }
 
 PhysicalReferenceInput = {
-    operand: NodeId<Typed>,
+    operand: AnyASTNodeId<Typed>,
     operandType: TypeId,
     storage: PhysicalStorageRef,
     proof: PhysicalStorageProof
 }
 
 HandleReferenceInput = {
-    operand: NodeId<Typed>,
+    operand: AnyASTNodeId<Typed>,
     handle: PointerLikeProof
 }
 
@@ -863,7 +871,7 @@ ReferenceSourceSlotBinding = {
 }
 
 ReferenceAccessorInvocationRequest = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     site: SemanticOperationSiteAssignment,
     storage: AbstractStorageRef,
     accessor: AbstractStorageRefAccessor,
@@ -892,7 +900,7 @@ ReferenceAccessorPlanAt<S: WitnessTableState> = {
 }
 
 ParameterReferenceAccessorRequest = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     site: SemanticOperationSiteAssignment,
     storage: AbstractStorageRef,
     mode: ParamPassingMode,
@@ -957,7 +965,7 @@ InternalRefStoragePlanAt<S: WitnessTableState> = {
 }
 
 StorageAccessRequestAt<S: WitnessTableState> = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     operationSite: PhysicalProjectionSiteAssignment,
     input: TypedExpr,
     intent: StorageAccessIntentAt<S>,
@@ -997,13 +1005,13 @@ StorageAccessResult = StorageAccessResultAt<Published>
 InternalRefStoragePlan = InternalRefStoragePlanAt<Published>
 
 CheckedReferenceFormationAt<S: WitnessTableState> =
-    DirectPhysicalReference(operand: NodeId<Typed>,
+    DirectPhysicalReference(operand: AnyASTNodeId<Typed>,
                             policy: ReferenceSyntaxPolicyAt<S>,
                             storage: PhysicalStorageRef,
                             proof: PhysicalStorageProof,
                             context: ExpressionCheckContextId,
                             operation: DirectReferenceOperationAt<S>)
-  | ExplicitAccessorReference(operand: NodeId<Typed>,
+  | ExplicitAccessorReference(operand: AnyASTNodeId<Typed>,
                               policy: ReferenceSyntaxPolicyAt<S>,
                               storage: AbstractStorageRef,
                               accessor: ReferenceAccessorPlanAt<S>)
@@ -1272,7 +1280,7 @@ SelectedDereferenceSyntax =
                                staticInputs: CanonicalArguments)
 
 DereferenceRequest = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     site: PhysicalProjectionSiteAssignment,
     syntax: SelectedDereferenceSyntax,
     operand: TypedExpr,
@@ -1282,7 +1290,7 @@ DereferenceRequest = {
 CheckedDereferenceAt<S: WitnessTableState> = {
     identity: DereferenceApplicationIdentity,
     site: PhysicalProjectionSiteAssignment,
-    operand: NodeId<Typed>,
+    operand: AnyASTNodeId<Typed>,
     syntax: SelectedDereferenceSyntax,
     context: ExpressionCheckContextId,
     operation: DereferenceOperationAt<S>
@@ -1475,7 +1483,7 @@ Its
 constructs the call through `BuildSelectedSurfaceTypedCallAt<S>` after the target proof; it does not
 fabricate an overload result or require an effective callable contract. `Selection` is the intended
 pre-fixpoint state for
-recursive local accessors. Chapter 11 completes the call after effect/capability fixpoints and before
+recursive local accessors. Chapter 12 completes the call after effect/capability fixpoints and before
 published elaboration. No lookup, overload resolution, contract completion, argument mapping,
 conversion search, or access planning is repeated. `ValidateRefAccessorAt<S>` is the explicit-only
 wrapper: it consumes a successful invocation and calls
@@ -1548,7 +1556,7 @@ builtin data dereference and is the registered application's stored uses otherwi
 selections only under `CAP-SEL-004`. The result therefore represents one execution of the accessor call
 followed by one dereference. The intermediate handle is plan-internal; the original property stays
 `AbstractStorage`, while `plan.endpoint.output.storage` is the new physical endpoint passed to the
-callee. A direct `PhysicalStorage` bypasses this query and uses the same chapter 7
+callee. A direct `PhysicalStorage` bypasses this query and uses the same chapter 8
 `PhysicalParameterBindingProofAt<S>` over its original endpoint. Neither route may use a getter,
 setter, sibling reference-accessor key, value conversion, synthesized address syntax, temporary, or
 write-back. Every failure is retained as the corresponding closed
@@ -1562,7 +1570,7 @@ a getter temporary, setter write-back, guessed backing field, same-named member 
 lookup, or lowering-time reconstruction.
 
 `EXP-STO-001`: `PlanStorageAccessAt<S>` is the sole consumer of `StorageAccessIntentAt<S>`. A
-successful result contains the complete chapter 11 `StorageAccessPlan<S>`; a failure selects one closed
+successful result contains the complete chapter 12 `StorageAccessPlan<S>`; a failure selects one closed
 `StorageAccessFailureAt<S>` alternative. The query plans only an ordinary value read or a fully
 specified ordinary value write. Parameter passing and explicit reference formation are not intents,
 and every success first requires
@@ -1609,7 +1617,7 @@ argument. Getter/setter access, internal ref-accessor-plus-dereference access, a
 first-class reference formation are therefore three disjoint executable plans.
 
 `EXP-STO-004`: `StorageAccessIntentAt<S>` deliberately has no parameter-mode alternative. Only
-chapter 7's `PlanArgumentAdaptationAt<S>`/`PlanArgumentAccessAt<S>` pair may construct an abstract
+chapter 8's `PlanArgumentAdaptationAt<S>`/`PlanArgumentAccessAt<S>` pair may construct an abstract
 `InMode`, `OutMode`, or `InOutMode` plan or a physical `ConstRefMode`/`RefMode` plan. The abstract
 modes may retain their own named read, materialization, setter, and write-back operations. A physical
 mode instead stores a complete `PhysicalParameterBindingProofAt<S>` and may call only the dedicated
@@ -1926,7 +1934,7 @@ ranking hint or replaced by an equivalent target opcode during validation or low
 
 ## Calls and operators
 
-Call-like forms delegate to chapter 7:
+Call-like forms delegate to chapter 8:
 
 ```text
 ResolveCall(calleeCandidates, receiver, arguments, expectedResult, context)
@@ -1938,7 +1946,7 @@ lookup, and any named primitive registry. The typed result stores the selected c
 generic solution, argument map, access/conversion plans, witness values, and result type.
 
 Type application, C-style explicit casts, braces, declaration initialization, and `new` delegate to
-chapter 15. Initialization may reuse callable candidate machinery after its target model admits an
+chapter 16. Initialization may reuse callable candidate machinery after its target model admits an
 initializer strategy, but it is not an ordinary call kind.
 
 `EXP-CALL-001`: Trial applicability never mutates argument nodes. The committed typed call is built
@@ -1946,7 +1954,7 @@ from the winning immutable candidate result; checking is not rerun “for real.�
 
 ## Differentiation expressions
 
-`fwd_diff`, `bwd_diff`, and `no_diff` use chapter 16's closed judgments:
+`fwd_diff`, `bwd_diff`, and `no_diff` use chapter 17's closed judgments:
 
 ```text
 CheckDifferentiate(mode, callable, order, environment)
@@ -1968,7 +1976,7 @@ derivative-detachment boundary; it is not an implicit conversion or a modifier h
 
 `&&` and `||` either select declared overloads or use the core short-circuit rule. The core rule
 coerces its operands to the standard environment's condition type and preserves conditional
-evaluation in the typed and IR-ready ASTs.
+evaluation in the typed and IR-ready node forms.
 
 For `c ? a : b`, checking obtains candidate branch types under any expected type, computes a
 principal common type through `JoinExpressionTypes`, and records conversions for both branches.
@@ -1990,7 +1998,7 @@ Tuple expressions have one typed child per element and an ordinary `TupleType`. 
 in Slang 2026 yields `void`; legacy comma-expression behavior is selected by language version before
 typing.
 
-A braced initializer is expectation-directed syntax and is checked only by chapter 15's published
+A braced initializer is expectation-directed syntax and is checked only by chapter 16's published
 `ResolveInitialization(request)` query. It retains nested brace/designator/source order but has no
 independent classifier. `T(e)` and `(T)e` are the same `ExplicitSingle` request after binding, while
 `T()` and omitted initialization remain distinct forms.
@@ -2009,14 +2017,14 @@ executable plan. Elaboration consumes the winner and does not rerun the choice o
 from its strategy.
 
 `EXP-INIT-003`: `RecoveredInitialization` produces an error-carrying typed node only for continued
-diagnostics and tooling. Its recovery plan may elaborate to chapter 15's recovery IR-ready node, but it
+diagnostics and tooling. Its recovery plan may elaborate to chapter 16's recovery IR-ready node, but it
 cannot be installed as a selected successful plan or contribute a publishable frontend-IR
 initialization dependency.
 
 ## Lambdas
 
 Checking preserves the existing `LambdaExpr` node family. A `LambdaExpr<Typed>` carries a
-`TypedLambdaInfo`; it does not synthesize the codebase's `LambdaDecl` environment until chapter 11:
+`TypedLambdaInfo`; it does not synthesize the codebase's `LambdaDecl` environment until chapter 12:
 
 ```text
 FreeVariableKey =
@@ -2056,7 +2064,7 @@ TypedCaptureUse = {
 
 TypedLambdaInfo = {
     parameters: NodeList<TypedParam>,
-    body: NodeRef<Typed, Stmt> | TypedExpr,
+    body: ASTNodeId<Typed, Stmt> | TypedExpr,
     signature: CallableSignature,
     freeVariables: FreeVariableSet,
     captureUseFacts: NodeList<TypedCaptureUse>,
@@ -2073,9 +2081,9 @@ LambdaResultSolution = {
 }
 
 LambdaResultContributorKey =
-    ExpressionBodyContributor(expr: NodeId<Typed>)
-  | ReturnContributor(statement: NodeId<Typed>)
-  | FallthroughContributor(body: NodeId<Typed>)
+    ExpressionBodyContributor(expr: AnyASTNodeId<Typed>)
+  | ReturnContributor(statement: AnyASTNodeId<Typed>)
+  | FallthroughContributor(body: AnyASTNodeId<Typed>)
 
 LambdaResultContributor = {
     key: LambdaResultContributorKey,
@@ -2107,13 +2115,13 @@ contributor's `type` to `result`. Consequently a return, expression body, or fal
 cannot be detached from or reordered relative to the fact that required it.
 
 `EXP-LAM-002`: Conversion to a raw function signature is applicable only when `freeVariables` is
-empty and produces the static-thunk plan in chapter 7. Otherwise the lambda has a synthesized
+empty and produces the static-thunk plan in chapter 8. Otherwise the lambda has a synthesized
 environment identity; callable-interface conversion uses an explicit conformance for that
 environment type.
 
 Binding records the lexically free declarations and receiver uses. Typing adds value category,
 mutation, ownership, and lifetime facts for each use. Capture fields and modes are then produced by
-the independent typed-capture analysis in chapter 11; a bound body alone is insufficient to choose
+the independent typed-capture analysis in chapter 12; a bound body alone is insufficient to choose
 those modes.
 
 ## Existentials and type tests
@@ -2285,8 +2293,9 @@ result is diagnosed. Returning across a `defer` body is rejected by the explicit
 
 ### Defer and exceptional control
 
-`defer s` checks `s` under a context that forbids control transfers escaping the defer. Typed AST
-retains the structured defer; elaboration into the IR-ready AST creates cleanup regions on every exiting edge.
+`defer s` checks `s` under a context that forbids control transfers escaping the defer. The typed
+node retains the structured defer; elaboration to the IR-ready node form creates cleanup regions on
+every exiting edge.
 
 `throw` checks against the function's declared error/effect type. `do ... catch` establishes a catch
 context and typed error binding. The precise `try` expression propagation rule is an effect rule in
@@ -2296,14 +2305,14 @@ the standard environment and must preserve its error conversion plan.
 
 Each case checks under `worldAssumption ∧ casePredicate`. Duplicate/default/exhaustiveness rules
 operate on capability formulas rather than string tokens. Branch results contribute conditional
-capability requirements as defined in chapter 9.
+capability requirements as defined in chapter 10.
 
 ### Shader-specific statements
 
 `discard`, intrinsic assembly, GPU foreach, and capability-require statements are explicit typed
 forms. Their availability, operand rules, and direct capability requirements come from versioned
 standard-environment rule descriptors with stable rule IDs. They are not generic unchecked token
-islands after `TypedAST`.
+islands after ordinary expression checking.
 
 ## Flow-sensitive validation
 
@@ -2312,13 +2321,13 @@ The frontend distinguishes typing from control/dataflow validation:
 ```text
 FlowConditionId = ContentId<{
     function: DeclRef,
-    producer: NodeId<IRReady>,
+    producer: AnyASTNodeId<IRReady>,
     role: QualifiedName
 }>
 
 FlowOperationId = ContentId<{
     function: DeclRef,
-    producer: NodeId<IRReady>,
+    producer: AnyASTNodeId<IRReady>,
     ordinal: UInt32
 }>
 
@@ -2336,12 +2345,12 @@ FlowOperation =
                        destination: PhysicalStorageRef, origin: Origin)
   | EndFlowWriteback(begin: FlowOperationId, completion: FlowCompletion,
                      origin: Origin)
-  | EvaluateForEffect(id: FlowOperationId, producer: NodeId<IRReady>, origin: Origin)
+  | EvaluateForEffect(id: FlowOperationId, producer: AnyASTNodeId<IRReady>, origin: Origin)
 
 FlowTransfer =
     FallThrough(origin: Origin)
-  | ReturnTransfer(value: Option<NodeId<IRReady>>, origin: Origin)
-  | ThrowTransfer(value: NodeId<IRReady>, origin: Origin)
+  | ReturnTransfer(value: Option<AnyASTNodeId<IRReady>>, origin: Origin)
+  | ThrowTransfer(value: AnyASTNodeId<IRReady>, origin: Origin)
   | BreakTransfer(target: TargetId, origin: Origin)
   | ContinueTransfer(target: TargetId, origin: Origin)
   | UnreachableTransfer(origin: Origin)
@@ -2395,8 +2404,8 @@ FlowTerminator =
     Goto(successor: FlowSuccessor)
   | Branch(condition: FlowConditionId, whenTrue: FlowSuccessor, whenFalse: FlowSuccessor)
   | Switch(condition: FlowConditionId, successors: NonEmpty<FlowSuccessor>)
-  | ReturnExit(value: Option<NodeId<IRReady>>, origin: Origin)
-  | ThrowExit(value: NodeId<IRReady>, origin: Origin)
+  | ReturnExit(value: Option<AnyASTNodeId<IRReady>>, origin: Origin)
+  | ThrowExit(value: AnyASTNodeId<IRReady>, origin: Origin)
   | UnreachableExit(origin: Origin)
 
 FlowBlock = {
@@ -2447,14 +2456,10 @@ PpBinaryOperator =
     PpLess | PpLessEqual | PpGreater | PpGreaterEqual | PpEqual | PpNotEqual |
     PpBitwiseAnd | PpBitwiseXor | PpBitwiseOr | PpLogicalAnd | PpLogicalOr
 
-PpName = {
-    normalizedText: Utf8String
-}
-
 PpExpr =
     PpIntegerLiteral(spelling: Utf8String, origin: SourceRangeSet)
-  | PpIdentifier(name: PpName, origin: SourceRangeSet)
-  | PpDefined(name: PpName, origin: SourceRangeSet)
+  | PpIdentifier(name: PreprocessorName, origin: SourceRangeSet)
+  | PpDefined(name: PreprocessorName, origin: SourceRangeSet)
   | PpUnary(operator: PpUnaryOperator, operand: PpExpr, origin: SourceRangeSet)
   | PpBinary(operator: PpBinaryOperator, left: PpExpr, right: PpExpr,
              origin: SourceRangeSet)
@@ -2473,7 +2478,7 @@ PpIntegerModel = {
 PpIdentifierRule = UndefinedIdentifierIsZero | DiagnoseUndefinedIdentifierAndUseZero
 
 PpConstEnvironment = {
-    definedNames: CanonicallyOrderedSet<PpName>,
+    definedNames: CanonicallyOrderedSet<PreprocessorName>,
     integerModel: PpIntegerModel,
     identifierRule: PpIdentifierRule,
     languageRules: LanguageRuleSetId
@@ -2494,7 +2499,7 @@ PpConstFailure =
                          origin: SourceRangeSet)
   | PpDivisionByZero(origin: SourceRangeSet)
   | PpInvalidShiftAmount(amount: BigInt, width: UInt16, origin: SourceRangeSet)
-  | UndefinedPpIdentifier(name: PpName, origin: SourceRangeSet)
+  | UndefinedPpIdentifier(name: PreprocessorName, origin: SourceRangeSet)
   | PriorPpError(error: ErrorId, origin: SourceRangeSet)
 
 PpConstResult =
@@ -2529,10 +2534,11 @@ to choose a conditional region, normally zero/false, together with every root fa
 source order. The environment and result are immutable values suitable for isolated tests; neither
 contains a macro table pointer, target singleton, diagnostic sink, or semantic declaration.
 
-`PpName.normalizedText` is produced by the language rule set's preprocessor-identifier
-normalization, which is distinct from chapter 1's registry-only `Utf8Identifier` grammar. Original
-spelling remains available through the expression's token origins. The environment contains only
-the resulting comparison keys, so macro-definition lookup is deterministic and mockable.
+`PreprocessorName.text` is the same preprocessing key defined in chapter 4 and is produced by the
+language rule set's preprocessor-identifier decoding, which is distinct from chapter 1's registry-
+only `Utf8Identifier` grammar. Original spelling remains available through the expression's token
+origins. The environment contains only the resulting comparison keys, so macro-definition lookup
+is deterministic and mockable; no separate `PpName` equality can drift from macro lookup.
 
 Both widths in `PpIntegerModel` are positive. Comparisons, `defined`, and logical operators produce
 `PpBooleanValue`; integer truth is `bits != 0`, and using a boolean in an integer operation converts
@@ -2555,7 +2561,7 @@ EvalConstDecl(DeclRef(d), phase, environment) = v
 `EvalConstDecl` and `EvalConst` are query kinds with the scheduler's `Reject` cycle policy. Query
 code carries no private `evaluating` stack; a recursive request records a dependency edge and the
 scheduler emits the complete deterministic cycle. A semantic-term growth detector and resource
-ceiling may protect non-repeating expansion as chapter 10 specifies, but neither replaces the cycle
+ceiling may protect non-repeating expansion as chapter 11 specifies, but neither replaces the cycle
 rule.
 
 `CON-EVAL-001`: Constant operations are deterministic over specified integer widths and floating

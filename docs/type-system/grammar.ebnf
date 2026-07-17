@@ -7,7 +7,7 @@
     cst-production-profile.json assigns every symbol occurrence a stable terminal/non-terminal
     field role. generate-cst-production-schema.py checks the pairing and emits NodeSchemaRegistry
     production descriptors; EBNF ordering alone is not a CST.
-    Recovery/version/dialect annotations are a blocking grammar-freeze follow-up in chapter 12.
+    Recovery/version/dialect annotations are a blocking grammar-freeze follow-up in chapter 13.
 *)
 
 source-file = { top-level-declaration }, END_OF_FILE ;

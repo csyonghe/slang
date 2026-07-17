@@ -2,60 +2,34 @@
 
 This chapter defines declaration identity, scope construction, lookup, redeclaration, imports, and
 extension/base member discovery. Visibility classification and access permission are defined in
-chapter 9; lookup retains inaccessible candidates so diagnostics can distinguish “not found” from
+chapter 10; lookup retains inaccessible candidates so diagnostics can distinguish “not found” from
 “found but inaccessible.”
 
-## Declaration stubs and headers
+## Declaration outlines, scope wiring, and checked headers
 
-Scope construction first publishes one stub per written declaration fragment, then freezes logical
-declaration identities after redeclaration grouping:
+Declaration parsing first publishes the hierarchy and syntax-only identity facts needed by later
+parsing. Expression, statement, initializer, and body regions that the declaration grammar does not
+interpret remain `UnparsedContent`. Scope wiring is a separate immutable product over those
+outlines; it is not a rewritten AST whose nodes have all advanced to a common checking state:
 
 ```text
-IndexDeclFragment(surfaceDecl, parentScope)
-    -> (DeclFragmentId, ScopedDeclStub, ScopeGraphFragment)
+ParseDecls(CSTSnapshot<MacroExpanded>, DeclGrammar,
+           GrammarVocabulary, DeclParserOptions)
+    -> CheckResult<DeclParseResult>
 
-AssembleFragmentScopes(NodeList<ScopeGraphFragment>) -> FragmentScopeGraph
+ResolveImportOutlines(DeclParseResult, ModuleId,
+                      ModuleResolutionProvider, ModuleResolutionRevision,
+                      LanguageRuleSetId)
+    -> QueryStep<ImportResolutionIndex>
 
-GroupLogicalDecls(FragmentScopeGraph, DeclFreezeEnvironment)
-    -> FrozenDeclIndex
+WireLookupScopes(DeclParseResult, ImportResolutionIndex,
+                 ScopeWiringEnvironment)
+    -> QueryStep<ScopeWiring>
 
-DeclFreezeEnvironment = {
+ScopeWiringEnvironment = {
     module: ModuleId,
-    importedInterfaces:
-        CanonicallyOrderedMap<ModuleId, ContentId<SchemaValue>>,
     implementingDocuments: CanonicallyOrderedSet<SourceFileId>,
     languageRules: LanguageRuleSetId
-}
-
-SurfaceGenericParameterClass = TypeParameterClass | ValueParameterClass |
-                               TypePackParameterClass | ValuePackParameterClass
-
-GenericArityShape = {
-    parameters: NodeList<SurfaceGenericParameterClass>,
-    hasParentBinder: Bool
-}
-
-ScopedDeclStub = {
-    fragment: DeclFragmentId,
-    kind: DeclKind,
-    name: Option<Name>,
-    parentScope: ScopeId,
-    genericArity: GenericArityShape,
-    origin: Origin
-}
-
-ScopeGraphFragment = {
-    root: ScopeId,
-    scopes: NodeMap<ScopeId, FragmentScope>,
-    declarations: NodeMap<DeclFragmentId, ScopedDeclStub>,
-    declarationOrder: NodeList<DeclFragmentId>
-}
-
-FragmentScopeGraph = {
-    roots: NodeList<ScopeId>,
-    scopes: NodeMap<ScopeId, FragmentScope>,
-    declarations: NodeMap<DeclFragmentId, ScopedDeclStub>,
-    declarationOrder: NodeList<DeclFragmentId>
 }
 
 RedeclarationGroup = {
@@ -65,55 +39,73 @@ RedeclarationGroup = {
     presentationOrder: NodeList<DeclFragmentId>
 }
 
-FrozenScopeGraph = {
-    roots: NodeList<ScopeId>,
-    scopes: NodeMap<ScopeId, FrozenScope>
+RedeclarationSeed = {
+    scope: ScopeId,
+    name: NameKey,
+    kind: DeclKind
 }
 
-FrozenDeclIndex = {
-    entities: NodeMap<DeclId, RedeclarationGroup>,
-    fragmentToEntity: NodeMap<DeclFragmentId, DeclId>,
-    scopes: FrozenScopeGraph
+RedeclarationPartition = {
+    seed: RedeclarationSeed,
+    groups: NodeMap<DeclId, RedeclarationGroup>,
+    fragmentToDecl: NodeMap<DeclFragmentId, DeclId>
 }
 
-BindDeclHeader(DeclId, NodeList<DeclFragmentId>)
-    -> CheckResult<DeclHeader>
+BuildRedeclarationKey(DeclFragmentId, ScopeWiringId, SemanticEnvironmentId)
+    -> QueryStep<RedeclarationKey>
+
+GroupRedeclarations(RedeclarationSeed, ScopeWiringId, SemanticEnvironmentId)
+    -> QueryStep<RedeclarationPartition>
+
+ResolveLogicalDecl(DeclFragmentId, ScopeWiringId, SemanticEnvironmentId)
+    -> QueryStep<DeclId>
+
+BindDeclHeader(DeclId, ParsedContent<DeclCSTCategory>,
+               ScopeWiringId, SemanticEnvironmentId)
+    -> QueryStep<DeclHeader>
 ```
 
-`DEC-ID-001`: Chapter 4's `DeclFragmentId` is the collision-safe content ID of
-`DeclFragmentKey(surfaceDecl.id, kind)` and identifies exactly one source occurrence. A
+`DEC-ID-001`: Chapter 5's `DeclFragmentId` is the collision-safe content identity anchored by a
+`ParserDeclStub.outline`, its `binding` ordinal, and its declared kind; it identifies exactly one
+source occurrence, including one declarator within a `DeclGroup`. A
 `DeclId` identifies the logical entity formed from one or more compatible fragments. The two IDs
-are never interchangeable, and a fragment map key must equal its stub's `fragment` field.
+are never interchangeable, and a declaration map key must equal its stub's `fragment` field.
 
-`DEC-ID-002`: Grouping may use private provisional entity handles while recursively binding header
-summaries. Freezing canonicalizes redeclaration keys, assigns stable `DeclId` values, and rewrites all
-handles before publication as specified in chapter 3. Neither ID depends on task execution order,
-and no consumer observes a fragment-local ID as nominal semantic identity.
+`DEC-ID-002`: `WireLookupScopes` uses only declaration-outline facts. In particular it does not
+check a parameter type, build a `GenericBinder`, compare overload signatures, or assign a logical `DeclId`.
+`BuildRedeclarationKey`, `GroupRedeclarations`, and `ResolveLogicalDecl` are ordinary scheduler
+queries. They may use private provisional entity handles while solving an identity/definition
+component, but publish only stable `DeclId` values and complete immutable partitions. Neither ID
+depends on task execution order, and no consumer observes a fragment-local ID as nominal semantic
+identity.
 
-`DEC-ID-003`: `AssembleFragmentScopes` is the `ScopedAST` output. `GroupLogicalDecls` is the
-single `FreezeDeclIndex` boundary into `BoundAST`; it rewrites every member list from
-`DeclFragmentId` to logical `DeclId` and preserves the contributing fragment list as
-provenance. It copies each scope's `kind`, `policy`, `parent`, `parentEntry`, `nodePositions`, and
-`endPosition` unchanged. Within each scope it rewrites every fragment binding-point key to its
-`DeclId`; if several fragments in that scope group into the same entity, the frozen point is their
-earliest position. The same logical entity may still contribute to several reopened physical
-scopes, each with its own local position. Lookup never mixes fragment and frozen scope graphs.
+`DEC-ID-003`: `Scope.lexicalMembers` and `Scope.bindingPoints` in a `ScopeWiring` remain keyed by
+`DeclFragmentId`. There is no bulk operation that rewrites every scope to logical declaration IDs.
+Lookup collects eligible outline fragments, requests `ResolveLogicalDecl` for the candidates it
+actually needs, and deduplicates equal logical declarations only after those results are available.
+The resulting `BoundDeclUse` retains the selected fragment origin and lookup path. If several
+fragments in one scope resolve to the same entity, its effective binding point for that lookup is
+their earliest eligible point; reopened physical scopes retain their own positions.
 
-`DEC-HDR-001`: Publishing a stub makes only its declared name, declaration kind, lexical owner,
-generic arity shape, and origin observable. A client needing its type, bases, constraints,
-visibility, or modifiers must request the fact's query.
+`DEC-ID-004`: `ScopeWiring.contentEntryPositions` has exactly one entry for each
+`UnparsedContent` region whose fine parser may perform lookup. The entry is the lexical
+`ScopePosition` at the start of that region. Fine parsing receives this position explicitly and may
+publish additional immutable local-scope wiring as it encounters source-ordered local declarations;
+it never mutates the outline wiring or consults an ambient parser scope.
 
-`SurfaceGenericParameterClass` is only a pre-header syntax classification used to reserve names and
-arity; it deliberately lacks kind/type payloads and is not a semantic parameter sort. Header
-binding replaces it with chapter 4's `GenericParameterSort`.
+`DEC-HDR-001`: Publishing a `ParserDeclStub` makes only its outline identity, declared name,
+declaration kind, declaring/member scopes, syntactic `DirectGenericMarker`, and origin observable.
+A client needing its parameter sorts, type, bases, constraints, visibility, or modifiers must
+request the corresponding fact query. Direct-generic presence is not a semantic parameter sort;
+header checking replaces the opaque clause with chapter 5's `GenericParameterSort` values.
 
-`DEC-HDR-002`: `BindDeclHeader` constructs at most one direct `GenericBinder` for the logical
-declaration, inserts it into chapter 4's authoritative `GenericBinderTable`, and stores only its
-`GenericBinderId` in `DeclHeader`. The table entry's `owner` equals the header declaration, and
-redeclaration compatibility uses the alpha-normalized `GenericBinderShape`, never an embedded
-binder copy or snapshot ID.
+`DEC-HDR-002`: `BindDeclHeader` requests chapter 5's `GetGenericBinder` query and stores only the
+resulting stable `GenericBinderId` in `DeclHeader`. The binder's `owner` equals the header
+declaration, and redeclaration compatibility uses the alpha-normalized `GenericBinderShape`, never
+an embedded binder copy, a snapshot-local table index, or declaration-outline arity as a semantic
+parameter sort.
 
-`DEC-HDR-003`: `BindDeclHeader` obtains `DeclHeader.concreteAvailability` only from chapter 9's
+`DEC-HDR-003`: `BindDeclHeader` obtains `DeclHeader.concreteAvailability` only from chapter 10's
 `ComputeConcreteAvailability(declaration, modifiers, environment)` product. A successful `Some`
 stores that product's exact `ConcreteAvailabilityId`; `None` remains semantically distinct from an
 explicit true availability. Header binding never copies `declaredCapabilities`, requests a body or
@@ -140,17 +132,17 @@ authority anchored to another declaration.
 This permits mutually recursive functions and nominal types without publishing partially filled
 mutable declarations or giving two compatible redeclarations different permanent identities.
 
-## Scope graph
+## Scope wiring and positions
 
-Scopes carry the explicit `ScopePolicy` and position schema defined in chapter 4. A
+Scopes in `ScopeWiring` carry the explicit `ScopePolicy` and position schema defined in chapter 5. A
 `ScopePosition(scope, ordinal)` is a boundary in the deterministic source-order traversal of that
-scope's scoped AST. Ordinal zero is scope entry; `endPosition` is one past every node position and
-is the entry boundary for a body nested immediately after a binder. Every `nodePositions` value and
-every direct member's binding point names the containing scope. Node ordinals are strictly less
-than `endPosition.ordinal`; binding points are at or before it. Positions are snapshot-local lookup
-inputs, not declaration identity. `nodePositions` contains exactly the scoped AST nodes whose
-innermost lexical scope is that scope, and `bindingPoints` contains exactly the distinct direct
-member identities occurring in `lexicalMembers`.
+scope's declaration outlines and already fine-parsed local syntax. Ordinal zero is scope entry;
+`endPosition` is one past every published position and is the entry boundary for a body nested
+immediately after a binder. Every direct member's binding point names the containing scope and is at
+or before `endPosition`. `ScopeWiring.contentEntryPositions` contains exactly the deferred regions
+visible to that wiring, and every value names its innermost lexical scope at the region's start.
+Positions are snapshot-local lookup inputs, not declaration identity. `bindingPoints` contains
+exactly the distinct direct fragment identities occurring in `lexicalMembers`.
 
 `parent` and `parentEntry` are both absent for a root and both present for a child;
 `parentEntry.scope = parent`. When lookup walks from a child to its parent, it replaces the child's
@@ -159,7 +151,7 @@ a nested block cannot see declarations written after it, while a function body e
 of its parameter binder sees every parameter.
 
 - module, file-aggregation, namespace, aggregate-type, and interface member scopes use
-  `UnorderedMembers`: all direct stubs are installed before headers are bound;
+  `UnorderedMembers`: all direct `ParserDeclStub` values are installed before headers are checked;
 - function and block scopes use `SourceOrderedMembers`: a local declaration is visible only after
   the point established by its declaration rule; and
 - generic parameter and parameter lists use `SequentialBinder`: a parameter may refer to earlier
@@ -172,25 +164,25 @@ selected by the declaration or binder rule; they do not infer visibility from ma
 ```text
 scopePolicy(S) = UnorderedMembers    declaredIn(d,S)
 ---------------------------------------------------- NAM-SCP-001
-d ∈ visibleLocalStubs(S, anyPosition)
+d ∈ visibleLocalFragments(S, anyPosition)
 
 scopePolicy(S) = SourceOrderedMembers    bindingPoint(S,d) ≤ usePosition
 --------------------------------------------------------------------- NAM-SCP-002
-d ∈ visibleLocalStubs(S, usePosition)
+d ∈ visibleLocalFragments(S, usePosition)
 
 scopePolicy(S) = SequentialBinder    bindingPoint(S,d) ≤ usePosition
 ------------------------------------------------------------------- NAM-SCP-003
-d ∈ visibleLocalStubs(S, usePosition)
+d ∈ visibleLocalFragments(S, usePosition)
 
 parent(C) = S    parentEntry(C) = p
 ------------------------------------ NAM-SCP-004
 positionInParent(C, anyPosition) = p
 ```
 
-`NAM-SCP-005`: Scope construction validates all position bounds, the exact node/member key coverage,
+`NAM-SCP-005`: Scope wiring validates all position bounds, the exact node/member key coverage,
 strict source-order traversal of node ordinals, the root/child `parentEntry` invariant, and the
-policy-specific binding-point rules above. Freezing preserves those facts under the per-scope
-fragment-to-entity rewrite; it cannot move a binding earlier to repair a lookup failure.
+policy-specific binding-point rules above. Resolving a fragment to a logical declaration cannot
+move its binding point earlier to repair a lookup failure.
 
 The exact binding point is declaration-specific: a variable is not visible in its own type or
 initializer unless a named recursion rule says otherwise; a function declaration in a local scope
@@ -209,7 +201,7 @@ cannot bypass the position relation.
 
 `NamespaceId = DeclId` for the logical namespace declaration. Reopened namespace declarations
 contribute member maps to that one logical `NamespaceId`. Each physical
-namespace body remains a distinct scoped AST node and provenance source.
+namespace body remains a distinct declaration-outline node and provenance source.
 
 ## Module graph
 
@@ -231,8 +223,10 @@ ImportEdge = {
 
 Every `roots`, `declarationOrder`, `fragments`, and `presentationOrder` list is duplicate-free.
 Each order list is a bijection onto the corresponding map/key set and is sorted by stable physical
-source order with semantic identity as the final tie-breaker. Assembly rejects disagreeing entries
-for the same scope, fragment, or declaration key; it never resolves them by task completion order.
+source order. `DeclFragmentId` is the final tie-breaker for outline/wiring order, while `DeclId` is
+the final tie-breaker only after a redeclaration partition exists. Wiring or grouping rejects
+disagreeing entries for the same scope, fragment, or declaration key; it never resolves them by
+task completion order.
 `RedeclarationGroup.fragments` is canonically ordered for identity, while `presentationOrder`
 retains source order for diagnostics.
 
@@ -242,7 +236,7 @@ retain separate syntax/source roots and explicit inclusion edges; any compatibil
 combine declarations are a module-assembly operation, not physical token concatenation.
 
 `implementing` associates a file with a named module augmentation. All files participating in the
-same module revision are known before its unordered top-level scope is frozen.
+same module revision are known before its unordered top-level `ScopeWiring` is published.
 
 `NAM-MOD-001`: Import reachability is graph reachability through the direct import followed by zero
 or more exported-import edges. Private source-file membership does not create cross-module access.
@@ -254,8 +248,9 @@ signature is diagnosed by the scheduler with module-edge roles.
 ## Unqualified lookup
 
 ```text
-LookupName(scope: ScopeId, position: ScopePosition, name, mask, environment)
-    -> LookupResult
+LookupName(wiring: ScopeWiringId, scope: ScopeId, position: ScopePosition,
+           name, mask, environment)
+    -> QueryStep<LookupResult>
 ```
 
 The input position must name `scope`. On each outward lexical step, lookup applies `NAM-SCP-004`
@@ -263,14 +258,16 @@ before consulting the parent scope's policy.
 
 For each scope from inner to outer:
 
-1. collect eligible direct members under the scope's ordering policy;
-2. collect eligible transparent-member contributions;
-3. apply the lookup mask and declaration-class filter;
-4. attach import/namespace paths and provisional access decisions;
-5. if the scope contains any non-overloadable eligible declaration, stop;
-6. if it contains only overloadable declarations, retain them and continue only as the language's
+1. collect eligible direct `DeclFragmentId` members under the scope's ordering policy;
+2. request `ResolveLogicalDecl` for precisely those fragments;
+3. deduplicate fragments that resolve to the same logical declaration at the same lookup role;
+4. collect eligible transparent-member contributions;
+5. apply the lookup mask and declaration-class filter;
+6. attach import/namespace paths and provisional access decisions;
+7. if the scope contains any non-overloadable eligible declaration, stop;
+8. if it contains only overloadable declarations, retain them and continue only as the language's
    overload-accumulation rule allows; and
-7. proceed to the lexical parent.
+9. proceed to the lexical parent.
 
 ```text
 local = candidates(S, p, n, mask)
@@ -289,7 +286,7 @@ Discovering the same declaration through semantically distinct base/witness path
 paths until the ambiguity/identity rule proves them equivalent.
 
 `NAM-LKP-003`: A completion query may request inaccessible or recovery candidates, but an ordinary
-binding query returns their `VisibilityDecision` and cannot silently treat them as accessible.
+lookup query returns their `VisibilityDecision` and cannot silently treat them as accessible.
 
 ## Qualified and member lookup
 
@@ -348,16 +345,16 @@ each witness to its stable `SubtypeWitnessId`. Thus two paths deduplicate only w
 perform the same semantic lookup/elaboration roles; provenance and definition revisions remain
 available in the retained `BoundDeclUseAt<S>.witnessResolutions` sidecar, while caller-owned
 extension ordinary uses remain in `extensionUses`; neither sidecar manufactures an overload. A
-`LookupPath` is never lowered as a proof in isolation: binding packages it with those sidecars,
-including the definitions required by its facet and existential edges.
+`LookupPath` is never lowered as a proof in isolation: committing the selected use packages it
+with those sidecars, including the definitions required by its facet and existential edges.
 
 `NAM-PTH-001`: A `LookupPath` is contiguous: lexical and import endpoints connect, facet and
 existential edges are applicable to the type produced by the preceding edge, and at most one
 `MemberBase` begins a value-member path. Path validation occurs before a candidate enters a
 `LookupResult`; elaboration consumes the stored edges without rediscovering them.
 
-`NAM-MEM-001`: Lookup does not synthesize `MemberExpr`, dereference, cast, or receiver nodes. Binding
-or elaboration interprets the selected path once a candidate is chosen.
+`NAM-MEM-001`: Lookup does not synthesize `MemberExpr`, dereference, cast, or receiver nodes. The
+fine-grained checking query or elaboration interprets the selected path once a candidate is chosen.
 
 `NAM-MEM-002`: Member lookup through a constrained type parameter carries the conformance or
 interface-refinement evidence that made the interface facet available. Nominal base lookup carries
@@ -367,15 +364,28 @@ parameter declaration by position.
 ## Contextual words and syntax ambiguities
 
 A word used as fixed grammar syntax is resolved by `GrammarVocabulary`, not ordinary semantic name
-lookup. A word in a named ambiguous CST is classified by:
+lookup. Fine parsing classifies a name at the exact scope position supplied by `ScopeWiring`:
 
 ```text
-ClassifySyntacticName(scope, position, name)
-    -> TypeName | ValueName | NamespaceName | SyntaxAlias | Unknown | Ambiguous
+ClassifySyntacticName(wiring: ScopeWiringId, scope, position, name)
+    -> QueryStep<TypeName | ValueName | NamespaceName | SyntaxAlias | Unknown | Ambiguous>
+
+ClassifyGenericApplicationHead(head, position, wiring, expressionContext)
+    -> QueryStep<GenericHeadClassification>
 ```
 
-This query reads only scoped declaration stubs and an explicit compatibility syntax environment. It
-does not type-check an expression or force a declaration definition.
+For an unqualified identifier these queries read `ParserDeclStub` records and an explicit
+compatibility syntax environment. They do not build a semantic `GenericBinder`, type-check an
+expression, or force a declaration definition. A qualified/member head may explicitly request its
+base expression's checked classifier; that dependency is part of the fine-grained query graph.
+
+`NAM-AMB-000`: When the next balanced token sequence begins with `<`, fine parsing selects generic
+application when `ClassifyGenericApplicationHead` returns `GenericHead`, meaning at least one visible
+candidate has a direct generic declaration outline. Any non-generic candidates remain available for
+later overload filtering. `NonGenericHead` leaves `<` to relational/operator parsing.
+`UnresolvedHead` blocks or produces the grammar's explicit recovery/ambiguity form according to its
+stored failure and dialect rule; the parser never guesses by declaration order or a speculative
+parser copy.
 
 `NAM-AMB-001`: If classification is `Unknown` and both syntax alternatives are structurally valid,
 modern mode preserves ambiguity for semantic diagnosis; it does not choose based on whitespace or
@@ -431,9 +441,12 @@ OverloadGroup = {
 }
 ```
 
-Redeclaration grouping is a query over all same-name fragments in an unordered container. The key uses
-only facts required by the language to decide whether declarations are attempts to denote the same
-entity. A checked `CallableSignature` then validates compatible declarations/definitions.
+`GroupRedeclarations(seed, wiring, environment)` is a query over only the outline fragments selected
+by that `(scope, name, kind)` seed. It requests each fragment's `BuildRedeclarationKey` result and
+partitions equal compatible keys into logical declarations; it neither scans unrelated names nor
+publishes a module-wide declaration index. The key uses only facts required by the language to
+decide whether declarations are attempts to denote the same entity. A checked
+`CallableSignature` then validates compatible declarations/definitions.
 `GenericBinderShape` is the alpha-normalized overload-identity projection: it retains parameter
 sorts and only constraints that the versioned language rule declares overload-discriminating;
 defaults are excluded. `CallableShape` retains receiver/input facts that can distinguish overloads.
@@ -442,6 +455,13 @@ convention, inferred contracts, dispatch, origins, and parameter slots are exclu
 later for header compatibility within a group. `registeredDiscriminators` is empty unless an
 explicit ledger-approved language rule names another overload discriminator. `OverloadGroup`'s
 `presentationOrder` is a duplicate-free bijection onto `members` sorted by stable source order.
+
+`DEC-RED-000`: A successful `RedeclarationPartition.fragmentToDecl` domain is exactly the
+eligible fragment set for its seed, and its range is exactly `groups.keys`. Each fragment occurs in
+exactly one corresponding `RedeclarationGroup.fragments` list. `ResolveLogicalDecl(fragment)`
+requests the partition for that fragment's outline seed and returns its unique mapped declaration.
+A pending redeclaration-key or header dependency therefore blocks only that seed's query; it does
+not prevent unrelated declarations from being parsed or checked.
 
 `DEC-RED-001`: Two declaration fragments with a compatible redeclaration key form one canonical
 entity with one `DeclId` plus multiple fragment origins. Conflicting headers produce a redeclaration error;
@@ -480,7 +500,7 @@ The source colon clause is classified before facet computation as
 `ClassBase`, `InterfaceConformance`, `InterfaceInheritance`, or
 `EnumTagType`. A modern struct has no concrete representation-base alternative. Rejected
 struct inheritance contributes no facet, base subobject, representation adjustment, or conformance
-evidence. Chapter 14 is normative for the checked clause and route algebras.
+evidence. Chapter 15 is normative for the checked clause and route algebras.
 
 Extension application has a context-free phase and a context-dependent phase. Target matching,
 constraint evidence, specialization, and reachability produce intrinsic evidence. The second phase
@@ -502,7 +522,7 @@ is diagnosed at the extension declaration.
 
 ## Facet routes and priority
 
-Facet discovery produces the canonical route-keyed set from chapter 14. Selection is the maximal
+Facet discovery produces the canonical route-keyed set from chapter 15. Selection is the maximal
 set under its proof-carrying partial priority relation; enumeration order is presentation metadata
 only.
 
@@ -526,7 +546,7 @@ retain their keyed witness-lookup routes, and extensions are compared only by na
 specificity or override proofs.
 
 `NAM-FAC-005`: Committing a member candidate copies every extension applicability ID in its lookup
-path into the `BoundDeclUseAt<S>.extensionUses` domain and calls chapter 14's
+path into the `BoundDeclUseAt<S>.extensionUses` domain and calls chapter 15's
 `CommitExtensionFacetUseAt<S>` with caller-owned ordinary-use keys. Facet discovery never allocates
 those keys, and candidate commitment never reruns the route's concrete-availability check.
 
@@ -543,7 +563,7 @@ An interface declaration introduces a checked `InterfaceDecl`. Its uses are clas
 to the interface. Member facets of an existential value are reached only after an explicit existential
 opening. The two are not interchangeable `DeclRefType` interpretations.
 
-This resolves the current dual-use limitation while keeping existing source spelling. Chapter 8
+This resolves the current dual-use limitation while keeping existing source spelling. Chapter 9
 defines the corresponding conformance and existential rules.
 
 ## Extension-introduced conformances
@@ -584,16 +604,19 @@ ElaboratedDefinition(d)
 ```
 
 Each product has a named dependency graph and typed cycle policy. A client requests the weakest fact
-it needs. Parsing never raises a declaration state, and a failed query never marks unrelated facts
-as complete.
+it needs. Declaration-outline parsing and scope wiring publish syntax facts but never raise a
+declaration state. Fine parsing may request semantic facts through the scheduler, but a failed query
+never marks unrelated facts as complete.
 
 ## Validation obligations
 
 The name/declaration validator checks:
 
 - each declaration belongs to exactly one lexical scope and logical module;
-- unordered scopes contain all direct stubs exactly once;
+- unordered scopes contain all direct `ParserDeclStub` fragments exactly once;
 - sequential scopes obey binding positions;
+- every lookup-capable `UnparsedContent` has one exact entry position in `ScopeWiring`;
+- each redeclaration partition covers exactly one seed's eligible fragments and maps each once;
 - normalized decl-refs target declarations visible in their snapshot/module interface;
 - lookup paths' substitutions and evidence compose to the selected declaration;
 - overload and redeclaration groups have canonical keys and no duplicate members;

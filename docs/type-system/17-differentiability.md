@@ -135,7 +135,7 @@ source spellings or assuming that an associated type is the first witness-table 
 registered differentiability contract. It obtains the
 differential type by an exact witness-entry lookup, then obtains evidence that the resulting type
 satisfies the required differential algebra. A bound generic witness, specialized generic table,
-lookup witness, concrete table, and existential witness all use the same operations from chapter 14.
+lookup witness, concrete table, and existential witness all use the same operations from chapter 15.
 
 `DIF-TYP-002`: `iteratedDifferential` proves the registered idempotence/iteration law required by
 the differentiation contract. It is not inferred by comparing source spellings. If a versioned
@@ -158,7 +158,7 @@ role, and retains exactly the stage-permitted definition resolutions reachable f
 `differential`.
 
 `DIF-TYP-006`: `ValueDifferentialInfoEvidence` is the stable proof term stored by the non-stage-
-indexed constraint algebra and specialization frames in chapter 4. Executable checked products
+indexed constraint algebra and specialization frames in chapter 5. Executable checked products
 resolve that evidence to `ValueDifferentialInfoAt<S>` before reading witness entries. Construction
 publication may replace only the sidecar's operational definition resolutions; evidence ID/key,
 witness IDs, entry keys, differential type, and equality proof do not change.
@@ -1242,7 +1242,7 @@ context and cannot erase a non-differentiability diagnostic unrelated to derivat
 `DIF-EXP-003`: Assigning an active value to an inactive storage path is a derivative-loss failure
 unless the value passes through an explicit detach-derivative boundary or a registered operation whose
 contract declares derivative consumption. Physical versus abstract storage remains governed by
-chapter 4; activity does not make abstract storage referenceable.
+chapter 5; activity does not make abstract storage referenceable.
 
 `DIF-EXP-004`: A call from differentiable code to a nondifferentiable callable with active inputs or
 an active result requires an explicit detach-derivative/no-diff call boundary or a registered provider.
@@ -1369,7 +1369,7 @@ source list and region proof remain selection evidence and never enter that grap
 and concrete formulas still retain both roles, and repeated traversal of the selected provider's
 diagnostic `considered` map cannot duplicate the winner's ordinary use. The direct effect-use graph
 likewise contains `selection.winner.proof.effectUse` exactly once; its post-fixpoint validation uses
-the ordinary chapter 4 effect-obligation rules rather than a concrete capability proof.
+the ordinary chapter 5 effect-obligation rules rather than a concrete capability proof.
 
 ## Visibility, effects, capabilities, and interfaces
 
@@ -1414,7 +1414,7 @@ BuildEffectiveDifferentiabilityContractAt<S>(callable: CallableValue<S>,
                                              environment,
                                              context: DerivativeProviderSelectionContext)
     -> QueryStep<EffectiveDifferentiabilityContractResultAt<S>>
-CheckDifferentiationAt<S>(syntax: NodeId<Bound>,
+CheckDifferentiationAt<S>(syntax: ExprCSTNodeId<Parsed>,
                           context: ExpressionCheckContextId)
     -> QueryStep<DifferentiationCheckResultAt<S>>
 ValidateDifferentiableBodyAt<S>(callable, mode, order)
@@ -1450,7 +1450,7 @@ scraping diagnostics.
 
 ## IRReady and frontend IR
 
-`IRReadyAST` carries the selected provider and `DerivativeSignatureMap` explicitly:
+The `IRReady` node carries the selected provider and `DerivativeSignatureMap` explicitly:
 
 ```text
 IRReadyDerivativeProviderOperands =

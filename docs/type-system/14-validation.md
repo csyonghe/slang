@@ -113,13 +113,17 @@ TestSourceFixture = {
 TestSource::fromBytes(bytes, encoding) -> TestSourceFixture
 TestTokens::fromElements(Token | Trivia...) -> TokenList
 TestTokens::view(TokenList, TokenListSelection) -> TokenListView
+TestLexing::context(SourceViewId, LexOptions) -> LexicalContext
 TestCST::terminal<S>(value, origin) -> TerminalNode<S>
 TestCST::nonTerminal<S, K>(kind, namedFields, origin) -> NonTerminalNode<S, K>
-TestCST::rewrite(rule, typedOperation) -> CSTRewrite
 TestCST::snapshot<S>(root, terminals, nonTerminals, predecessors...) -> CSTSnapshot<S>
-TestAST<S>::node(kind, fields...) -> ASTSnapshot<S>
+TestCST::translatedOrigin(rule, inputs...) -> CSTTranslationOrigin
+TestAST::node<F>(kind, fields, origin) -> (SemanticSnapshot, ASTNodeId<F, kind>)
 TestSemantics::type(...), decl(...), scope(...), witness(...)
+TestPreprocessor::persistentState(configuration...) -> PreprocessorPersistentState
+TestScopes::outlineInterface(module, exportedOutlines...) -> ModuleDeclOutlineInterface
 FakeQueryContext::given(key, result)
+FakeModuleResolutionProvider::given(revision, request, result)
 FakeStandardEnvironment::withDecls(...)
 ```
 
@@ -137,26 +141,31 @@ rendered English text has a separate snapshot suite.
 Each query or semantic service lists its dependencies in its public constructor/signature. Tests
 supply small fakes:
 
-| Subject                      | Mocked dependencies                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| lexical classification       | source snapshot and language options                                                                         |
-| preprocessor structuring     | `CSTSnapshot<Lexed>`, `PreprocessorOptions`, rewrite publisher                                               |
-| macro/include expansion      | structured CST, `PreprocessorState`, fake versioned `IncludeSystem`, paste lexer, rewrite publisher          |
-| parser production            | terminal reader over `ActiveTokenView`, `GrammarVocabulary`, `SyntaxParseInfoSet`, recovery/rewrite sink     |
-| lookup                       | immutable scope graph, facet provider, access predicate                                                      |
-| facet closure/priority       | typed aggregate relations, witness-route provider, extension applicability, priority proofs                  |
-| visibility                   | declaration facts, module/container relation, extension target equality                                      |
-| coercion                     | canonical types, standard conversion declarations, relation-specific evidence providers                      |
-| overload resolution          | candidate list, signatures, argument mapper, generic solver, coercion planner                                |
-| generic solver               | constraint set, type equality, conformance provider, constant evaluator                                      |
-| conformance                  | requirement list, member lookup, signature comparer, synthesis planner                                       |
-| initialization               | initialization model, candidate provider, conversion/call planner, storage and definite-initialization facts |
-| differentiability            | differential-info provider, signature transformer, derivative candidates, activity facts                     |
-| effect inference             | direct-effect uses, declared contracts, local/imported callee facts                                          |
-| capability inference         | atom graph, direct-use facts, callee requirements                                                            |
-| expression checking          | bound children and the narrow primitive queries the node rule requests                                       |
-| property reference formation | typed abstract/physical storage, accessor target, call/access planner, registered-operation validator        |
-| IRReady lowering             | canonical semantic values, imported symbol resolver, IR fragment builder                                     |
+| Subject                      | Mocked dependencies                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| lexical classification       | source snapshot, source view, and exact `LexOptions`                                                                                        |
+| lexed CST construction       | `TokenList` and the exact `LexicalContext` that produced it                                                                                 |
+| preprocessor structuring     | `CSTSnapshot<Lexed>`, retained lexical context, and `PreprocessorOptions`                                                                   |
+| macro/include expansion      | unit input, `PreprocessorPersistentState`, fake versioned include/builtin/feature/directive providers, paste lexer, direct-origin validator |
+| declaration outlining        | macro-expanded CST, `DeclGrammar`, vocabulary, recovery policy                                                                              |
+| import-outline resolution    | `DeclParseResult`, current module, mock `ModuleResolutionProvider`, its revision, and language rules                                        |
+| lookup-scope wiring          | declaration outlines, total `ImportResolutionIndex`, and scope policies                                                                     |
+| fine parse/check             | `FineParseSubject`, check context, mock `SyntaxDisambiguationProvider`, and exact input `ScopeWiring`                                       |
+| local-scope publication      | base `ScopeWiring`, `LocalScopeWiringFragment`, and source-order sibling inputs                                                             |
+| lookup                       | immutable scope wiring, facet provider, access predicate                                                                                    |
+| facet closure/priority       | typed aggregate relations, witness-route provider, extension applicability, priority proofs                                                 |
+| visibility                   | declaration facts, module/container relation, extension target equality                                                                     |
+| coercion                     | canonical types, standard conversion declarations, relation-specific evidence providers                                                     |
+| overload resolution          | candidate list, signatures, argument mapper, generic solver, coercion planner                                                               |
+| generic solver               | constraint set, type equality, conformance provider, constant evaluator                                                                     |
+| conformance                  | requirement list, member lookup, signature comparer, synthesis planner                                                                      |
+| initialization               | initialization model, candidate provider, conversion/call planner, storage and definite-initialization facts                                |
+| differentiability            | differential-info provider, signature transformer, derivative candidates, activity facts                                                    |
+| effect inference             | direct-effect uses, declared contracts, local/imported callee facts                                                                         |
+| capability inference         | atom graph, direct-use facts, callee requirements                                                                                           |
+| expression checking          | parsed syntax, scope position, expected context, and the narrow primitive queries the rule requests                                         |
+| property reference formation | typed abstract/physical storage, accessor target, call/access planner, registered-operation validator                                       |
+| IR-ready node lowering       | canonical semantic values, imported symbol resolver, IR fragment builder                                                                    |
 
 Mocks return real domain values, not booleans that bypass invariants. For example, a mock coercion
 provider returns a `ConversionResult` with plan, rank, and witness; a mock conformance provider
@@ -190,69 +199,107 @@ Required direct lexer/CST suites include:
 - active versus inactive `#line`, macro-expanded line operands, final interpreted-view construction,
   and `BuiltinLine`/`BuiltinFile` observation of the exact logical-location state without a lex-time
   directive prescan;
-- `BuildLexedCST` bijection with its exact `TokenList`, plus
-  `StructurePreprocessor`/`ExpandPreprocessor` rejection of snapshots paired with the wrong
-  view/options/state or include-system revision, including inherited child options;
-- total stage-specific `terminalKind`/`terminalClass` round trips for every admitted terminal value,
-  including rejection of an ID or record whose cached kind disagrees with its value class;
-- zero-width `MacroInvocationArg` and grammar-production rewrites with exact `Empty` anchors,
-  distinguishing `Before`, `After`, `EndOfInput`, and `SourceAnchor` and rejecting a fabricated
-  consumed terminal;
-- literal decoding as a pure `(TokenRef, LanguageRuleSetId)` query, including every radix/format,
-  suffix, escape failure, macro-pasted spelling, and cache-key distinction;
-- direct-source, replacement-body, repeated-parameter-occurrence, prescanned-argument,
-  unexpanded-argument, and nested macro CST rewrite chains plus `BusyMacro` suppression linked to
-  the exact blocking invocation;
-- nested macro-output recognition where `PreserveTerminal(..., PreprocessorStructured)` bridges
-  each terminal to the new stage while its `TokenOrigin` remains the earlier macro output, rejecting
-  a direct wrong-stage origin binding and any non-terminal or bare source-range preserve input;
-- direct active/inactive `TextRegion` token and trivia terminals bridged into the `MacroExpanded`
-  primary list in exact interleaved order, with unchanged token origins/trivia values, correct
-  activity, and no accidental directive-terminal leakage into active views;
-- `Suppressed` and recovered `Failed` macro outcomes whose verbatim tokens are produced by the exact
-  `ReplayMacroInvocationResult` projection, preserving each token value/origin while giving each new
-  terminal its replay origin; interleaved nested/recovery outputs must reproduce the rescan trace,
-  and a missing, duplicate, reordered, anonymous, or mismatched-decision replay is rejected;
-- `FunctionLike` including zero parameters, `ObjectLike`, and source-less `BuiltinObjectLike`
-  definitions; named, named-variadic, and `...`/`__VA_ARGS__` parameters; every legal and illegal
-  `MacroDefinition::Opcode`/`MacroDefinition::Op` pair; name/field/argument-map invariants;
-  the definition distinction between `#define F(x)` and object-like `#define F (x)`; accepted trivia
-  between a resolved function-like invocation name and `(`; cross-definition rewrite rejection; and
-  source-token/output spelling equality;
-- stringization from exact argument `Token | Trivia`; token paste with two/one/zero/invalid operands,
-  chained `X ## Y ## Z`, an empty middle operand, and trivia-like `/ ## *`; variadics,
-  `BuiltinLine`/`BuiltinFile`, includes, and synthesized tokens;
-- traversed (including a macro-produced child token), `#pragma once`-suppressed, pre-resolution
-  failed, and `Failed(Cycle, error)` include edges with no fabricated view/list, including rejection
-  of a traversed include back to an ancestor expanded snapshot and rejection of wrong directive,
-  predecessor, initiating-range, included-root, or resolved-identity links;
-- traversed-include `includedInputs` equality with `IncludedContentView`'s active non-EOF terminal
-  projection; interleaved `tokenResult`/`triviaResult` output reconstruction; token
-  type/logical-spelling/physical-spelling/continuation copying; exact trivia copying; and retention
-  of the child EOF without inserting it into the parent list, rejecting wrong count, order, input,
-  class, or output metadata;
-- ordered state replay where an include defines or undefines `M` before a parent-file use, an
-  inactive definition does not mutate the environment, conditional/busy/input stacks push and pop
-  without leakage, pragma-once identities and loaded source versions propagate, and identical text
-  is recognized differently under two immutable `PreprocessorState` values;
-- deterministic physical-source, invocation, definition, primary-anchor, and full-trace provenance
-  projections, including left/right branch preorder and first-visit deduplication; exact
-  `CSTProvenanceTrace` closure/role equations; DAG acyclicity; and copy/serialization round trips;
-- active and inactive conditional regions;
-- exact initial `Lexed -> PreprocessorStructured`, dynamically recognized structured-fragment,
-  and final `MacroExpanded -> Parsed` predecessor links; per-token rewrite roots; lexed and
-  macro-expanded primary terminal-projection coverage bijections; structured-stage predecessor-list
-  retention without duplicate trivia terminals; and parsed active-token coverage;
-- a `TokenizedSource` whose terminal fields are in one-to-one list order with every `Token | Trivia`
-  element, and rejection of an anonymous/parallel child authority;
-- `DefineDirective`, `MacroDefinition`, parameter/argument clause and comma-tail nodes,
-  `MacroInvocation`, `MacroInvocationArg`, and `TokenPaste` non-terminals with all
-  keyword/operator/delimiter/separator terminals in named fields and exact interleaved operand order;
-- `MacroExpansion`, chained `TokenPasteExpansion`, and `IncludeExpansion` nodes whose
-  `expandedFrom` fields reach the exact predecessor non-terminal and whose ordered `result` fields
-  agree with the rewrite outputs;
-- whole and sliced `>>` token coverage, including exact `SplitToken` predecessor, partition, and
-  output-ordinal validation;
+- `BuildLexedCST` bijection with its exact `TokenList` and `LexicalContext`, including one
+  `TokenizedSource` root, no parallel token/trivia ownership, distinct identities for equal tokens
+  produced under different views/options, and rejection of a mismatched context;
+- `StructurePreprocessor` terminal coverage and purity: directives, inactive regions, definitions,
+  malformed lines, and ordinary text retain every input element and do not consult macro state;
+- function-like definition recognition for `#define F(x)` versus object-like `#define F (x)`, while
+  function-like invocation permits trivia between a resolved name and `(`;
+- persistent `preprocessor::Environment` lookup, shadowing, redefinition, and `#undef` tombstones,
+  including proof that an earlier environment value never changes;
+- `BuildPreprocessorPersistentState` from builtin and API/command-line definitions, including
+  deterministic configuration order, redefinition-equivalence diagnostics, zeroed resource usage,
+  and empty pragma-once/loaded-source state;
+- `BeginPreprocessorUnit`/`EndPreprocessorUnit` round trips: the entry frame is derived from the
+  unit's lexical context and unique identity, transient input/conditional/busy stacks never enter
+  the persistent seed, mismatched or unbalanced exit fails, and chained units receive exactly the
+  preceding `finalPersistentState`;
+- every `PreprocessorPersistentState` field and every transient `PreprocessorState` field
+  independently affects and keys expansion where applicable, with tests that fail on any ambient
+  environment, conditional, busy, pragma-once, warning, location, loaded-source, or resource state;
+- include, builtin-macro, feature-set, and registered-directive provider fakes return typed results
+  at one explicit revision; equal request/revision maps behind distinct service objects produce
+  equal output, while a changed revision or an unsupported revision changes or rejects the key;
+- active/inactive nested conditional selection, `defined`, feature queries, malformed group
+  recovery, and proof that inactive directives have no undeclared state effect;
+- object-like, function-like, builtin, named-variadic, and `__VA_ARGS__` invocation recognition;
+  nested-parenthesis argument splitting, zero/empty arguments, missing closer, and arity failures;
+- textual/unhygienic macro behavior: an identifier introduced by replacement text participates in
+  ordinary call-site lookup and capture, equal produced spellings have equal identifier semantics,
+  and changing only `TokenOrigin` changes provenance but never name equality;
+- invocation recognition freezes a `PreprocessorStructured` fragment before the referring
+  `MacroExpanded` node, leaves its source/intermediate stream unchanged, and works identically for
+  a physical-source stream and a generated replacement stream; the expanded root reaches call
+  spelling only through provenance and therefore never emits it twice;
+- raw span, prescanned parameter, unexpanded parameter, stringized parameter, paste, builtin line,
+  and builtin file replacement operations, with each parameter occurrence selecting its required
+  written or prescanned form rather than sharing one accidental expansion cache;
+- exact stringization over `Token | Trivia` ranges, including whitespace folding and escaping, and
+  paste re-lexing for valid, empty, invalid, chained, and trivia-looking results;
+- streaming rescan that expands newly formed invocations and `BusyMacro` suppression that names the
+  exact blocking invocation; direct, mutual, and nested recursion terminate without a global flag;
+- include resolution modes, distinct include-use `SourceView` identities, cycle failure,
+  `#pragma once`, excluded child EOF, and exact field-by-field outward propagation of environment,
+  directive, loaded-source, pragma-once, and resource state while conditional/busy/input stacks do
+  not leak;
+- `#line`, warning, language/version/extension, unknown pragma, `#error`, and `#warning` behavior
+  through typed provider/state projections and provider revision keys;
+- every deterministic resource limit at its boundary and one past it, with typed recovery that
+  always consumes input or inserts one anchored missing terminal;
+- direct `TokenDerivation` and `CSTTranslationOrigin` closure for source copying, parameter
+  expansion, nested invocation, paste, builtin, include, suppression, and recovery; every edge is
+  backward-pointing and serialization/allocation order independent;
+- absence of an operation/output-binding authority: reconstructing any produced CST field or token
+  origin requires only the produced value and its direct predecessor references;
+- declaration-outline coverage: bindings, declaration hierarchy, `DirectGenericMarker`, active
+  delimiters, exact `UnparsedContent`, and maximal `InactiveContent` ranges cover every element of
+  the macro-expanded base list once without copied tokens; inactive tokens/trivia never create a
+  declaration, import, scope, delimiter event, or fine-parse subject;
+- active-trivia/active-token/inactive-element selectors under every interleaving, proving grammar
+  decisions equal `ActiveTokenView` while structural terminals still reproduce the full base list;
+  changing only inactive text preserves scope wiring even though lossless CST identity changes;
+- `DeclGroup` fallback cases for `float x;`, `float x, y;`, pointer/array/function declarators,
+  `struct S {} x;`, `struct { int field; } x, y;`, nested delimiter commas, opaque generic angles,
+  and initializers; every unique scan plan yields one optional inline-type binding followed by one
+  direct `name` field/binding per declarator, preserves each heterogeneous `DeclKind`, and makes
+  no-plan/multiple-plan cases recover without guessing;
+- each binding's marker recognizes only the immediate active `<` and never claims a parameter count
+  or matching `>`;
+- declaration-outline boundary scanning with nested `()`/`[]`/`{}`, angle tokens and `>>` left
+  opaque, exact recursive declaration containers, deferred callable/property bodies, C-style
+  declarator-name skeletons, multiple valid fallback plans producing recovery, and proof that
+  outlining a legacy struct-base spelling creates no checked inheritance fact;
+- `ResolveImportOutlines` with resolved, missing, ambiguous, blocked, and stale-revision
+  `ModuleResolutionProvider` fakes; every source import has exactly one typed result entry, selected
+  `ModuleDeclOutlineInterfaceId` content matches its value, `ExportedDeclOutlineId` is stable under
+  checked-signature changes, the later `ModuleDeclOutlineExportMap` is functional and rejects
+  unproved identity merging, mutually importing outline interfaces need no checked header, and no
+  checked `ModuleInterfaceContentId` is requested;
+- `decodeImportModuleSpecifier` for dotted and string forms, trivia-insensitive equal requests at
+  different source sites, identifier/string decoding failures that never call the module provider,
+  and proof that source provenance remains on the per-outline result rather than provider identity;
+- `ScopeWiring` parent/entry edges and unordered, source-ordered, and sequential-binder policies,
+  including namespace reopening, local `DirectGenericMarker`, imported `GenericPresence`, failed
+  import entries, and exact module-outline-interface member scopes;
+- `ExtendScopeWiring` with every conflict alternative, structural sharing of unchanged maps, and
+  `ScopeWiringPublication` validation; source-order sibling chains require `next.input = prior.output`
+  and produce equal wiring under every task completion order;
+- generic-application classification from visible declaration outlines, mixed generic/non-generic
+  candidates, member heads that request a checked base, blocked lookup, recovery, relational `<`,
+  and `>>` splitting only after generic syntax is selected;
+- each fine parse/check query records the exact `FineParseSubject`, check context, and dependency
+  requests, publishes a parsed CST fragment plus node-local immutable result and
+  `ScopeWiringPublication`, and is invariant under unrelated query scheduling;
+- a `Parsed` fragment rejects `TriviaTerminal` and `InactiveContent` as own-stage nodes, while its
+  exact `ParsedContent.source`/predecessor traversal recovers every active-trivia and inactive
+  element from `DeclParsed` in base-list order;
+- `CheckExpressionPrefix` accepts strict token subranges and preserves their scope/context, rejects
+  equal-range recursion, and on a blocked dependency publishes no partial CST, AST, or wiring before
+  deterministically restarting from the immutable subject;
+- composite parse/check results embed the exact `CheckExpression`, `CheckStatement`, or
+  `BindDeclHeader` dependency result; identity-substitution tests reject any copied/reconstructed
+  second producer for the typed node or header;
 - every grammar production in isolation;
 - every EBNF choice as one closed, wire-tagged variant with exactly one selected alternative, never
   as a product that requires every alternative's fields;
@@ -286,14 +333,21 @@ The second test is executable now:
 
 ```text
 python docs/type-system/generate-cst-production-schema.py
+python docs/type-system/generate-cst-production-schema.py \
+    --profile decl-cst-production-profile.json
 ```
 
-The command parses the EBNF, validates its pinned canonical UTF-8/LF digest and terminal vocabulary,
-resolves every explicit selector, generates every typed production shape, and checks the exact
-seven-field `IfStatement` contract. It also has executable sentinels proving that `declaration` is a
-closed variant and that the repeated suffix of `dotted-name` is a list of ordered
-`{ dot, identifier }` products. Generation validates the `{ major, minor }` schema version, derives
-non-zero wire tags for every kind/field/group/alternative, and rejects tag collisions. `--emit`
+Each command parses the profile-selected EBNF, validates its pinned canonical UTF-8/LF digest,
+stage, grammar namespace, and terminal vocabulary, resolves every explicit selector, and generates
+every typed production shape. The fine grammar checks the exact seven-field `IfStatement` contract
+and sentinels proving that `declaration` is a closed variant and the repeated suffix of
+`dotted-name` is a list of ordered `{ dot, identifier }` products. The declaration profile checks
+all declaration, unparsed, inactive, C-style-declarator, and inline-type category members in the
+`DeclParsed` domain, requires direct `name` fields for both fallback declarator alternatives and
+the inline type, and validates the
+registered derived-view descriptors used by `declOutlineIndex` and `inactiveContentIndex`.
+Generation validates the `{ major, minor }` schema version, derives non-zero wire tags for every
+kind/field/group/alternative, and rejects tag and normalized-production-ID collisions. `--emit`
 writes the complete `NodeSchemaRegistry` fragment to standard output; `--production if-statement`
 emits one descriptor for focused review and unit-test fixtures.
 
@@ -310,47 +364,43 @@ Generated tests iterate every node descriptor and verify:
 - every `CSTCategoryDescriptor` accepts exactly its registered production members and cannot be
   constructed as a concrete occurrence, including a production in multiple categories and
   rejection of non-injective `grammarProductions` kinds;
+- every `CSTDerivedViewDescriptor` names one registered source category and one normative rule;
+  generated fixtures compare its generic traversal result with the typed `DeclOutline` or
+  `InactiveContent` projection for every member production;
 - `nodes[production.kind]` equals the descriptor generated from `compileShape`, direct group fields
   are the sole serialized authority, and every nested leaf uses the exact generated
   `CSTShapeProjectedField` and `projectedCSTFieldKind`;
 - `NodeKindValue` checks exact, acyclic `baseKind`, and category-membership cases; abstract category
-  and terminal-family kinds never enter `stageKinds` or acquire constructors;
+  and terminal-family kinds never enter `domainKinds` or acquire constructors;
 - `terminalKinds` is total and injective for each stage's admitted `TerminalClass` values, and its
   generated inverse rejects the wrong family or stage;
 - each CST non-terminal's generic operands are derived exactly from its named structural fields,
   with no anonymous child list or omitted punctuation terminal;
 - structural/alternative/semantic/provenance edge filters are correct;
-- `withCSTField` requires a rule, creates a `FunctionalCSTEdit` predecessor edge, and leaves the old
-  snapshot byte-identical; `replacementOf` round trips scalars, CST/schema references, products,
-  variants, optionals, lists, non-empty lists, and maps without hiding node inputs; its canonical
-  replacement distinguishes different edits; origin and rewrite-projected fields are read-only,
-  and preserving the old origin while changing a field is rejected;
+- `withCSTField` requires a rule, stores a direct `CSTTranslationOrigin` to the edited node, and
+  leaves the old snapshot byte-identical; it round trips scalars, CST/schema references, products,
+  variants, optionals, lists, non-empty lists, and maps without hiding node inputs; origin fields
+  are read-only, and preserving the old origin while changing a field is rejected;
 - non-root `withCSTField` edits remain reachable from the returned root after canonical reindexing;
   identity edits update every intentional alias, while `withCSTCursorField` clones/rewires only the
   selected alternative occurrence;
 - `withField` creates a new node and leaves the old snapshot byte-identical;
 - invalid field kinds, presence, or collection shapes fail before publication;
-- generic rewrite identity preserves structural hashes;
+- generic edit identity preserves structural hashes;
 - serialization round trips every optional/variant field;
-- `DerivedField`, `CSTShapeProjectedField`, and `CSTRewriteProjectedField` each expose their complete
-  declared dependency class; rewrite output projections reconstruct from serialized
-  `outputBindings` and reject the wrong operation/path/class;
+- `DerivedField` and `CSTShapeProjectedField` each expose their complete declared dependency class;
+  no field depends on an operation log or output-binding side table;
 - unknown optional fields survive schema-version round trips; and
 - unknown required fields fail atomically, forward/SCC graph references round trip, and golden files
   migrate through every supported wire version;
-- every staged CST rewrite round trips with its predecessor snapshot IDs and rejects forward,
-  dangling, wrong-role, wrong-stage, or cyclic provenance inputs; output resolution also rejects an
-  unknown port, wrong output class, or ordinal at/above the declared dynamic count;
-- snapshot output bindings reject a missing/duplicate inverse, wrong local node, wrong
-  terminal-class/non-terminal-kind, mismatched token/terminal origins, or ambiguous predecessor
-  realization; `resolveOutput` returns the exact bound occurrence;
+- every staged CST translation round trips with its predecessor snapshot IDs and rejects forward,
+  dangling, wrong-domain, or cyclic direct provenance inputs;
 - canonical CST snapshot encoding omits its own ID, uses unique local indices with matching
   terminal-kind/non-terminal-kind tags, gives equivalent trees built in different allocation or
   scheduler orders the same ID, and rejects unreachable records, a wrong root class, or
   noncanonical array order;
-- atomic preprocessor transitions replay their typed effect exactly; scoped macro/include steps
-  require matching enter/leave effects, a valid nested state chain, and only the declared outward
-  state changes;
+- pure preprocessor state-transition functions produce the specified next state for each directive,
+  macro invocation, and include; nested inputs expose only the declared outward state changes;
 - copy/share counts and snapshot lifetime do not affect equality or serialization.
 
 Every node kind receives a minimal valid fixture. This is type coverage independent of which
@@ -362,6 +412,9 @@ end-to-end language tests happen to create the node.
 
 - identity, associativity, shadowing rejection, and capture avoidance;
 - substitution through every type, function receiver, parameter, constraint, and witness field;
+- `GetGenericBinder` for absent, direct, nested, recovered, and blocked binders, with every parameter
+  sort, default, constraint, and parent identity checked independently; equal owners/environments
+  produce one immutable result without a separately populated binding table;
 - working-key to alpha-normalized `SpecializationFrame` freezing and proof-relevant evidence
   preservation;
 - nominal versus structural equality;
@@ -530,7 +583,7 @@ endpoints; a shorter handle selects `DereferenceLifetimeExpired(actual, required
 successful case also derives a stage-free `DereferenceApplicationIdentity`, retains the exact
 executable handle separately, and carries `DereferencedReference(identity)` through Typed, IRReady,
 and IR forms. Tests
-replace the identity with the handle `NodeId<Typed>`, a sibling dereference identity, and the later
+replace the identity with the handle `AnyASTNodeId<Typed>`, a sibling dereference identity, and the later
 IRReady/IR producer ID; drop or replace the handle operand; and independently mutate every
 `DereferencedStorageProof` endpoint. The matrix is repeated for an internal ref-accessor read/write
 fallback, whose identity is derived from the accessor invocation rather than an otherwise
@@ -557,7 +610,7 @@ named builtin rule, result type, path, alias derivation, and written base-then-i
 success retains exactly one `BuiltinPhysicalProjectionApplicationAt<S>` and lowers one-to-one
 through Elaborated, `IRReadyBuiltinPhysicalProjection`, and
 an instruction carrying `BuiltinPhysicalProjectionInstPlan`. Round trips assert that
-`BuiltinElement(inputStorage.path, identity)` contains no `NodeId<Typed>`, while the application and
+`BuiltinElement(inputStorage.path, identity)` contains no `AnyASTNodeId<Typed>`, while the application and
 IRReady/IR operation still carry both executable operands and the complete result proof. Negative
 tests drop, duplicate, reorder, or exchange equal-typed operands; substitute the index node ID,
 IRReady value ID, or IR instruction ID for the stable identity; mutate the base path or any storage
@@ -572,7 +625,7 @@ a sibling; and verify that builtin, registered, dereference, const-reference-acc
 accessor-invocation constructors produce distinct nominal identities. Synthesized-anchor mutation
 tests attempt to embed a `SynthesizedSemanticId`, `SynthesisKey`, or syntax-node cause; recovery
 tests attempt to embed `ErrorId` or its semantic diagnostic anchor. All are rejected transitively,
-as are direct `StableSemanticId`, `NodeId<Typed>`, IRReady value, and IR instruction substitutions.
+as are direct `StableSemanticId`, `AnyASTNodeId<Typed>`, IRReady value, and IR instruction substitutions.
 Index tests publish the exact content-addressed internal storage plans and
 their scheduler-query dependencies, then reject duplicate identities, missing/extra plans,
 non-bijective dependencies, unresolved owners, wrong application kinds, and identity mismatches.
@@ -615,7 +668,7 @@ invocation's identity is rejected. `constref` and `ref` accessor declarations re
 structural handle type with respectively `ReadAccess` and `ReadWriteAccess`, and reject a bare
 referent value that lowering would otherwise have to retrofit. Storage-access-intent tests keep
 ordinary getter/setter and named reference-accessor read/write fallbacks distinct from explicit reference
-formation and chapter 7's physical-reference argument plans. `StorageAccessIntentAt<S>` admits only
+formation and chapter 8's physical-reference argument plans. `StorageAccessIntentAt<S>` admits only
 reads and payload-complete writes; `OutMode`, `InOutMode`, `ConstRefMode`, and `RefMode` are tested
 as exclusive `PlanArgumentAccess` inputs. Write fixtures independently mutate the exact checked source,
 conversion endpoints/plan, and completion condition and require the selected physical store,
@@ -847,12 +900,28 @@ drops one role, converts one into the other, or loses a source while retaining t
 ## Scheduler suites
 
 Scheduler tests use artificial query kinds and integer/bitset lattices before testing language
-queries. They cover every case listed in chapter 10, including SCC policy mixing, atomic publication,
+queries. They cover every case listed in chapter 11, including SCC policy mixing, atomic publication,
 SCC enlargement/restart, current-approximation reads, acyclic key growth, context-sensitive query
 keys, parallel determinism, cancellation, and hash-based incremental reuse.
 
 For every real query kind, one metadata test asserts that a cycle policy, durability class, result
 validator, and implementation version are registered.
+
+Frontend scheduler integration tests additionally assert:
+
+- `ExpandPreprocessor` keys include the persistent seed, lexical context, and all four provider
+  revisions; entry/exit/final state identity follows `BeginPreprocessorUnit` and
+  `EndPreprocessorUnit` exactly;
+- `ResolveImportOutlines` blocks and resumes through the revisioned `ModuleResolutionProvider`, then
+  passes one total `ImportResolutionIndex` to `WireLookupScopes` without requesting a checked module
+  interface;
+- `CheckExpressionPrefix` edges always decrease the token-range measure, while an equal-range edge
+  reaches the declared reject policy rather than recursing through parser state;
+- blocked fine parsing atomically publishes nothing and restart requests the same dependency keys
+  from the same `FineParseSubject`; and
+- each `ScopeWiringPublication.output` is reproducible by `ExtendScopeWiring` and feeds the next
+  source-order sibling, while composite parse/check results retain the exact canonical typed-node or
+  header producer ID.
 
 ## Elaboration and IR tests
 
@@ -905,7 +974,7 @@ Elaboration tests directly instantiate typed nodes and assert explicit plans:
   stable projection identity, result proof, and output storage through `ELB-STO-003`,
   `ELB-STO-004`, and `IR-STO-002`. Dereference applications preserve the independently executable
   handle plus the stable identity/path equation through `IR-REF-004`; no IRReady or IR descriptor
-  contains a `NodeId<Typed>`;
+  contains a `AnyASTNodeId<Typed>`;
 - accessor-result certificate lowering retains producer instruction/normal ordinal, call
   instantiation ID, contract, stage-free subject evidence, signature, referent, exact
   source-role-to-producer-operand/projection bindings, every component derivation, and result shape,
@@ -973,7 +1042,7 @@ constraints, and scheduler dependency graphs. Important metamorphic properties a
 - reordering generic constraints does not change a unique solution;
 - adding an unused private declaration does not change exported semantic hashes;
 - one-worker and many-worker schedules are identical; and
-- serialize/deserialize between stages does not change the next-stage result.
+- serialize/deserialize between representation forms does not change the next requested result.
 
 ## Coverage gates
 

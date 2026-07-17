@@ -1,0 +1,214 @@
+(*
+    Declaration-outline grammar for CSTSnapshot<DeclParsed>.
+
+    This grammar is paired with decl-cst-production-profile.json. CST_ELEMENT, TRIVIA, TOKEN,
+    and INACTIVE_ELEMENT are stage-local terminal selectors defined by chapter 2: they select
+    existing MacroExpanded terminals and never manufacture lexer tokens. Boundary, activity,
+    fallback-declarator, and precedence predicates are the deterministic scanner rules there.
+*)
+
+outline-unit = outline-layout-run,
+               { outline-declaration, outline-layout-run },
+               END_OF_FILE ;
+
+outline-declaration = outline-import-declaration
+                    | outline-namespace-declaration
+                    | outline-aggregate-declaration
+                    | outline-interface-declaration
+                    | outline-extension-declaration
+                    | outline-buffer-declaration
+                    | outline-callable-declaration
+                    | outline-property-declaration
+                    | outline-variable-declaration
+                    | outline-type-alias-declaration
+                    | outline-associated-declaration
+                    | outline-syntax-declaration
+                    | outline-explicit-generic-declaration
+                    | outline-empty-declaration
+                    | outline-fallback-declaration
+                    | outline-recovered-declaration ;
+
+outline-layout-run = { TRIVIA | outline-inactive-content } ;
+
+outline-inactive-content =
+    <the maximal contiguous run selected by INACTIVE_ELEMENT>,
+    INACTIVE_ELEMENT, { INACTIVE_ELEMENT } ;
+
+outline-modifier-prefix =
+    { outline-modifier, outline-layout-run } ;
+
+outline-modifier = outline-attribute-modifier
+                 | outline-keyword-modifier ;
+
+outline-attribute-modifier = "[", outline-unparsed-content, "]" ;
+
+outline-keyword-modifier =
+    <token is a declaration modifier in GrammarVocabulary>, TOKEN ;
+
+outline-import-declaration = outline-modifier-prefix,
+                             [ SOFT("__exported"), outline-layout-run ],
+                             ( SOFT("import") | SOFT("__import") ),
+                             outline-layout-run,
+                             outline-import-module-name,
+                             outline-layout-run,
+                             ";" ;
+
+outline-import-module-name = outline-dotted-module-name
+                           | STRING_LITERAL ;
+
+outline-dotted-module-name = IDENTIFIER,
+                             { outline-layout-run, ".", outline-layout-run,
+                               IDENTIFIER } ;
+
+outline-namespace-declaration = outline-modifier-prefix,
+                                SOFT("namespace"), outline-layout-run,
+                                outline-namespace-name,
+                                outline-unparsed-header,
+                                ( outline-declaration-container | ";" ) ;
+
+outline-namespace-name = IDENTIFIER,
+                         { outline-layout-run, ( "." | "::" ),
+                           outline-layout-run, IDENTIFIER } ;
+
+outline-aggregate-declaration = outline-modifier-prefix,
+                                <ScanFallbackDecl does not select a trailing declarator group>,
+                                outline-aggregate-introducer,
+                                outline-layout-run,
+                                [ IDENTIFIER ],
+                                outline-unparsed-header,
+                                ( outline-declaration-container | ";" ) ;
+
+outline-aggregate-introducer = SOFT("struct") | SOFT("class") | SOFT("enum") ;
+
+outline-interface-declaration = outline-modifier-prefix,
+                                SOFT("interface"), outline-layout-run,
+                                IDENTIFIER,
+                                outline-unparsed-header,
+                                outline-declaration-container ;
+
+outline-extension-declaration = outline-modifier-prefix,
+                                ( SOFT("extension") | SOFT("__extension") ),
+                                outline-unparsed-header,
+                                outline-declaration-container ;
+
+outline-buffer-declaration = outline-modifier-prefix,
+                             ( SOFT("cbuffer") | SOFT("tbuffer") ),
+                             outline-layout-run,
+                             [ IDENTIFIER ],
+                             outline-unparsed-header,
+                             outline-declaration-container ;
+
+outline-callable-declaration = outline-modifier-prefix,
+                               outline-callable-introducer,
+                               outline-layout-run,
+                               [ IDENTIFIER ],
+                               outline-unparsed-header,
+                               outline-deferred-body ;
+
+outline-callable-introducer = SOFT("func")
+                            | SOFT("__init")
+                            | SOFT("__func_extension") ;
+
+outline-property-declaration = outline-modifier-prefix,
+                               ( SOFT("property") | SOFT("__subscript") ),
+                               outline-layout-run,
+                               [ IDENTIFIER ],
+                               outline-unparsed-header,
+                               outline-deferred-body ;
+
+outline-variable-declaration = outline-modifier-prefix,
+                               ( SOFT("let") | SOFT("var") ),
+                               outline-layout-run,
+                               IDENTIFIER,
+                               outline-unparsed-header,
+                               ";" ;
+
+outline-type-alias-declaration = outline-modifier-prefix,
+                                 SOFT("typealias"), outline-layout-run,
+                                 IDENTIFIER,
+                                 outline-unparsed-header,
+                                 ";" ;
+
+outline-associated-declaration = outline-modifier-prefix,
+                                 outline-associated-introducer,
+                                 outline-layout-run,
+                                 [ IDENTIFIER ],
+                                 outline-unparsed-header,
+                                 outline-deferred-body ;
+
+outline-associated-introducer = SOFT("associatedtype")
+                              | SOFT("__associatedfunc")
+                              | SOFT("type_param")
+                              | SOFT("__generic_value_param")
+                              | SOFT("__constraint") ;
+
+outline-syntax-declaration = outline-modifier-prefix,
+                             SOFT("syntax"), outline-layout-run,
+                             IDENTIFIER,
+                             outline-unparsed-header,
+                             outline-deferred-body ;
+
+outline-explicit-generic-declaration = outline-modifier-prefix,
+                                       SOFT("__generic"),
+                                       outline-unparsed-header,
+                                       outline-declaration ;
+
+outline-empty-declaration = outline-modifier-prefix, ";" ;
+
+outline-fallback-declaration = outline-modifier-prefix,
+                               <no preceding outline production applies and
+                                ScanFallbackDecl selected one unique plan>,
+                               outline-c-style-declaration-specifiers,
+                               ( outline-c-style-variable-declarator,
+                                 { outline-layout-run, ",", outline-layout-run,
+                                   outline-c-style-variable-declarator },
+                                 outline-layout-run, ";"
+                               | outline-c-style-function-declarator,
+                                 outline-deferred-body ) ;
+
+outline-c-style-declaration-specifiers =
+    <the exact declaration-specifier range selected by ScanFallbackDecl>,
+    ( outline-c-style-inline-type-specifier | outline-unparsed-content ) ;
+
+outline-c-style-inline-type-specifier =
+    outline-aggregate-introducer, outline-layout-run,
+    [ IDENTIFIER ], outline-unparsed-header,
+    ( <the introducer is struct or class>, outline-declaration-container
+    | <the introducer is enum>, outline-c-style-inline-enum-body ) ;
+
+outline-c-style-inline-enum-body =
+    <ScanFallbackDecl selected the balanced inline enum body>,
+    outline-unparsed-content ;
+
+outline-c-style-variable-declarator =
+    <the next variable-declarator partition selected by ScanFallbackDecl>,
+    outline-c-style-declarator-prefix,
+    IDENTIFIER,
+    outline-c-style-declarator-suffix ;
+
+outline-c-style-function-declarator =
+    <the function-declarator partition selected by ScanFallbackDecl>,
+    outline-c-style-declarator-prefix,
+    IDENTIFIER,
+    outline-c-style-declarator-suffix ;
+
+outline-c-style-declarator-prefix = outline-unparsed-content ;
+outline-c-style-declarator-suffix = outline-unparsed-content ;
+
+outline-recovered-declaration =
+    <recovery policy selected this declaration boundary>,
+    outline-unparsed-content ;
+
+outline-declaration-container = "{", outline-layout-run,
+                                { outline-declaration, outline-layout-run },
+                                "}" ;
+
+outline-unparsed-header =
+    <ScanOutlineHeader stops at the selected declaration-body boundary>,
+    outline-unparsed-content ;
+
+outline-deferred-body =
+    <ScanDeferredBody consumes one semicolon or one balanced brace body>,
+    outline-unparsed-content ;
+
+outline-unparsed-content = { CST_ELEMENT | outline-inactive-content } ;

@@ -1,8 +1,8 @@
 # Subtyping, facets, and extensions
 
 This chapter is normative for interface subtyping, witness-table values, member-providing facets,
-extension application, and lookup disambiguation. Chapter 4 defines the shared semantic fields,
-chapter 5 defines lexical lookup, and chapter 8 defines witness-table contents. This chapter defines
+extension application, and lookup disambiguation. Chapter 5 defines the shared semantic fields,
+chapter 6 defines lexical lookup, and chapter 9 defines witness-table contents. This chapter defines
 how those values compose operationally.
 
 The design does not preserve a frontend representation merely because the current compiler uses it.
@@ -40,7 +40,7 @@ facet.
 A type-to-interface `SubtypeWitness` is an immutable semantic value. It can be stored in generic
 arguments, substituted, serialized, reflected through the node schema, passed as a runtime generic
 argument, and lowered independently of any declaration that happens to use it. This chapter reuses
-chapter 8's `SubtypeWitnessTarget` for both witness-table forms and operational witness values;
+chapter 9's `SubtypeWitnessTarget` for both witness-table forms and operational witness values;
 there is no separate conformance-endpoint product.
 
 ```text
@@ -70,7 +70,7 @@ SubtypeWitnessOperation =
   | LookupSubtypeWitness(base: SubtypeWitnessId,
                          key: SubtypeWitnessLookupKey)
   | ExtractExistentialSubtypeWitness(opening: OpenedTypeId,
-                            source: NodeId<Typed>)
+                            source: AnyASTNodeId<Typed>)
   | ErrorSubtypeWitness(error: ErrorId)
 
 SubtypeWitnessKey = {

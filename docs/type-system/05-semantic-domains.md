@@ -9,12 +9,9 @@ such as substitution, conversion comparison, or capability implication directly 
 ```text
 Name = {
     text: InternedString,
-    hygiene: HygieneId,
     class: NameClass,
     origin: Origin
 }
-
-HygieneId = Unhygienic | HygienicExpansion(origin: TokenOriginId)
 
 NameClass =
     IdentifierName
@@ -25,9 +22,10 @@ NameClass =
 
 NameKey = {
     normalizedText: Utf8String,
-    class: NameClass,
-    hygiene: HygieneId
+    class: NameClass
 }
+
+nameKey(name: Name, languageRules: LanguageRuleSetId) -> NameKey
 
 DeclKind = {
     stableName: QualifiedName,
@@ -65,7 +63,8 @@ DeclId = {
 }
 
 DeclFragmentKey = {
-    syntax: NodeId<Surface>,
+    outline: DeclOutlineId,
+    binding: DeclOutlineBindingOrdinal,
     kind: DeclKind
 }
 
@@ -95,22 +94,28 @@ ExpansionPath = NodeList<PackExpansionIndex>
 ParameterKey = (source: SourceParameterKey, expansion: ExpansionPath)
 ```
 
-`nameKey` NFC-normalizes identifier text, preserves the exact `NameClass`, and copies the hygiene
-identity. Physical source and today's unhygienic macro expansion use `Unhygienic`; a language mode
-that enables hygienic expansion must supply the originating `TokenOriginId`. Source spelling and
-provenance remain available through `Name.origin` and the originating token but cannot affect map
-identity. Operator names, constructors, accessors, and contextual syntax have declared classes
-instead of magic strings.
+`nameKey` applies the normalization relation selected by the exact `LanguageRuleSetId` and preserves
+the exact `NameClass`. Compatibility rules use the decoded scalar sequence unchanged, as required
+by `LEX-ID-001`; a modern rule set may select NFC only as an explicit language-version feature.
+Source spelling and provenance remain available through `Name.origin` and the originating token but
+cannot affect map identity. Operator names, constructors, accessors, and contextual syntax have
+declared classes instead of magic strings.
 
-`TYP-NAM-001`: `NameKey` equality is exact equality of all three fields. A scope map, declaration
+`TYP-NAM-001`: `NameKey` equality is exact equality of both fields. A scope map, declaration
 grouping rule, or label comparison may apply a different language relation only through a named
-rule; it may not compare intern-pool addresses or silently discard hygiene.
+rule; it may not compare intern-pool addresses or token provenance.
 
-`TYP-NAM-002`: `nameKey(Name).normalizedText` is the language-rule-set normalization of
-`Name.text`. `OperatorName` is a tag; its complete normalized operator spelling occurs only in
+`TYP-NAM-002`: `nameKey(name, languageRules).normalizedText` is exactly the normalization selected
+by `languageRules` for
+`name.text`. `OperatorName` is a tag; its complete normalized operator spelling occurs only in
 `normalizedText`. Constructor/accessor/contextual classes likewise add only the semantic role shown
 by their payload. It is invalid to construct a key whose normalized text or class disagrees with
 the source `Name`, so a second spelling field cannot split or alias operator identity.
+
+`TYP-NAM-003`: Slang preprocessing is textual and unhygienic. A macro-produced identifier compares
+by the same normalized text and `NameClass` as a physically written identifier; its `TokenOrigin`
+affects diagnostics and formatting provenance, not lookup identity. A future hygienic macro system
+would be a new versioned name-identity rule and schema, not a dormant field on every current name.
 
 `TYP-DID-001`: `DeclId` equality is exact field equality. Named path segments use canonical
 `NameKey` values; anonymous anchors are collision-safe content IDs and their ordinal is assigned in
@@ -120,9 +125,10 @@ use the versioned alpha-normalized redeclaration identity shape, anonymous decla
 syntax anchor/role ordinal, and synthesized declarations use their synthesis identity. No hash,
 source byte offset, provisional handle, or definition revision defines nominal equality.
 
-`TYP-DID-002`: `DeclFragmentId` is the exact content ID of one Surface-AST declaration node
-and its declared kind. Its discriminator includes the full snapshot-local `NodeId<Surface>` tuple,
-so two written occurrences never alias even when their text is equal. Redeclaration freezing may map
+`TYP-DID-002`: `DeclFragmentId` is the exact content ID of one declaration-outline CST node,
+its gap-free declaration-binding ordinal, and its declared kind. Its discriminator includes the
+full `DeclOutlineId` tuple, so two written occurrences and two declarators in one `DeclGroup` never
+alias even when their text is equal. Redeclaration freezing may map
 many fragments to one `DeclId`, but neither conversion direction is implicit.
 
 A declaration is a product of independently queryable facts:
@@ -186,9 +192,10 @@ requirement), so explicit/inherited origins and caller-inference semantics are n
 formula copied into the header. Concrete availability is never synthesized from an ordinary
 contract.
 
-`DeclHeader.genericBinder` is a reference into the semantic environment's authoritative
-`GenericBinderTable`, not an embedded binder value. A present reference resolves to a binder whose
-`owner` equals `DeclHeader.declaration`; absence means that declaration has no direct binder entry.
+`DeclHeader.genericBinder` is the stable identity of the binder owned by that declaration, not an
+embedded binder value. `GetGenericBinder(declaration, environment)` computes the immutable binder
+on demand. A present reference equals `GenericBinderOf(DeclHeader.declaration)`; absence means that
+the declaration has no direct generic binder.
 
 ## Scopes and lookup candidates
 
@@ -203,35 +210,21 @@ ScopePosition = {
     ordinal: UInt64
 }
 
-FragmentScope = {
+Scope = {
     id: ScopeId,
     kind: ScopeKind,
     policy: ScopePolicy,
     parent: Option<ScopeId>,
     parentEntry: Option<ScopePosition>,
     lexicalMembers: NodeMap<NameKey, NodeList<DeclFragmentId>>,
-    nodePositions: NodeMap<NodeId<Scoped>, ScopePosition>,
     bindingPoints: NodeMap<DeclFragmentId, ScopePosition>,
     endPosition: ScopePosition,
-    origin: Origin
-}
-
-FrozenScope = {
-    id: ScopeId,
-    kind: ScopeKind,
-    policy: ScopePolicy,
-    parent: Option<ScopeId>,
-    parentEntry: Option<ScopePosition>,
-    lexicalMembers: NodeMap<NameKey, NodeList<DeclId>>,
-    nodePositions: NodeMap<NodeId<Scoped>, ScopePosition>,
-    bindingPoints: NodeMap<DeclId, ScopePosition>,
-    endPosition: ScopePosition,
     importedScopes: NodeList<ImportEdge>,
-    extensions: NodeList<DeclId>,
+    extensions: NodeList<DeclFragmentId>,
     origin: Origin
 }
 
-Scope = FrozenScope
+ScopeWiringId = ContentId<ScopeWiring>
 
 SemanticVersion = (major: UInt32, minor: UInt32, patch: UInt32)
 DialectId = QualifiedName
@@ -282,8 +275,7 @@ GenericEnvironmentId = ContentId<GenericEnvironment>
 
 SemanticEnvironment = {
     snapshot: SemanticSnapshotId,
-    frozenScopes: ContentId<FrozenScopeGraph>,
-    genericBinders: GenericBinderTableId,
+    scopeWiring: ScopeWiringId,
     moduleGraph: ContentId<ModuleGraph>,
     languageRules: LanguageRuleSetId,
     standardEnvironment: StandardEnvironmentId
@@ -331,6 +323,11 @@ LookupResult =
   | Recovered(NodeList<LookupCandidate>, ErrorId)
 ```
 
+`ScopeWiring` has its single structural definition in chapter 3 because it is the output of the
+declaration-outline translation. Its `scopes` values use the `Scope` and `ScopePosition` domains
+defined here; `ScopeWiringId` is the content identity of that exact product, not of a second semantic
+projection.
+
 All environment IDs are `ContentId` values with chapter 1's exact discriminator bytes; a digest
 collision cannot merge contexts. Generic frames are ordered lexically outer-to-inner and contain
 only keys owned by their named binder. `StableOrderKey` is presentation metadata derived from a
@@ -356,7 +353,7 @@ must validate the registered static/runtime endpoint and control schemas before 
 typed operation; registration alone is not evidence that arbitrary operands are applicable.
 
 `TYP-LKP-001`: `LookupAmbiguity.maximal` is exactly the duplicate-free maximal candidate set under
-chapter 14's member-priority relation. `comparisons` contains one endpoint-correct result for every
+chapter 15's member-priority relation. `comparisons` contains one endpoint-correct result for every
 unordered pair of maxima, and none may prefer one endpoint; otherwise that endpoint set is not
 maximal. A legal overload set is `Found`, not ambiguous. `MultipleNonOverloadableMaxima` contains a
 non-overloadable conflicting pair; `IndistinguishableMaxima` contains a distinct pair related only
@@ -370,12 +367,7 @@ diagnostics.
 ## Generic binders, arguments, and substitutions
 
 ```text
-LocalGenericBinderIndex = UInt32
-
-GenericBinderId = {
-    snapshot: SemanticSnapshotId,
-    index: LocalGenericBinderIndex
-}
+GenericBinderId = GenericBinderOf(owner: DeclId)
 
 GenericParameterSort =
     TypeParameterSort(kind: Kind)
@@ -397,13 +389,8 @@ GenericBinder = {
     parent: Option<GenericBinderId>
 }
 
-GenericBinderTable = {
-    snapshot: SemanticSnapshotId,
-    binders: NodeMap<GenericBinderId, GenericBinder>,
-    byOwner: NodeMap<DeclId, GenericBinderId>
-}
-
-GenericBinderTableId = ContentId<GenericBinderTable>
+GetGenericBinder(owner: DeclId, environment: SemanticEnvironmentId)
+    -> QueryStep<Option<GenericBinder>>
 
 ConstraintId = snapshot-local identity of one ConstraintDecl
 
@@ -508,22 +495,22 @@ OptionalAbsenceReason =
 OptionalEvidence = Present(ConstraintEvidence) | Absent(OptionalAbsenceReason)
 ```
 
-The table lookup and the two relevant equality relations are explicit:
+Binder lookup and the two relevant equality relations are explicit:
 
 ```text
-resolveGenericBinder(table, id) = table.binders[id]
-    when id.snapshot = table.snapshot and table.binders[id].id = id
+resolveGenericBinder(environment, GenericBinderOf(owner)) =
+    GetGenericBinder(owner, environment)
 
 sameGenericBinderId(a, b) iff
-    a.snapshot = b.snapshot and a.index = b.index
+    ownerOf(a) = ownerOf(b)
 
 sameGenericBinder(a, b) iff sameGenericBinderId(a.id, b.id)
 
-alphaEquivalentBinder(tableA, a, tableB, b) iff
-    canonicalizeBinder(tableA, a.id) = canonicalizeBinder(tableB, b.id)
+alphaEquivalentBinder(environmentA, a, environmentB, b) iff
+    canonicalizeBinder(environmentA, a.id) = canonicalizeBinder(environmentB, b.id)
 ```
 
-`sameGenericBinderId` and `sameGenericBinder` are snapshot-working identity.
+`sameGenericBinderId` and `sameGenericBinder` are stable owner identity.
 `alphaEquivalentBinder` first replaces source
 parameter identities by depth/ordinal variables and is the relation used by canonical type,
 signature, frame, and redeclaration shapes. It does not make structurally equal source binders share
@@ -531,7 +518,7 @@ a `GenericBinderId`.
 
 `SubstitutionSet` is keyed by parameter identity, never binder position. Positional source arguments are
 mapped to identities once during generic argument mapping. The empty substitution is `id`.
-`GenericParameterKey` is a snapshot-local lookup key, not part of structural type equality. Before
+`GenericParameterKey` is an owner-identity lookup key, not part of structural type equality. Before
 hashing or comparing a type, bound parameters are alpha-normalized to `CanonicalBoundVariable`
 (equivalently, de Bruijn depth plus ordinal). Renaming a generic parameter or rebuilding the same
 binder in another snapshot therefore cannot change a function type.
@@ -541,7 +528,7 @@ constraints record `Absent` explicitly; absence is not an error witness. Pack ex
 distinct `ParameterKey` for each expanded callable parameter. The empty expansion path identifies
 an unexpanded parameter, while nested paths such as `[2, 0]` remain stable across scheduling order.
 
-`SubstitutionSet`, `GenericParameterKey`, and `ConstraintKey` are working/snapshot views used by
+`SubstitutionSet`, `GenericParameterKey`, and `ConstraintKey` are query-working views used by
 mapping and solving. Freezing alpha-normalizes the binder, orders arguments by canonical parameter
 ordinal, rewrites evidence to `CanonicalConstraintSlot`, and assigns a named frame role.
 `SpecializationFrame` is the only applied-binder form stored in `DeclRef`; an unapplied
@@ -595,14 +582,15 @@ argumentMatchesSort(ValuePackArg(vs), ValuePackParameterSort(t)) iff
 argumentMatchesSort(_, _) = false otherwise
 ```
 
-`TYP-BND-004`: `GenericBinderTable` is the sole authority for snapshot binder references. Its map
-key equals each value's `id`, every ID names `table.snapshot`, `byOwner` is a bijection between
-owners and binders, and every parent resolves in the same table to a strictly enclosing binder.
-Freezing sorts binders by stable owner identity before assigning `LocalGenericBinderIndex` and
-rewrites all provisional references. A semantic environment's table snapshot equals
-`SemanticEnvironment.snapshot`. `DeclHeader.genericBinder = Some(id)` iff `byOwner[declaration] =
-id`; `GenericEnvironmentFrame`, `GenericParameterKey`, and `ConstraintKey` references must resolve
-through the same table. Table/ID equality is never substituted for alpha-equivalence.
+`TYP-BND-004`: A logical declaration owns at most one direct generic binder, whose identity is
+`GenericBinderOf(owner)`. `GetGenericBinder` returns `None` exactly when the declaration has no
+direct binder; otherwise the result's `id` and `owner` equal that identity and declaration. A
+parent is the binder of a strictly enclosing declaration and is obtained through the same query.
+`DeclHeader.genericBinder = Some(GenericBinderOf(declaration))` exactly when the query returns a
+binder. `GenericEnvironmentFrame`, `GenericParameterKey`, and `ConstraintKey` use these stable
+identities. Binder identity never substitutes for alpha-equivalence, which is still defined by
+canonical bound variables. The scheduler may memoize query results, but no second binder table is
+a semantic authority.
 
 `TYP-BND-005`: `GenericParam.sort`, `CanonicalGenericParameter.sort`, and
 `CanonicalBoundVariable.sort` are the same four-way `GenericParameterSort` domain. Canonicalization
@@ -720,7 +708,7 @@ in the standard environment:
 
 ```text
 OpenedTypeKey = {
-    opening: NodeId<Typed>,
+    opening: AnyASTNodeId<Typed>,
     interface: InterfaceInstanceKey
 }
 
@@ -744,7 +732,7 @@ Type =
                     access: AccessQualifier, lifetime: LifetimeId)
   | ArrayExpressionType(element: TypeId, count: ConstValue)
   | ExistentialType(interfaces: CanonicalInterfaceSet)
-  | ExtractExistentialType(identity: OpenedTypeId, source: NodeId<Typed>)
+  | ExtractExistentialType(identity: OpenedTypeId, source: AnyASTNodeId<Typed>)
   | ConcreteTypePack(NodeList<TypeId>)
   | EachType(elementType: TypeId)
   | ExpandType(patternType: TypeId, capturedPacks: NodeList<PackId>)
@@ -981,8 +969,8 @@ directPhysicalLocationRequirement(rule, sourceRequirement) = {
 ```
 
 `DifferentialParticipation`, `DifferentiabilityPromise`, and the callable derivative contract are
-defined in chapter 16. `CallablePurpose` and its explicit initialization target are defined in
-chapter 15. They are referenced here because both are structural parts of the checked function
+defined in chapter 17. `CallablePurpose` and its explicit initialization target are defined in
+chapter 16. They are referenced here because both are structural parts of the checked function
 type, not modifiers recovered from the declaration or body.
 
 The modes form two explicit axes rather than pointer-like type wrappers:
@@ -1063,7 +1051,7 @@ operand of the interned `FuncType`. Slots associate arguments and evidence with 
 after pack expansion. A checked language rule constructs
 `IdentityLabel(NameKey)` when labels participate in callable identity and `LabelExcluded`
 otherwise; source spelling/origin remains on parameter AST nodes. That compatibility decision is
-tracked in chapter 12 and never leaves an undecided source `Name` inside `FuncType`.
+tracked in chapter 13 and never leaves an undecided source `Name` inside `FuncType`.
 Mode equality is fieldwise over `ParamPassingMode.domain` and `ParamPassingMode.access`; a
 `PhysicalOperand(location)` includes all lifetime, address-space, and source fields of `location`.
 No source spelling or compatibility alias replaces those structural equality operands.
@@ -1115,7 +1103,7 @@ The following relations must name their fields instead of sharing an accidental 
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | structural equality/canonical hash | all `TYP-FUN-003` fields after alpha-normalization                                                                                          |
 | function conversion compatibility  | receiver and parameter variance, modes, result/error, and traits under an explicit rule                                                     |
-| overload/redeclaration identity    | only chapter 5's `RedeclarationKey`/`CallableShape` input discriminators; excluded signature-field differences are diagnosed after grouping |
+| overload/redeclaration identity    | only chapter 6's `RedeclarationKey`/`CallableShape` input discriminators; excluded signature-field differences are diagnosed after grouping |
 | interface matching                 | equality/subtyping plus an explicit adapter plan and contract compatibility                                                                 |
 | symbol mangling                    | canonical binder shape, receiver, parameters, result/error, traits, and calling convention                                                  |
 | ABI lowering                       | receiver, modes, value layouts, error convention, traits, and calling convention                                                            |
@@ -1263,9 +1251,10 @@ EffectUseGraphId = ContentId<EffectUseGraph<Published>>
 
 Unqualified `EffectUse` means `EffectUse<Published>`. Construction-stage synthesis graphs may use
 `EffectUse<Construction>` whose witness resolution set contains a scope-authorized
-`OperationalWitnessTableRef`; chapter 8's atomic freeze must rewrite only that resolution to its
+`OperationalWitnessTableRef`; chapter 9's atomic freeze must rewrite only that resolution to its
 frozen definition reference before the graph can enter any published
-typed/elaborated snapshot, exported metadata, or IR. Construction-stage elaborated nodes
+`SemanticSnapshot` node of `Typed` or `Elaborated` form, exported metadata, or IR.
+Construction-stage elaborated nodes
 inside the synthesis transaction remain legal and cannot escape that transaction.
 `rootWitnessResolutions` is the minimal stage-correct set required by `root.specializations`.
 Every graph map key equals `ContentId(use.key)`, every `use.key.owner` equals `root`, and ordinals
@@ -1378,7 +1367,7 @@ pointerStorageView(ReadWrite) = (ReadWriteAccess, Mutable)
 pointerStorageView(Read) = (ReadAccess, UnknownMutability)
 pointerStorageView(Immutable) = (ReadAccess, Immutable)
 
-SourceArgumentId = NodeId<Typed>
+SourceArgumentId = AnyASTNodeId<Typed>
 SourceArgumentForm = OrdinaryArgument | PackExpansionArgument
 
 SourceArgument = {
@@ -1567,7 +1556,7 @@ AssignSemanticOperationSite(context: SemanticOperationSiteAssignmentContextId,
                             role: SemanticOperationSiteRole)
     -> Result<SemanticOperationSiteAssignment, SemanticOperationSiteFailure>
 
-ValidateSemanticOperationSite(owner: NodeId<Typed>,
+ValidateSemanticOperationSite(owner: AnyASTNodeId<Typed>,
                               assignment: SemanticOperationSiteAssignment)
     -> Result<Unit, SemanticOperationSiteFailure>
 
@@ -1591,15 +1580,15 @@ AssignPhysicalProjectionSite(context: PhysicalProjectionSiteAssignmentContextId,
                              role: PhysicalProjectionSiteRole) =
     AssignSemanticOperationSite(context, origin, parent, role)
 
-ValidatePhysicalProjectionSite(owner: NodeId<Typed>,
+ValidatePhysicalProjectionSite(owner: AnyASTNodeId<Typed>,
                                assignment: PhysicalProjectionSiteAssignment) =
     ValidateSemanticOperationSite(owner, assignment)
 
 PhysicalProjectionApplicationOwner =
-    TypedProjectionOwner(node: NodeId<Typed>)
+    TypedProjectionOwner(node: AnyASTNodeId<Typed>)
   | StorageAccessProjectionOwner(plan: ContentId<InternalRefStoragePlan>,
                                  ordinal: UInt32)
-  | CallSlotProjectionOwner(call: NodeId<Typed>,
+  | CallSlotProjectionOwner(call: AnyASTNodeId<Typed>,
                             slot: BoundCallSlot,
                             operationPath: NonEmpty<SemanticOperationSiteRole>)
 
@@ -1639,7 +1628,7 @@ PublishPhysicalProjectionSemanticResults(
     -> PhysicalProjectionSemanticResultSnapshotId
 
 BuildPhysicalProjectionApplicationIndex(
-    snapshot: ASTSnapshotId<Typed>,
+    snapshot: SemanticSnapshotId,
     semanticResults: PhysicalProjectionSemanticResultSnapshotId)
     -> Result<PhysicalProjectionApplicationIndex,
               PhysicalProjectionApplicationIndexFailure>
@@ -1888,7 +1877,7 @@ AbstractStorageRef = {
     access: StorageAccessMode,
     mutability: Mutability,
     capturedSources: CapturedStorageSources,
-    evaluationIdentity: NodeId<Typed>,
+    evaluationIdentity: AnyASTNodeId<Typed>,
     witnessResolutions: WitnessResolutionStamp
 }
 
@@ -2257,7 +2246,7 @@ separately stored `base` must equal the application's input path. The path never
 expression or any other AST identity. The named application is the sole authority for the exact
 checked base, converted index, written evaluation order, builtin operation rule, result-type proof,
 and complete output storage. Resolving the path identity to zero, two, a registered projection, or
-an application with a different input path is an invalid typed projection. The later IR-ready AST and IR
+an application with a different input path is an invalid typed projection. The later IR-ready node and IR
 consumers retain the complete application beside the path rather than requiring a global raw-ID
 resolver.
 
@@ -2267,7 +2256,7 @@ application by `DereferenceApplicationIdentity`. For explicit syntax that applic
 in an `InternalRefStoragePlanAt<S>` or `ParameterReferenceAccessorPlanAt<S>`. In every case the exact executable handle operand and
 its `PointerLikeProof` are retained independently of the path, and the resulting
 `DereferencedStorageProof.identity = application` with
-`output.storage.path = DereferencedReference(application)`. The IR-ready AST and IR retain that identity with
+`output.storage.path = DereferencedReference(application)`. The IR-ready node and IR retain that identity with
 the executable handle operand and proof-derived endpoint shapes. A typed-node ID, the handle's
 producer node, or an equal handle type can never substitute for the application identity.
 The internal operation's dereference site is the fixed-role child of its accessor invocation's
@@ -2280,7 +2269,7 @@ standalone Typed projection node.
 `SemanticOperationSiteKey`. Parsed syntax anchors the key in canonical physical source ranges and
 a deterministic same-range occurrence derived from its CST cursor, without embedding a CST or AST
 snapshot identity. Macro-origin ranges are computed by `physicalSpellingSources` from each token's
-immutable `TokenOriginId` through the `CSTRewrite` graph. Synthesized,
+immutable, backward-pointing `TokenOriginId` graph. Synthesized,
 imported, and recovery syntax uses the corresponding closed stage-free anchor. A synthesized anchor contains only a
 source/import/recovery root plus a fixed rule/ordinal synthesis path; it never embeds the source
 `SynthesizedSemanticId`, `SynthesisKey`, cause, or canonical arguments. A recovery anchor contains
@@ -2291,7 +2280,7 @@ role rather than reusing the source
 application. Physical projection, dereference, accessor invocation, and temporary-storage allocation
 constructors content-address that complete key and wrap the result in
 distinct nominal types. None accepts `StableSemanticId`, `AnyCSTNodeId`, `AnyNodeId`,
-`NodeId<Typed>`, an IR-ready AST
+`AnyASTNodeId<Typed>`, an IR-ready node
 value ID, or an IR instruction ID. Requests carry an authenticated site assignment explicitly, and
 their successful
 application identity must equal the corresponding constructor result, avoiding both an AST content-
@@ -2300,7 +2289,8 @@ identity cycle and a later attempt to recover a site from `Origin`.
 `TYP-STO-016`: `AssignSemanticOperationSite` normalizes the supplied origin to exactly one closed
 source/synthesis/import/recovery anchor using only its explicit frozen assignment context. That
 context is part of the query key and records the exact source snapshots, macro-expanded CST
-predecessors, and earlier-stage provenance snapshot traversed; it cannot include the Typed snapshot being built, and
+predecessors, and predecessor `SemanticSnapshot` values traversed; it cannot include the semantic
+snapshot currently being constructed, and
 no ambient source manager or AST registry participates. A root
 derived from synthesized or recovery `Origin` recursively projects provenance to the closed
 `SemanticOperationSourceAnchor` and records only the fixed derivation path shown above. Failure to
@@ -2316,7 +2306,8 @@ validate functions are compatibility aliases of this one schema rather than an i
 identity mechanism. A `PhysicalProjectionSemanticResultSnapshot` is
 published only after its `queryDependencies` form a bijection onto the exact completed
 `PlanStorageAccessAt<Published>` results that contain the keyed `storagePlans`; every content ID
-resolves byte-identically. `BuildPhysicalProjectionApplicationIndex` traverses the Typed snapshot
+resolves byte-identically. `BuildPhysicalProjectionApplicationIndex` traverses the
+`ASTNodeId<Typed, _>` view of the heterogeneous `SemanticSnapshot`
 and that frozen result snapshot, registering every builtin, registered, explicit-dereference,
 storage-fallback, and physical call-slot application under its nominal identity and exact owner. A
 `CallSlotProjectionOwner(call, slot, path)` resolves the selected typed call, its exact
@@ -2332,10 +2323,10 @@ stored site assignment validates against that owner (or the published plan's aut
 and whose identity equals the matching constructor applied to `site.site` and to the index key. For
 `CallSlotProjectionOwner`, the authenticated parent is the exact typed source retained by the
 slot's `PhysicalParameterSourceAt<S>`, not the enclosing call node: the accessor invocation site
-validates against that source's `NodeId<Typed>`, and the stored child dereference site extends that
+validates against that source's `AnyASTNodeId<Typed>`, and the stored child dereference site extends that
 same anchor by the fixed dereference role. Pairing an accessor plan with an equal-classified sibling
 source, or validating its site against `call`, is invalid.
-Duplicate or unresolved owners make the semantic snapshot invalid. The IR-ready AST
+Duplicate or unresolved owners make the semantic snapshot invalid. The IR-ready node
 and IR carry complete applications and do not serialize this Typed-snapshot index.
 
 `TYP-STO-017`: `StoredRoot` contains only the stage-free `DeclRef` that owns the physical
@@ -2343,7 +2334,7 @@ storage. Checking a name expression obtains that root from `BoundDeclUse.target`
 complete `BoundDeclUse` separately on the typed expression for lookup, access, witnesses,
 extensions, diagnostics, and origin. No `LookupPath`, `VisibilityDecision`, witness-resolution sidecar,
 `Origin`, or AST node is copied into `PhysicalStoragePath`. Consequently copying a use of the same
-specialized declaration preserves physical-storage identity, while IR-ready AST/IR static storage proofs
+specialized declaration preserves physical-storage identity, while IR-ready node/IR static storage proofs
 cannot acquire an AST reference transitively through the root.
 
 `TYP-ACC-002`: `InMode` requires an ordinary readable value preparation. `OutMode` requires write
@@ -2355,7 +2346,7 @@ requires either the argument's existing `PhysicalStorage(p)`, or an exact access
 accessor invocation followed by an explicit dereference whose endpoint is a new
 `PhysicalStorage(p)`. In either case it requires a `PhysicalStorageProof` for that exact endpoint and
 requirement, a non-recovery equality between `p.valueType` and the substituted parameter value
-type, and chapter 7's conversion-free `PhysicalStorageIdentityProof`. The chapter 7
+type, and chapter 8's conversion-free `PhysicalStorageIdentityProof`. The chapter 8
 `PhysicalParameterBindingProofAt<S>`
 retains those facts, the exact `AccessEnvironmentId`, and whether the physical endpoint was direct
 or produced by the stored accessor plan.
@@ -2364,7 +2355,7 @@ or produced by the stored accessor plan.
 container order is never an alias test. Two `ConstRefMode` read claims may overlap. An exclusive
 `OutMode`/`InOutMode` claim conflicts with every overlapping live read/write claim. `RefMode`
 aliasing is permitted only by the versioned rule stored with its exact read/write access mode and
-still obeys atomic discipline. Chapter 7's
+still obeys atomic discipline. Chapter 8's
 `CheckCallAliasClaims` applies this algebra to all receiver/argument plans together, and the
 selected candidate stores either every pairwise compatibility proof or the structured conflict.
 
@@ -2722,14 +2713,14 @@ application always proceeds from the outermost owner to the referenced declarati
 `TYP-DRF-004`: A `ResolvedDeclRefAt<S>` or `BoundDeclUseAt<S>` resolution map has exactly the
 canonical union of `requiredDefinitions` for every subtype witness reachable from its
 specialization spine, lookup path, member evidence, and referenced accessor selector. Map keys and
-definition refs obey chapter 14's stage rule; unrelated definitions are forbidden. The map is a
+definition refs obey chapter 15's stage rule; unrelated definitions are forbidden. The map is a
 dependency/materialization sidecar and never participates in `DeclRef`, `LookupPathRole`,
 `FacetKey`, overload identity, or mangling. Projecting a selected bound use to a callable preserves
 this sidecar rather than reconstructing table revisions from an ambient snapshot.
 
 `TYP-DRF-005`: `BoundDeclUseAt<S>.extensionUses` has exactly one entry for every distinct
 `ExtensionApplicabilityEvidenceId` occurring in its retained lookup path and no other entry. Each
-map key equals `use.applicability`. Chapter 14 validates the ordinary capability-use map against the
+map key equals `use.applicability`. Chapter 15 validates the ordinary capability-use map against the
 specialized extension and optional target requirements. The sidecar is use provenance, not lookup-
 route identity: it is excluded from `DeclRef`, `LookupPathRole`, and `FacetKey`, but every
 projection/elaboration of the committed bound use preserves and aggregates it exactly once.
@@ -2737,7 +2728,7 @@ projection/elaboration of the committed bound use preserves and aggregates it ex
 ## Evidence and witnesses
 
 Evidence is typed proof data. Representation adjustment, interface refinement, subtype
-witness values, existential opening, and conversion are distinct relations. Chapter 14 is the
+witness values, existential opening, and conversion are distinct relations. Chapter 15 is the
 schema and operational authority for `RepresentationAdjustmentPath` and
 `SubtypeWitnessId`:
 
@@ -2818,7 +2809,7 @@ TypeCoercionWitness<S: WitnessTableState> = {
 Proof constructors state their premises, and a debug validator rechecks them. Error evidence
 supports recovery but cannot discharge a user-written generic constraint in a successfully
 published module interface. No constructor implicitly converts one evidence family into another;
-chapter 7 names every permitted bridge.
+chapter 8 names every permitted bridge.
 
 `TYP-EVD-001`: Resolving a proof ID yields a payload whose canonical encoding exactly matches the
 typed `ContentId`; recursive proof edges form a finite DAG. `TypeEqualityProofId`,
@@ -2864,7 +2855,7 @@ extension, specialization, or semantic environment is invalid.
 
 ## Interfaces, conformances, and evidence graphs
 
-Chapter 8 is the sole schema authority for `WitnessTableIdentity`, `WitnessTableDefinitionRevision`,
+Chapter 9 is the sole schema authority for `WitnessTableIdentity`, `WitnessTableDefinitionRevision`,
 `ValidatedWitnessTableRef`, `WitnessTableDefinition`, `RequirementDictionary`, and the kind-indexed
 `GuardedRequirementWitness<K>`/`RequirementWitness<K>` families. An allocated `WitnessTableId` may
 name a draft identity and participate in an atomic recursive build. A
@@ -2901,7 +2892,7 @@ stable, specialization-aware requirement identity.
 
 ## Facets
 
-A facet is a member-providing view reached through an explicit operational route. Chapter 14 is the
+A facet is a member-providing view reached through an explicit operational route. Chapter 15 is the
 authority for route folding and partial priority:
 
 ```text
@@ -2960,7 +2951,7 @@ by witness IDs in the route/evidence and is excluded from `FacetKey`; a selected
 that sidecar into its `BoundDeclUseAt<S>`.
 
 `TYP-FAC-002`: A facet skipped because one dependency is incomplete makes the facet-construction
-query return chapter 10's `QueryStep::Blocked` with that dependency, not a semantic facet result or
+query return chapter 11's `QueryStep::Blocked` with that dependency, not a semantic facet result or
 a silently shortened inheritance list.
 
 Path-distinct diamond routes therefore have different keys even when they end at the same provider.
@@ -3116,7 +3107,7 @@ synthesis transaction and are rewritten together with their operational witness 
 
 There is no "committed candidate" reconstruction step: `Selected.winner` contains every plan and
 piece of evidence needed to construct the typed call. Failures are structured data so diagnostics
-and tests need not scrape text. Candidate ranking is the partial order defined in chapter 7; it does
+and tests need not scrape text. Candidate ranking is the partial order defined in chapter 8; it does
 not depend on container iteration order.
 
 `ApplicableOverloadCandidate.use.target` is the sole stored owner of the selected declaration's
@@ -3131,7 +3122,7 @@ expansion mapped to that slot, or
 `DefaultedCallSource(k)` exactly when slot `k` has a default binding. Defaulted sources participate
 in default/specificity ranking but not pointwise source-conversion comparison. Every
 `access.terminal` is `PassArgument`; a standalone storage terminal cannot inhabit a call slot.
-`access.rankingCoercion = Some(rankingCoercion)`. Chapter 7 derives the slot's sole
+`access.rankingCoercion = Some(rankingCoercion)`. Chapter 8 derives the slot's sole
 `SourceAdaptationRank` from that value. `AppliedStorageCoercion` selects the conversion operation used both
 for pairwise ranking and eventual elaboration as required by `ELB-ACC-003` and records exactly
 `conversionEnvironment`; `ConsumedWithoutStorageCoercion(rule)` names the exact candidate-passing
@@ -3153,7 +3144,7 @@ or retaining a proof while dropping its source list, is invalid.
 
 ## Visibility and capabilities
 
-Chapter 9 is the sole schema authority for the `DeclVisibility` alternatives, their declaration-level
+Chapter 10 is the sole schema authority for the `DeclVisibility` alternatives, their declaration-level
 order, and the separate contextual access predicate. Composite exposure uses that order:
 
 ```text
@@ -3162,7 +3153,7 @@ effectiveVisibility(composite) = meet of referenced declaration visibilities
 
 Capability formulas are positive formulas in disjunctive normal form, represented canonically as a
 set of conjunction clauses. Atom implication and incompatibility come from the versioned standard
-environment. Their full algebra is defined in chapter 9.
+environment. Their full algebra is defined in chapter 10.
 
 ## Semantic validation
 

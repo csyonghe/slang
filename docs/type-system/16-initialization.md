@@ -64,10 +64,10 @@ candidate and reuses it for another.
 ## Requests, goals, and results
 
 ```text
-InitializationInputId = NodeId<Bound>
+InitializationInputId = ContentId<InitializationInputKey>
 
 InitializationInputKey =
-    ExpressionInput(expression: NodeId<Bound>)
+    ExpressionInput(expression: ExprCSTNodeId<Parsed>)
   | InitializerListInput(elements: NodeList<InitializationInputId>,
                 designator: Option<InitializationDesignator>)
 
@@ -128,6 +128,11 @@ InitializationRequest = {
     origin: Origin
 }
 ```
+
+`ResolveInitialization` requests `CheckExpression` for an `ExpressionInput` under the proposed
+target and strategy. The input is syntax identity, not a node produced by a global binding pass.
+Different candidates may therefore check the same syntax under different expected types without
+mutating or prematurely committing that syntax.
 
 `INI-REQ-001`: `InitializeStorage` accepts only fresh or explicitly delegating physical storage from
 the closed `InitializationDestinationStorage` sum. A supplied alternative contains its
@@ -460,7 +465,7 @@ declared and synthesized initializers carry callable rank, aggregate initializat
 rank, `StandardInitializationStrategy(r)` carries a registered rank for exactly `r`, and allocation
 carries both its provider rank and the selected payload plan's complete nested rank. No generic
 “exact” or composite detail may be attached to an unrelated strategy. All `BoundedNat` components
-satisfy chapter 7's common-maximum invariant. A trace is the content hash of its request, strategy,
+satisfy chapter 8's common-maximum invariant. A trace is the content hash of its request, strategy,
 and deterministic semantic events, so retrying a query cannot change its identity by scheduling or
 enumeration order. An applicable, per-strategy rejected, or recovered candidate has
 `Some(candidateStrategy)`; only `RejectedBeforeStrategy` has `None`.
@@ -491,7 +496,7 @@ DefaultMemberRecipe = {
     owner: DeclId,
     slot: AggregateSlotKey,
     binder: Option<CanonicalGenericBinder>,
-    expression: NodeId<Typed>,
+    expression: AnyASTNodeId<Typed>,
     resultType: TypeId,
     readablePredecessors: CanonicallyOrderedSet<AggregateSlotKey>,
     origin: Origin
@@ -660,7 +665,7 @@ admitted by `requirement.addressSpace`; `lifetime` proves the shape lifetime out
 for the address-space admission premise.
 
 `INI-CTR-002`: Constructor argument mapping reuses `ArgumentMap`, generic deduction, overload
-comparison, and keyed access plans from chapter 7. The initialization target is a separate role and
+comparison, and keyed access plans from chapter 8. The initialization target is a separate role and
 is never consumed as receiver/argument zero. Aggregate slot mapping uses its own keyed map and is
 not disguised as a synthesized callable invocation.
 
@@ -744,7 +749,7 @@ InitializationSubobjectStorageProjection = {
 
 InitializationEndpointSourceAt<S: WitnessTableState> =
     RequestInputEndpoint(input: InitializationInputId)
-  | CheckedExpressionEndpoint(expression: NodeId<Typed>)
+  | CheckedExpressionEndpoint(expression: AnyASTNodeId<Typed>)
   | NestedInitializationResultEndpoint(plan: InitializationPlanIdAt<S>)
   | ConstructorCallResultEndpoint(call: ConstructorCallPlanId<S>)
   | RegisteredInitializationResultEndpoint(
@@ -1305,7 +1310,7 @@ effect use and the merged capability-selection product of every registered and n
 so lowering never reruns selection or loses an explicitly true availability source.
 
 `INI-PLN-014`: A `TemporaryInitializationPlanApplicationAt<S>` is the only way an enclosing access
-plan applies chapter 15 initialization to compiler-owned temporary storage. Resolving `plan` yields
+plan applies chapter 16 initialization to compiler-owned temporary storage. Resolving `plan` yields
 an `InitializeStorage(PlanOwnedInitializationStorage(destination), targetType)` request whose
 `planStorage` map contains that exact destination, whose `sourceInput` is the single externally
 captured source input, and whose operation contains the exact `ExpressionInitialization` conversion
@@ -1605,7 +1610,7 @@ IRReadyInitializationPlanStep =
     CreatePlanInitializationStorageStep(storage: PlanInitializationStorageId)
   | TransferInitializationStep(operation: InitializationPath)
   | ConstructorCallInitializationStep(call: ConstructorCallPlanId<Published>,
-                                      callRegion: NodeId<IRReady>)
+                                      callRegion: AnyASTNodeId<IRReady>)
   | AggregateInitializationStep(operation: InitializationPath,
                                 shape: AggregateInitializationShapeId)
   | RegisteredInitializationStep(
@@ -1647,7 +1652,7 @@ InitializationInstSemanticPlan = {
 }
 ```
 
-`INI-IR-001`: The `IRReadyAST` has distinct closed plan steps for plan-storage creation, transfer,
+`INI-IR-001`: The `IRReady` node form has distinct closed plan steps for plan-storage creation, transfer,
 constructor call, aggregate construction, registered execution, allocation, and cleanup. These are
 operational plans, not source strategies. `IRReadyExpr.Initialize` contains
 `IRReadyInitialization`. Each emitted `IRInst` carries `InitializationInstSemanticPlan` in the
@@ -1678,7 +1683,7 @@ shape with
 `ExactAliasRoot(StableAliasRegionIdentity(ContentIdentity(allocation.key.object.id)))`. A supplied destination emits no
 creation operation and retains its incoming physical-storage value and shape; an internal request
 destination reuses the storage/projection operation emitted once by its owning plan.
-For a `TemporaryInitializationPlanApplicationAt<Published>`, chapter 11's
+For a `TemporaryInitializationPlanApplicationAt<Published>`, chapter 12's
 `MaterializeTemporaryInstPlan` is the one lowering of its destination's `CreatePlanStorage`
 transition; no second create operation is emitted. Every internal endpoint rooted at that
 destination uses `ExactAliasRoot(temporaryStorageAliasRoot(application.identity))`, exactly matching
@@ -1716,13 +1721,13 @@ producer is evaluated exactly once in its operation-qualified evaluation order; 
 occurrences reuse that SSA value, and their multiplicity must equal the declared emission recipe.
 Every occurrence preserves its physical-storage shape. Neither IRReady nor IR consults
 `InitializationStrategy`. Every emitted successful initialization instruction contributes the
-exact `InitializationPlanDependency(plan)` required by chapter 11; canonical dependency-map merging
+exact `InitializationPlanDependency(plan)` required by chapter 12; canonical dependency-map merging
 prevents a multi-instruction recipe from creating distinct authorities.
 
 `INI-IR-006`: `InitializationRecovery(error)` and `RecoveryInitializationStep(error)` exist only so
 diagnostic/tooling elaboration remains structurally total. They do not lower to
 `InitializationInstSemanticPlan`, do not contribute `InitializationPlanDependency`, and cannot
-appear in a publishable frontend-IR fragment. Under chapter 11's `IR-005`, tooling lowering emits
+appear in a publishable frontend-IR fragment. Under chapter 12's `IR-005`, tooling lowering emits
 the existing `IRPoison` opcode with `recoveryError = Some(error)` instead. Thus an
 initialization-plan dependency always
 resolves an applicable `Selected` winner, never a recovered plan whose operation would need to be
@@ -1741,7 +1746,7 @@ selection with independent ordinary capability use and concrete availability (in
 true availability); capability-selection merge/replay; recovery-tooling rejection; and
 serialization/lowering replay.
 
-Before schema freeze, chapter 12 must choose per language version:
+Before schema freeze, chapter 13 must choose per language version:
 
 - omitted local/field/global initialization and zero-initialization options;
 - which type definitions admit nominal, aggregate, extension, and synthesized strategies;

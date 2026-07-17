@@ -36,7 +36,7 @@ evidence is an operational runtime value:
 example, an interface witness can construct an existential-pack conversion, but is not itself a
 representation-adjustment path.
 
-Chapter 14 defines the witness operations and the exact one-to-one mapping from
+Chapter 15 defines the witness operations and the exact one-to-one mapping from
 `LookupSubtypeWitness` to frontend IR. Concrete struct inheritance is absent from the
 representation relation.
 
@@ -135,7 +135,7 @@ ConversionOperation<S: WitnessTableState> =
 ```
 
 The plan includes source/target types, operation, evidence, semantic-use edges, and origin as defined
-in chapter 4. It is a proof-carrying elaboration recipe, not merely a numeric cost. Primitive edges
+in chapter 5. It is a proof-carrying elaboration recipe, not merely a numeric cost. Primitive edges
 record direct effect/capability uses; an imported user conversion records published contract uses;
 a local user conversion records its stable callee identity plus the exact stage-correct witness
 resolutions needed by its specialization evidence. Composite plans contain the
@@ -175,7 +175,7 @@ exact stage-appropriate `SubtypeWitnessRef<S>`, whose semantic operand is a
 `SubtypeWitnessId`. A bound generic witness, specialized generic table, lookup, or
 existential witness is valid evidence; a bare `WitnessTableId` is not. When evidence is synthesized,
 plan construction depends on publication of the complete atomic `SynthesisGroup` or carries the
-authorized construction-stage resolutions described in chapter 14; it never invents a frozen
+authorized construction-stage resolutions described in chapter 15; it never invents a frozen
 conformance reference for a runtime witness parameter.
 
 `CVR-PLAN-006`: `LoadPhysicalStorage` is valid only for `PhysicalStorage(storage)` and its proof names
@@ -325,7 +325,7 @@ CallInput = {
 }
 
 CheckedGenericArgument = {
-    id: NodeId<Typed>,
+    id: AnyASTNodeId<Typed>,
     label: Option<Name>,
     value: GenericArg,
     sort: GenericParameterSort,
@@ -354,11 +354,11 @@ Argument mapping checks positional/label rules, arity, defaults, packs, and dupl
 without examining argument types. Labels participate only when enabled by the callable's language
 version; otherwise source arguments are positional.
 
-`SourceArgument`, `SourceArgumentId`, and `SourceCallRole` are the shared chapter 4 domains. The
+`SourceArgument`, `SourceArgumentId`, and `SourceCallRole` are the shared chapter 5 domains. The
 same identities are retained when property/subscript syntax captures sources and when an accessor
 call maps them; access planning never creates a parallel argument numbering scheme.
 
-`InitializationCallable` is used only after chapter 15's initialization model admits a callable
+`InitializationCallable` is used only after chapter 16's initialization model admits a callable
 strategy and supplies an explicit initialization target. `ExplicitSingle`, C-style casts, aggregate
 initialization, and default/value initialization are not ordinary call kinds; the initialization
 query may reuse this chapter's callable candidate machinery without conflating the judgments.
@@ -589,11 +589,11 @@ CheckCallAliasClaims(plans: NodeMap<BoundCallSlot, StorageAccessPlan<Published>>
     -> CallAliasCheck
 ```
 
-The successful output is the shared `StorageAccessPlan` defined in chapter 11, including evaluate-once,
+The successful output is the shared `StorageAccessPlan` defined in chapter 12, including evaluate-once,
 any abstract-mode temporary/write-back, the exact physical endpoint for a physical mode, cleanup
 condition, and alias class.
 Its terminal is always `PassArgument`; storage-read and storage-write terminals belong only to
-chapter 6's standalone storage-access query.
+chapter 7's standalone storage-access query.
 Candidate evaluation interns the complete `AccessEnvironment`, stores its ID on both the candidate
 and every `ApplicableCallSlotPlan`, and stores the resulting access plan. The query resolves only
 that ID; elaboration never reconstructs the environment or plan from a mode, conversion, ambient
@@ -715,7 +715,7 @@ if an `AbstractConversion` is supplied for a physical mode, even if its result t
 direction, and the equality does not use recovery. Physical identity contributes no semantic uses.
 The enclosing access plan has
 `rankingCoercion = Some(ConsumedWithoutStorageCoercion(PhysicalParameterIdentityPassingRule))`,
-from which chapter 7 derives comparison rank `zeroRank`. The instantiated requirement is
+from which chapter 8 derives comparison rank `zeroRank`. The instantiated requirement is
 the result of instantiating the proof's complete, well-formed `PhysicalOperand` `mode` in its exact
 `accessEnvironment`; its access equals `mode.access`. An accessor-produced source validates the
 entire stored `ParameterReferenceAccessorPlanAt<S>`, requires that plan's `mode`,
@@ -747,7 +747,7 @@ slot, binding, parameter, and context; a domain mismatch is a closed
 `AdaptationDomainMismatch`. It may retain named temporary/write-back machinery for
 `InMode`, `OutMode`, or `InOutMode`; a physical mode instead retains the complete physical source
 and proof and has exactly one physical-storage `PassArgument` terminal. Neither primitive delegates
-parameter semantics to chapter 6's ordinary `PlanStorageAccessAt<S>`; only the dedicated
+parameter semantics to chapter 7's ordinary `PlanStorageAccessAt<S>`; only the dedicated
 mode-specific reference-accessor plan may call the shared accessor-validation primitives. Both
 queries preserve diagnostics in their outer `CheckResult`; dependency blocking remains a scheduler
 state and cannot be collapsed into any semantic failure alternative.
@@ -819,8 +819,7 @@ change the result.
 Explicit generic arguments map to parameter identities before solving:
 
 ```text
-MapGenericArguments(binder: GenericBinderId,
-                    binderTable: GenericBinderTable,
+MapGenericArguments(binder: GenericBinder,
                     arguments: NodeList<CheckedGenericArgument>)
     -> PartialSpecializationFrame | GenericArgumentFailure
 
@@ -832,20 +831,20 @@ PartialSpecializationFrame = {
 }
 
 GenericArgumentFailure =
-    TooManyGenericArguments(arguments: NonEmpty<NodeId<Typed>>)
-  | UnknownGenericLabel(argument: NodeId<Typed>, label: Name)
+    TooManyGenericArguments(arguments: NonEmpty<AnyASTNodeId<Typed>>)
+  | UnknownGenericLabel(argument: AnyASTNodeId<Typed>, label: Name)
   | DuplicateGenericParameter(parameter: GenericParameterKey,
-                              arguments: NonEmpty<NodeId<Typed>>)
+                              arguments: NonEmpty<AnyASTNodeId<Typed>>)
   | GenericKindMismatch(parameter: GenericParameterKey,
                         expected: GenericParameterSort,
                         actual: GenericParameterSort)
   | InvalidGenericPack(parameter: GenericParameterKey,
                        actual: GenericArg,
                        rule: RuleId)
-  | ExplicitEvidenceArgumentForbidden(argument: NodeId<Typed>)
+  | ExplicitEvidenceArgumentForbidden(argument: AnyASTNodeId<Typed>)
 ```
 
-Sorts must match under chapter 4's `argumentMatchesSort`. Type/value pack arguments consume the
+Sorts must match under chapter 5's `argumentMatchesSort`. Type/value pack arguments consume the
 source forms allowed by their grammar and cardinality rules. Ordinary arguments and constraint
 witnesses are never concatenated into one positional suffix.
 
@@ -911,7 +910,7 @@ InferenceBound = {
 }
 
 InferenceBindingSource =
-    ExplicitGenericArgument(NodeId<Typed>)
+    ExplicitGenericArgument(AnyASTNodeId<Typed>)
   | ReceiverConstraint(origin: Origin)
   | CallArgumentConstraint(argument: SourceArgumentId)
   | ExpectedResultConstraint(origin: Origin)
@@ -990,8 +989,9 @@ constraint to have typed evidence, and every pack shape/count equation to be sol
 alternative, query dependency, and evidence proof. Diagnostic replay uses this same trace; it does
 not rerun a declaration-order solver.
 
-`GEN-SLV-003`: `InferenceState.binder` resolves through the query environment's
-`GenericBinderTable`; `variables` contains exactly that binder's inferable parameter keys. Each
+`GEN-SLV-003`: `InferenceState.binder` resolves through
+`GetGenericBinder(ownerOf(InferenceState.binder), environment)`; `variables` contains exactly that
+binder's inferable parameter keys. Each
 initial `Unbound.sort` equals its resolved `GenericParam.sort`. Every `InferenceBound.value`,
 `Bound.value`, and `Conflict.values` member satisfies that sort after applying the state's bindings
 for earlier parameters. State transitions preserve the symbolic sort rather than recomputing a
@@ -1036,7 +1036,7 @@ position is never used as identity.
 
 ## Constraint solving
 
-The solver handles the constraint constructors in chapter 4:
+The solver handles the constraint constructors in chapter 5:
 
 - equality uses canonical equality proofs;
 - representation adjustment and interface refinement request their distinct proof relations;
@@ -1065,7 +1065,7 @@ zipExpand(pattern, P, Q) has cardinality n
 ```
 
 Unknown but equated symbolic counts are valid with `PackCountWitness`; unequal concrete counts fail.
-`nonempty(P)` requires chapter 4's `NonEmptyPackWitness`: a
+`nonempty(P)` requires chapter 5's `NonEmptyPackWitness`: a
 `ConcreteNonEmptyPackWitness` for a known pack, a `DeclaredNonEmptyPackWitness` tied to the exact
 canonical generic constraint, or a derived positive-count proof. First/last operations consume the
 same pack-specific evidence and do not rely on a runtime bounds guard.
@@ -1289,7 +1289,7 @@ apply these proposed specificity relations in order, only while the preceding re
 3. a non-generic declaration over an otherwise equivalent generic instantiation;
 4. fewer defaulted parameters and non-greedy pack bindings;
 5. a directly declared/overriding member over an inherited default implementation;
-6. a semantically closer lookup facet/scope under chapter 5's path precedence; and
+6. a semantically closer lookup facet/scope under chapter 6's path precedence; and
 7. a language-version-specific preference explicitly registered by rule ID.
 
 `OVL-RANK-002`: Stable declaration/source order is never the final semantic tie-breaker. If maximal
@@ -1297,7 +1297,7 @@ candidates are not one canonical declaration, resolution is ambiguous.
 
 `OVL-RANK-003`: Capability-specific definitions of one canonical declaration are not ordinary
 overloads. The frontend preserves the canonical symbol plus capability alternatives for target-time
-selection under chapter 9. Filtering those alternatives uses only their concrete availability;
+selection under chapter 10. Filtering those alternatives uses only their concrete availability;
 their ordinary/transitive `inferredCapabilities` contribute the selected call's capability use and
 never act as a specificity rank or an implicit availability predicate.
 

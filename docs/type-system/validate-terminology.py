@@ -218,19 +218,22 @@ FORBIDDEN_TERMS = (
     ForbiddenTerm("SourceCSTKind", "NonTerminalKind<S>", _schema_root("SourceCSTKind")),
     ForbiddenTerm("bare CSTKind", "NonTerminalKind<S>", _exact_identifier("CSTKind")),
     ForbiddenTerm("PreprocessorTree", "CSTSnapshot<PreprocessorStructured>", _schema_root("PreprocessorTree")),
-    ForbiddenTerm("MacroExpansionStep", "CSTRewrite.operation", _schema_root("MacroExpansionStep")),
-    ForbiddenTerm("MacroTokenOrigin", "CSTRewriteTokenOrigin", _schema_root("MacroTokenOrigin")),
-    ForbiddenTerm("IncludedTokenOrigin", "CSTRewriteTokenOrigin", _schema_root("IncludedTokenOrigin")),
+    ForbiddenTerm("MacroExpansionStep", "direct CSTTranslationOrigin / TokenOrigin", _schema_root("MacroExpansionStep")),
+    ForbiddenTerm("MacroTokenOrigin", "TokenOrigin", _schema_root("MacroTokenOrigin")),
+    ForbiddenTerm("IncludedTokenOrigin", "TokenOrigin", _schema_root("IncludedTokenOrigin")),
+    ForbiddenTerm("HygieneId", "textual Slang names plus TokenOrigin provenance", _schema_root("HygieneId")),
+    ForbiddenTerm("GenericBinderTable", "GetGenericBinder(owner, environment)", _schema_root("GenericBinderTable")),
+    ForbiddenTerm("GenericBindingTable", "GetGenericBinder(owner, environment)", _schema_root("GenericBindingTable")),
     ForbiddenTerm("TokenKind", "TokenType", _schema_root("TokenKind")),
     ForbiddenTerm("FileId", "SourceFileId", _schema_root("FileId")),
     ForbiddenTerm(
         "bare SnapshotId",
-        "CSTSnapshotId / ASTSnapshotId / SemanticSnapshotId / SourceFileSnapshotId",
+        "CSTSnapshotId / SemanticSnapshotId / SourceFileSnapshotId",
         _exact_identifier("SnapshotId"),
     ),
     ForbiddenTerm("AstKind", "SyntaxNode kind", _schema_root("AstKind")),
     ForbiddenTerm("AstNode", "SyntaxNode", _schema_root("AstNode")),
-    ForbiddenTerm("AstSnapshot", "ASTSnapshot", _schema_root("AstSnapshot")),
+    ForbiddenTerm("AstSnapshot", "SemanticSnapshot", _schema_root("AstSnapshot")),
     ForbiddenTerm("AstEdit", "ASTEdit", _schema_root("AstEdit")),
     ForbiddenTerm(
         "Cst identifier component", "CST", _identifier_with_component("Cst")
@@ -392,16 +395,16 @@ FORBIDDEN_TERMS = (
         "PointerLike / ExplicitRef",
         _identifier_with_component("ReferenceHandle"),
     ),
-    ForbiddenTerm("CoreAST", "IRReadyAST", _schema_root("CoreAST")),
+    ForbiddenTerm("CoreAST", "IRReady node form", _schema_root("CoreAST")),
     ForbiddenTerm(
         "Core AST phrase",
-        "IRReadyAST",
+        "IRReady node form",
         re.compile(r"(?<![A-Za-z])Core[ -]+AST(?![A-Za-z])"),
     ),
-    ForbiddenTerm("LowerToCore", "LowerToIRReadyAST", _schema_root("LowerToCore")),
+    ForbiddenTerm("LowerToCore", "LowerNodeToIRReady", _schema_root("LowerToCore")),
     ForbiddenTerm(
         "Core-stage schema identifier",
-        "IRReady-stage identifier",
+        "IRReady-form identifier",
         re.compile(
             rf"{IDENTIFIER_LEFT}(?:"
             rf"Core(?:Stage|Snapshot|Expr|Stmt|Decl|Type|Value|Call|Storage|Initialization|"
@@ -531,12 +534,10 @@ FORBIDDEN_TERMS = (
     ForbiddenTerm(
         "WitnessCallRef", "SubtypeWitnessRef", _schema_root("WitnessCallRef")
     ),
-    ForbiddenTerm("SurfaceFile", "ASTSnapshot<Surface>", _schema_root("SurfaceFile")),
-    ForbiddenTerm("ScopedFile", "ASTSnapshot<Scoped>", _schema_root("ScopedFile")),
-    ForbiddenTerm(
-        "NominalDefinition", "NodeRef<Typed, Decl>", _schema_root("NominalDefinition")
-    ),
-    ForbiddenTerm("TypedStmt", "NodeRef<Typed, Stmt>", _schema_root("TypedStmt")),
+    ForbiddenTerm("SurfaceFile", "node-local Surface forms", _schema_root("SurfaceFile")),
+    ForbiddenTerm("ScopedFile", "ScopeWiring", _schema_root("ScopedFile")),
+    ForbiddenTerm("ScopedAST", "ScopeWiring", _schema_root("ScopedAST")),
+    ForbiddenTerm("BoundAST", "integrated parse/check queries", _schema_root("BoundAST")),
     ForbiddenTerm(
         "IRWitnessLookupKey",
         "first-class interface-requirement key operand",
