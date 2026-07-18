@@ -243,8 +243,11 @@ Required direct lexer/CST suites include:
   `#pragma once`, excluded child EOF, and exact field-by-field outward propagation of environment,
   directive, loaded-source, pragma-once, and resource state while conditional/busy/input stacks do
   not leak;
-- `#line`, warning, language/version/extension, unknown pragma, `#error`, and `#warning` behavior
-  through typed provider/state projections and provider revision keys;
+- `#line`, warning, unknown pragma, `#error`, and `#warning` behavior through typed provider/state
+  projections and provider revision keys; `#language`/`#lang` succeeds only at the first
+  non-comment file position, duplicates/body changes and module-file mismatches are diagnosed,
+  while written `#version` obeys the placement check but has no successful Slang meaning and
+  `#extension` is rejected;
 - every deterministic resource limit at its boundary and one past it, with typed recovery that
   always consumes input or inserts one anchored missing terminal;
 - direct `TokenDerivation` and `CSTTranslationOrigin` closure for source copying, parameter
@@ -288,6 +291,17 @@ Required direct lexer/CST suites include:
 - generic-application classification from visible declaration outlines, mixed generic/non-generic
   candidates, member heads that request a checked base, blocked lookup, recovery, relational `<`,
   and `>>` splitting only after generic syntax is selected;
+- reserved declaration/statement/binding words rejected in every `IDENTIFIER` field, contextual
+  words accepted outside their exact production positions, and reservedness invariant under lookup
+  results, declaration order, imports, and overload selection;
+- user-written `syntax` and `attribute_syntax` produce only implementation-reserved recovery and no
+  declaration outline, scope binding, `SyntaxParseInfoSet` mutation, imported outline, or semantic
+  declaration;
+- inline and `__generic` spellings on functions, structs, classes, and nested members produce equal
+  declaration-owned `GenericBinder` facts and specialization requirements while retaining distinct
+  CST provenance; a declaration with both spellings is rejected;
+- comma-separated argument/tuple/initializer/generic/declarator productions preserve every comma
+  terminal, while `a, b;` has no expression parse and `(a, b)` has only tuple meaning;
 - each fine parse/check query records the exact `FineParseSubject`, check context, and dependency
   requests, publishes a parsed CST fragment plus node-local immutable result and
   `ScopeWiringPublication`, and is invariant under unrelated query scheduling;
@@ -319,6 +333,12 @@ Required direct lexer/CST suites include:
   construct, field/kind mismatch rejection, and progress guarantee;
 - `CSTCursor` parent/path/range behavior for repeated or shared-equal node records; and
 - incremental reparse sharing without conflating distinct occurrences.
+
+Leading-zero octal literals and HLSL-derived `register(...)`/`packoffset(...)` suffixes have
+inventory fixtures that record current acceptance, but their final accept/reject expectations
+remain blocked on the two explicit chapter 13 language-owner decisions. Until those entries close,
+they have no successful normative grammar/literal-decoding case and cannot be counted as verified
+Slang 2026 coverage. Adjacent attribute items without a comma have a fixed negative expectation.
 
 The parser/preprocessor schema has three generated completeness tests:
 
@@ -390,9 +410,10 @@ Generated tests iterate every node descriptor and verify:
 - serialization round trips every optional/variant field;
 - `DerivedField` and `CSTShapeProjectedField` each expose their complete declared dependency class;
   no field depends on an operation log or output-binding side table;
-- unknown optional fields survive schema-version round trips; and
-- unknown required fields fail atomically, forward/SCC graph references round trip, and golden files
-  migrate through every supported wire version;
+- the exact `SerializationCompatibilityId` round trips and independently mutating its compiler,
+  schema, registry, or standard-environment component fails atomically;
+- every unknown field fails atomically, while forward/SCC graph references round trip within the
+  same compiler version; no golden-file migration suite implies cross-version module support;
 - every staged CST translation round trips with its predecessor snapshot IDs and rejects forward,
   dangling, wrong-domain, or cyclic direct provenance inputs;
 - canonical CST snapshot encoding omits its own ID, uses unique local indices with matching
@@ -433,18 +454,28 @@ end-to-end language tests happen to create the node.
 - `Private < Internal < Public` meet laws;
 - access from same/different type, namespace, extension, file, and module;
 - generic specialization and composite-type effective visibility; and
-- language-version defaults and synthesized-member caps.
+- Slang 2026 namespace/inherited/module-or-implicit-internal defaults, owner caps, and explicit
+  synthesized-member visibility plans.
 
 ### Conversion and overload resolution
 
 - one unit case for every conversion constructor and `ConversionFailure`;
 - primitive, local-user, imported-user, and nested conversion plans preserve and deduplicate their
   exact effect/capability use edges through access-plan and typed-expression collection;
-- `extendRank` identity/associativity/monotonicity, overflow failure, and search dominance;
+- `combineSearchRanks` identity/associativity/monotonicity, `extendSearchRank` left-fold behavior,
+  whole-cost maximum selection, rejection of a second user-defined step, overflow failure, and
+  search dominance;
 - rank ordering, irreflexivity/transitivity of `strictlyBetter`, antisymmetry after quotienting by
   `SemanticallyEquivalent`, and stable equal-rank ambiguity;
+- candidate conversion ranking recomputes the single maximum `comparisonRank` across receiver and
+  supplied-argument adaptations, uses `zeroRank` for an empty set, and never sums costs;
+- paired fixtures whose per-source vectors differ but whose maxima are equal prove that pointwise
+  dominance is not semantic ranking and that comparison proceeds to the accepted specificity rules;
 - argument arity, labels, defaults, variadics, direction/storage requirements, and receiver matching;
 - generic and non-generic candidates, explicit/partial generic application, and defaults;
+- call-candidate integration invokes `FreezeDeclUse` exactly once after a complete generic solution;
+  a residual `UnappliedDeclRef` may produce a `PartiallyAppliedGenericValue` but is rejected from
+  `ApplicableOverloadCandidate`, selected calls, and argument planning;
 - each tie-break rule isolated from all later rules;
 - “best failed candidate” diagnostic ranking isolated from semantic applicability; and
 - error arguments suppress cascades without making an error candidate outrank a valid candidate.
@@ -463,15 +494,19 @@ expression context, authenticated operation site, slot, and typed binding altern
 projection mismatch selects its exact `ArgumentPlanningContextFailure`; no ambient test harness
 state repairs it. `PlanArgumentAdaptationAt<S>` is mocked with all three `ConversionResult`
 alternatives and both outer `CheckResult` alternatives: only an applicable conversion may inhabit
-`AbstractConversion`, and only nested successful adaptation plus access results create a candidate
-slot. Dependency tests leave each child query pending in turn and require scheduler blocking rather
-than a fabricated semantic failure.
+`AbstractConversion` for `InMode`; `OutMode`/`InOutMode` instead require a non-recovery
+`ExactStorageIdentity` proof and never invoke the conversion mock. Only nested successful adaptation
+plus access results create a candidate slot. Dependency tests leave each child query pending in turn
+and require scheduler blocking rather than a fabricated semantic failure.
 
 Ranking mutation tests replace `StorageAccessPlan.rankingCoercion` independently with `None`,
 `AppliedStorageCoercion`, and each `ConsumedWithoutStorageCoercion(rule)`. Candidate validation derives
 exactly one `SourceAdaptationRank` from that stored value, rejects `None`, and admits
-`PhysicalParameterIdentityPassingRule` as the sole conversion-free physical-mode rule. No parallel
-rank field or conversion plan is accepted. Alias-rejection fixtures round-trip the complete
+`PhysicalParameterIdentityPassingRule` as the sole conversion-free physical-mode rule and
+`ExactStorageIdentityPassingRule` only for abstract `OutMode`/`InOutMode`. No parallel
+rank field or conversion plan is accepted. It recomputes `CandidateConversionRank.maximum` from all
+those source ranks and rejects a stale maximum or a per-source comparison used as winner evidence.
+Alias-rejection fixtures round-trip the complete
 `ConflictingCallAliasClaims` through `AliasClaimConflict`, mutate each claim, slot, overlap reason,
 and versioned rejection rule independently, and prove that a disjointness result cannot inhabit a
 conflict payload.
@@ -720,6 +755,20 @@ lifetime would have compared equal.
 
 ### Generic solving
 
+- declaration-owned `GenericBinder` construction for inline and `__generic` CST forms, alpha-
+  equivalent `CanonicalGenericBinder` equality, and proof that no frame-role tag or semantic wrapper
+  declaration can affect identity;
+- generic lookup returns `CandidateDeclUse(UnappliedDeclRef(...))`; explicit argument mapping and
+  deduction mutate no candidate, all owner binders must already be complete, and the sole pending
+  binder is the referenced declaration's direct binder; `FreezeDeclRef` accepts only
+  `CompleteGenericSolution`, while `ResidualGenericSolution` constructs
+  `PartiallyAppliedGenericValue` for both callable and type-constructor classifications; partial
+  values require an empty pending supplied-argument map and retain all bound arguments/evidence only
+  in their canonical residual frame;
+- exhaustive residual-frame validation mutates each parameter partition, source/residual ordinal
+  mapping, substituted sort/default, constraint partition, source/residual slot mapping,
+  optionality, predicate, and evidence endpoint independently; every inconsistent serialized
+  partial application is rejected;
 - each constraint kind and evidence kind;
 - occurs checks, conflicting bounds, underconstrained variables, defaults, and ambiguity;
 - bidirectional inference from parameters and expected results where specified;
@@ -741,11 +790,24 @@ lifetime would have compared equal.
 - inherited/overridden requirements and diamond interfaces;
 - receiver/mode/effect/capability mismatch;
 - witness-table identity/definition graph cycles, conditional witness partitions, optional absence,
-  and path-distinct diamond keys;
+  and diamond provider/path candidates whose unique specificity maximum becomes the sole published
+  endpoint witness or whose tied/incomparable maxima produce one structured ambiguity;
 - concrete, generic, specialized, bound, lookup, existential, and pack `SubtypeWitness`
   values, with stable identity across construction-to-publication definition-resolution rewrites;
 - exact one-to-one `LookupSubtypeWitness` spines, including requirement-key mismatch, diamond path
-  distinction, serialization, and one frontend-IR lookup operation per semantic lookup;
+  canonicalization, serialization, and one frontend-IR lookup operation per semantic lookup;
+- endpoint-key uniqueness: publishing a second witness for the same `(subType, superType)` pair is
+  rejected even when its semantic environment, provider, or operational path differs; composing
+  environments with incompatible selected definitions diagnoses coherence rather than changing the ID;
+- alpha-equivalent declared `T : I` evidence in unrelated generic contexts produces the same open
+  witness ID/operation/form, merges its distinct origins into one provenance set, and lowers through
+  the pair-keyed `WitnessAbiInput`; duplicate active `Conforms` slots for that pair are rejected;
+- `LookupRequirement<K>` family placement: associated-type lookup satisfies `as<Type>`, callable
+  lookup satisfies only `as<CallableValue>`, constant lookup satisfies the constant domain, and
+  subtype lookup satisfies only `as<SubtypeWitness>`; no payload inspection changes the family;
+- source `a.AssocType` succeeds when `a` supplies the required interface witness, while a function
+  parameter type dependent on a preceding runtime value, such as
+  `void foo(IBar a, a.AssocType b)`, is rejected in this edition;
 - synthesis-key idempotence and deterministic synthesized requirement witness method bodies; and
 - witness substitution, composition, validation, serialization, and IR key preservation.
 
@@ -754,16 +816,22 @@ lifetime would have compared equal.
 - every source form × initialization strategy × value/storage goal and declaration site;
 - `T(e)` and `(T)e` use the same `ExplicitSingle` candidate/ranking relation while retaining
   occurrence-specific CST origins, bound input IDs, request IDs, and (when those IDs differ) plans;
-- target-directed braces, zero/one/many elements, nested aggregates, defaults, designators, packs,
-  excess/missing/duplicate slots, and each versioned missing/flattening policy;
+- target-directed braces, zero/one/many elements, designators, packs, and
+  excess/missing/duplicate slots; C-style aggregates alone test nested-list flattening plus explicit
+  zero plans for missing fields, while non-C-style aggregates require strict nesting and every field;
 - declared, synthesized, builtin, extension, generic, and witness-provided initializers;
 - composite initialization models whose descriptor maps offer nominal and aggregate strategies
-  together, with deterministic scheduler results, structured rejected/ambiguous candidates, and the
-  one admissible rank-detail family for every strategy;
+  together only when the aggregate style permits it, with deterministic scheduler results,
+  structured rejected/ambiguous candidates, and the one admissible rank-detail family for every
+  strategy; a user or extension constructor excludes C-style aggregate eligibility;
 - absence of a flag-like default operation: every accepted default/value/omitted request resolves a
-  mandatory zero-input call, aggregate binding, or registered execution;
-- complete call/registered/transfer endpoint maps for copy, move, aggregate written/member/type
-  defaults, standard initialization, allocators, deallocators, and destructors, including
+  mandatory zero-input call, aggregate binding, registered execution, or the sole mutable-local
+  `LeaveStorageUninitialized` operation;
+- `T x;` for mutable local storage has an empty required-subobject set, no state transition or IR
+  initialization step, and an uninitialized flow state; other sites follow their explicit policy and
+  omission never calls or synthesizes `__init`;
+- complete call/registered/transfer endpoint maps for copy, move, aggregate written/zero bindings,
+  standard initialization, allocators, deallocators, and destructors, including
   operation-qualified exactly-once evaluation/storage orders;
 - supplied, plan-owned, and allocated target-entry evidence; exact derived required-subobject sets;
   exhaustive legal/illegal state-transition tables; and nested-plan state/exit/cleanup composition;
@@ -792,8 +860,9 @@ lifetime would have compared equal.
 - per-subobject definite initialization on normal/exceptional/delegating paths, replay of every
   exit-state proof, dependency-correct partial destruction, and exactly-once required allocation
   cleanup; and
-- explicit rejection of concrete struct base slots, base-constructor steps, and legacy `(Struct)0`
-  outside its named compatibility rule.
+- explicit rejection of concrete struct base slots, base-constructor steps, and legacy
+  `(Struct)0` initialization; the Slang 2026 grammar has no compatibility rule that can
+  admit any of them.
 
 Registered-plan fixtures exercise `INI-PLN-012` and `INI-PLN-013` with absent, explicitly true, and
 restrictive concrete availability. The rule's ordinary inferred capability always contributes its
@@ -805,9 +874,11 @@ drops one role, converts one into the other, or loses a source while retaining t
 ### Differentiability
 
 - value and pointer differential evidence, associated-type idempotence, `dzero`/`dadd`, aggregate
-  field maps, exclusions, and ambiguous providers;
+  field maps, exclusions, structural flavor selection, missing-evidence rejection, and ambiguous
+  registered dual-flavor providers;
 - forward and backward signature maps for receiver, every passing mode, result/error policy, packs,
-  active/inactive slots, and derivative order boundaries;
+  active/inactive slots, backward-implies-forward closure, every `Through(n)` order boundary,
+  rejection of exact-only/registered order spellings, and default `Through(1)`;
 - `ConstRefMode(r)` is tested separately from `InMode` in forward and backward mode, for both active
   and inactive slots. Missing registration yields `MissingPhysicalOperandDerivativeRule`; no case
   falls back to an unchanged value input or an implicit pair/accumulator mapping;
@@ -816,7 +887,8 @@ drops one role, converts one into the other, or loses a source while retaining t
   maps use `RegisteredDerivativeRole(rule)`, preserve `isPhysicalStorage = True`, and contain no
   primal load, temporary materialization, or value-mode substitution;
 - direct, custom, synthesized, witness, dynamic, builtin, and assumed providers,
-  partial-priority ambiguity, generic specialization, exact stage-bound primal callable values,
+  fixed dispatch/explicit-before-synthesis-before-assumed-zero priority, same-tier ambiguity,
+  generic specialization, exact stage-bound primal callable values,
   visibility, effects, and capabilities;
 - `DIF-PRV-001`, `DIF-PRV-007`, and `DIF-PRV-016` capability phases independently: applicability
   records the provider's pre-inference ordinary use without requesting a local effective contract;
@@ -824,7 +896,8 @@ drops one role, converts one into the other, or loses a source while retaining t
   selected pending local/witness/dynamic/synthesized provider is immutably revalidated against its
   exact post-fixpoint effective source without changing winner, ranking, ordinary use, or concrete
   selection;
-- provider-candidate applicability, every registered priority dimension, comparison-proof replay,
+- provider-candidate applicability, the mandatory fixed tier plus each within-tier priority
+  dimension, comparison-proof replay,
   retained rejected candidates, equivalent maxima, and deterministic pairwise ambiguity independent
   of discovery/source/module order;
 - keyed differential-evidence operand plans for concrete, generic-specialized, bound, lookup,
@@ -833,7 +906,9 @@ drops one role, converts one into the other, or loses a source while retaining t
 - derivative slot maps whose domains include receiver, every expanded `ParameterKey`, result, and
   preserved error channel, with receiver/result/error never encoded as ordinary parameters;
 - `fwd_diff`, `bwd_diff`, `no_diff`, custom association coherence, interface dispatch, and exact
-  preservation of ordinary effects/access across detach-derivative boundaries;
+  declaration/expression `no_diff` context restrictions plus preservation of ordinary
+  effects/capabilities/access/exceptions/initialization/aliasing across detach-derivative boundaries;
+- default rejection of throwing callables and every registered alternative error-channel mapping;
 - body activity joins, mutation/control-flow restrictions, recursive provider/synthesis queries,
   and deterministic serialization;
 - total differentiation query products covering every structured rejection and ambiguity,
@@ -854,6 +929,12 @@ drops one role, converts one into the other, or loses a source while retaining t
 - atom implication graph closure and cycle validation;
 - conjunction/disjunction normalization, absorption, incompatibility, and canonical ordering;
 - implication truth tables and counterexample clauses;
+- `TrueFormula` as the unconstrained identity, `FalseFormula` as impossible, and strict
+  `requireAll` conjunction between enclosing and local requirement contributions, including
+  incompatible combinations that canonicalize to `FalseFormula` rather than preserving an
+  alternative;
+- interface/base compatibility by logical implication alone, with mutations proving that equal or
+  unequal abstract target/stage atoms add no separate keyhole premise;
 - `CAP-REG-005` region-availability proofs for positive and negative world assumptions, universe
   mismatches, and pointwise generic requirements;
 - every `SelectCapabilitiesAt<S>` producer with zero, one, and multiple ordinary uses and concrete
@@ -885,7 +966,8 @@ drops one role, converts one into the other, or loses a source while retaining t
   without merging their proof/use identities;
 - join/meet laws using the domain's actual semantic order;
 - recursive call-graph least fixpoints and declared-requirement validation;
-- target/stage switch branch formulas; and
+- target/stage switch branch formulas, including non-monotone valid-world sets that diagnose and
+  recover with `requireAll` of all reachable branches rather than `allowEither`; and
 - standard capability-definition file validation.
 
 ### Effects
@@ -1011,7 +1093,7 @@ IRReady-to-IR tests use a fake symbol resolver and compare a normalized IR fragm
 target legalization or emission. Mutual-recursion tests publish all `IRSymbolDecl`s before
 definitions and verify stable `ParameterKey`/requirement-key maps.
 
-## Differential and migration testing
+## Differential and compiler-version rejection testing
 
 For compatibility-preserving rules, a differential harness runs the old and new frontends on the
 same source and compares normalized observations:
@@ -1026,6 +1108,12 @@ same source and compares normalized observations:
 Expected differences are keyed by an accepted `Intentional change` ledger entry and rule ID. A
 global “known differences” text file is not acceptable.
 
+Serialized-module tests use the producing compiler version for positive round trips. Negative
+fixtures alter the exact `CompilerVersionId`, schema, registry fingerprint, and
+standard-environment identity independently and must be rejected before any AST, semantic value,
+diagnostic, or scheduler fact is published. The
+test suite does not define a cross-version migration path or a stable public wire format.
+
 The existing `tests/` corpus seeds differential coverage, but small generated programs exercise
 cross-products that integration tests miss. Corpus minimization retains the smallest source for
 each distinct semantic observation.
@@ -1035,7 +1123,8 @@ each distinct semantic observation.
 Continuous fuzzers cover tokens, preprocessing, CST parsing/recovery, serialization, generic
 constraints, and scheduler dependency graphs. Important metamorphic properties are:
 
-- inserting/removing trivia does not change semantic results outside trivia-sensitive legacy rules;
+- inserting/removing trivia does not change semantic results except where a named Slang 2026 rule
+  consumes token adjacency;
 - reformatting and identity serialization preserve source/CST semantics;
 - reordering independent declarations does not change modern-language binding;
 - reordering keyed interface requirements does not change witness satisfaction;

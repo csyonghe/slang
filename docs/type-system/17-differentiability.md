@@ -18,14 +18,11 @@ DerivativeOrder = {
     value: BigNat
 } where value >= 1
 
-DifferentiationOrderPolicy =
-    Exactly(order: DerivativeOrder)
-  | Through(order: DerivativeOrder)
-  | RegisteredOrderPolicy(rule: RuleId, inputs: CanonicalArguments)
+DifferentiationOrderPromise = Through(order: DerivativeOrder)
 
 DifferentiabilityPromise = {
     modes: CanonicalFiniteSet<DifferentiationMode>,
-    order: DifferentiationOrderPolicy
+    order: DifferentiationOrderPromise
 }
 
 DifferentialParticipation =
@@ -33,9 +30,9 @@ DifferentialParticipation =
   | ExcludedByNoDiff
 ```
 
-Mode implication is versioned standard-environment data. If one language version declares that
-backward differentiability implies forward differentiability, promise canonicalization closes the
-set under that implication; the core algebra does not hard-code the implication.
+In this language edition, backward differentiability implies forward differentiability. Promise
+canonicalization therefore adds `Forward` whenever `Backward` is present; a backward-only canonical
+promise is invalid.
 
 `DIF-MOD-001`: An omitted differentiation order maps to the version's declared default. An explicit
 zero or negative order is not a `DerivativeOrder` and produces a structured modifier diagnostic;
@@ -44,6 +41,11 @@ it cannot be interpreted by a downstream pass.
 `DIF-MOD-002`: Receiver, every parameter, and result participation are structural callable-signature
 fields. `no_diff` is never hidden in a `ModifiedType` or recovered from a declaration after function
 type construction.
+
+`DIF-MOD-003`: `Through(n)` promises every derivative order `1 ... n`; it entails `Through(m)`
+exactly when `n >= m`. The omitted Slang 2026 promise is `Through(1)`. There is no exact-only or
+registered alternative order policy in this language edition. Mode implication is applied at every
+promised order, so a backward `Through(n)` promise also contains every forward surface through `n`.
 
 ## Differential type evidence
 
@@ -146,9 +148,11 @@ by user implementations are semantic contracts just like other interface laws; t
 test registered builtins and synthesized implementations, but a conformance is not a proof obtained
 from entry position or method name.
 
-`DIF-TYP-004`: A type cannot simultaneously select incompatible value- and pointer-differential
-contracts in one environment. Provider specialization may choose one strictly more specific
-contract; otherwise `Ambiguous` retains both candidates.
+`DIF-TYP-004`: Flavor selection is structural and conservative. `PtrType`, `ExplicitRefType`, and a
+registered pointer-like type request `IDifferentiablePtrType`; every non-pointer value requests
+`IDifferentiable`. A conformance to the other flavor is not an implicit fallback. If a registered
+type family genuinely admits both interpretations and its registration does not select one for the
+exact role, `Ambiguous` retains both candidates rather than applying a specificity heuristic.
 
 `DIF-TYP-005`: `evidence.id = ContentId(evidence.key)`. Each subtype-witness ref's stable witness ID
 equals the correspondingly named ID in `evidence.key`, has the exact classifier required by that
@@ -391,6 +395,11 @@ DifferentialEvidenceOperandPlan =
     DifferentialEvidenceOperandPlanAt<Published>
 ```
 
+`DIF-CAL-000`: `RejectThrowingCallable` is the default policy. A callable with a non-`BottomType`
+error channel is not differentiable unless an explicitly registered language/standard-environment
+rule supplies a complete alternative policy and derivative signature mapping. No default rule drops,
+differentiates, or silently preserves thrown values.
+
 `DIF-CAL-001`: Shape construction visits the receiver, every `ParameterSlot`, result, and non-`BottomType`
 error channel exactly
 once. `ExcludedByNoDiff` always yields `Inactive(ExplicitNoDiff)`. `InferFromType` requests
@@ -531,10 +540,10 @@ and write-back semantics. `ConstRefMode` additionally obeys `DIF-SIG-FWD-004` ev
 differential flavor is value-like.
 
 `DIF-SIG-FWD-003`: Under `PreserveErrorChannel`, a non-`BottomType` error channel is represented by
-`ErrorPrimalSlot` and maps to `DerivativeErrorSlot` with the identical error type. The default
-language rule does not differentiate thrown error values. A registered error policy may define a
-different mapping explicitly; `RejectThrowingCallable` returns a signature failure instead of
-silently dropping the channel.
+`ErrorPrimalSlot` and maps to `DerivativeErrorSlot` with the identical error type. This alternative
+is available only through an explicitly registered policy. The default `RejectThrowingCallable`
+returns a signature failure instead of silently dropping or preserving the channel; a different
+registered policy must define its mapping explicitly.
 
 `DIF-SIG-FWD-004`: Every `ConstRefMode(r)` slot, active or inactive, requires a registered
 physical-operand derivative rule selected by the complete canonical passing mode (the
@@ -548,7 +557,7 @@ rule produces `MissingPhysicalOperandDerivativeRule`; it never falls through to
 
 ### Backward mode
 
-The proposed default backward mapping is explicit in the following table. `Pair<T>` means the
+The accepted default backward mapping is explicit in the following table. `Pair<T>` means the
 registered primal/differential pair and `D<T>` means the looked-up differential type.
 
 | primal slot            | active backward slot                                                                 | inactive backward slot                                                               |
@@ -573,9 +582,9 @@ result seed when backward mode creates one), then result and error outputs when 
 downstream pass rediscovers which parameter is a cotangent or mistakes receiver/result/error for an
 ordinary parameter.
 
-`DIF-SIG-BWD-002`: Aliasable `RefMode`, pointer-differential outputs, throwing functions, and other
-unsupported role combinations fail signature transformation with named reasons. A target or IR pass
-cannot silently choose a different signature.
+`DIF-SIG-BWD-002`: Exclusive `RefMode`, pointer-differential outputs, throwing functions, and other
+physical or error-channel role combinations without an exact registered rule fail signature
+transformation with named reasons. A target or IR pass cannot silently choose a different signature.
 
 `DIF-SIG-BWD-003`: `ConstRefMode(r)` has no default active or inactive backward mapping. A
 registered physical-operand derivative rule must consume the complete structural passing mode and
@@ -848,18 +857,27 @@ ApplicableDerivativeProviderAt<S: WitnessTableState> = {
     proof: DerivativeProviderCompatibilityProofAt<S>
 }
 
+DerivativeProviderTier =
+    DispatchMandatedProviderTier
+  | ExplicitAssociationProviderTier
+  | SynthesizedProviderTier
+  | AssumedZeroProviderTier
+
+DispatchMandatedProviderTier < ExplicitAssociationProviderTier <
+    SynthesizedProviderTier < AssumedZeroProviderTier
+
 DerivativeProviderPriorityDimension =
-    ExplicitAssociationPriority(policy: StandardEnvironmentRuleId)
+    ProviderTierPriority
   | GenericSpecificityPriority
   | WitnessRoutePriority
   | RegisteredDerivativeProviderPriority(rule: StandardEnvironmentRuleId,
                                          inputs: CanonicalArguments)
 
 DerivativeProviderPriorityPremiseAt<S: WitnessTableState> =
-    ExplicitAssociationPremise(preferred: DerivativeProviderCandidateId,
-                               other: DerivativeProviderCandidateId,
-                               association: DerivativeAssociationProof,
-                               policy: StandardEnvironmentRuleId)
+    ProviderTierPremise(preferred: DerivativeProviderCandidateId,
+                        other: DerivativeProviderCandidateId,
+                        preferredTier: DerivativeProviderTier,
+                        otherTier: DerivativeProviderTier)
   | GenericSpecificityPremise(preferred: DerivativeProviderCandidateId,
                               other: DerivativeProviderCandidateId,
                               proof: GenericConstraintImplicationProof)
@@ -1015,7 +1033,9 @@ diagnosed independently of declaration/import order.
 `DIF-PRV-003`: Provider applicability and ranking are separate. Applicability constructs a complete
 `DerivativeProviderCompatibilityProofAt<S>`, including the stage-specific differential-evidence
 operand plan. Ranking compares only applicable candidates under the finite set of
-`DerivativeProviderPriorityDimension` values registered by the request's language environment.
+`DerivativeProviderPriorityDimension` values. `ProviderTierPriority` is mandatory and uses the fixed
+order above; registered rules cannot reorder or cross tiers. Other dimensions compare candidates
+only after their tiers tie.
 For every active dimension the comparison proof records `LeftPreferred`, `RightPreferred`, equal,
 or unordered with its typed premise. `leftNoWorse(proof)` is derived exactly when no observation
 prefers the right or is unordered; `rightNoWorse(proof)` is symmetric. `outcome` is revalidated from
@@ -1023,14 +1043,23 @@ those derived predicates: strict preference requires one no-worse direction and 
 the quotient by `SemanticallyEquivalent` is a partial order. No stored boolean is a second ranking
 authority.
 
-A compatible explicitly associated provider may dominate automatic synthesis only when the
-version policy supplies the corresponding proof. Two incomparable visible providers are ambiguous.
-Source order, candidate discovery order, module load order, and “first attribute found” are not
-priority dimensions.
+`tierOf` returns `DispatchMandatedProviderTier` only for a witness, dynamic, or builtin provider whose
+identity exactly matches the request's primal dispatch; a route for another dispatch is inapplicable,
+not merely lower-ranked. A user-defined exact association uses `ExplicitAssociationProviderTier`,
+automatic synthesis uses `SynthesizedProviderTier`, and `AssumedZeroDerivative` uses
+`AssumedZeroProviderTier`. Consequently a dispatch-mandated or explicit exact provider precedes
+automatic synthesis, and assumed-zero is the final fallback. Generic specificity may order providers
+within one tier; two otherwise incomparable visible providers in the same tier are ambiguous. Source
+order, candidate discovery order, module load order, and “first attribute found” are not priority
+dimensions.
 
 `DIF-PRV-004`: `TreatAsDifferentiable` creates `AssumedZeroDerivative` with an explicit trust proof
 and call-site provenance. It is not ordinary body synthesis, not `no_diff`, and not evidence that
-the primal body obeys derivative rules.
+the primal body obeys derivative rules. The attribute must be written on the exact declaration,
+names the admitted mode and order, and is never inferred, inherited, or supplied by a use site. Its
+provider is considered only after all real providers and synthesis fail. Conflicting trust
+attributes are diagnosed, and publication preserves the trust boundary so downstream tooling never
+mistakes it for validated derivative evidence.
 
 `DIF-PRV-005`: Interface requirement matching compares the promised modes/order and derivative
 signature maps. A witness derivative retains the interface-subtype witness and derivative entry
@@ -1101,8 +1130,8 @@ manufacture a `DerivativeProviderAt<S>`. No failure alternative can appear in
 
 `DIF-PRV-010`: An `EffectiveDifferentiabilityContractAt<S>` repeats one signature across its
 promise and callable shape. Its surface-map domain is exactly the promised mode/order set after
-versioned mode implication and order-policy expansion: `Exactly(n)` requires order `n`, while
-`Through(n)` requires every positive order at most `n`. Each selected provider's winner proof request key
+this edition's backward-to-forward implication: `Through(n)` requires every positive order at most
+`n`. Each selected provider's winner proof request key
 has the map key's mode/order and the same primal signature/environment; its request has the exact
 callable value being contracted and a compatible derivative signature map. Missing, failed, or
 ambiguous surfaces make contract construction fail; they are not omitted from the map.
@@ -1263,6 +1292,13 @@ error-bearing typed expression. Dependency waiting is only the enclosing schedul
 `QueryStep.Blocked`; cancellation abandons the unpublished attempt. A provider rejection or
 ambiguity retains its entire considered-candidate map and therefore cannot disappear into
 diagnostics while the query returns an apparently successful callable.
+
+`DIF-EXP-007`: Declaration `no_diff` is admitted only on a receiver, parameter, result, or stored
+field participation slot represented by `DifferentialParticipation`. Expression `no_diff(e)` is
+admitted only within a differentiability context and only when `e` can be evaluated as a value; it
+cannot detach an assignable storage identity. Neither form suppresses ordinary effects,
+capabilities, access checks, exceptions, initialization, or alias contracts, and neither can make an
+otherwise unsupported differentiable operation valid.
 
 ## Activity and body validation
 
@@ -1685,4 +1721,9 @@ contracts so a previously selected local provider fails validation without chang
 its concrete proof.
 
 The compatibility ledger separately records legacy spellings and current restrictions. It cannot
-substitute downstream IR behavior for any rule above.
+substitute downstream IR behavior for any rule above. This edition closes the policy choices:
+backward promises imply forward promises; `Through(n)` covers every order through `n`; throwing
+callables, physical/pointer roles, and missing differential evidence are rejected unless an exact
+registered rule supplies the complete mapping; exact explicit/dispatch providers precede synthesis,
+which precedes an explicit `TreatAsDifferentiable` trust fallback; and `no_diff` is only the typed
+participation/detach boundary described above.

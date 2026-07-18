@@ -105,6 +105,22 @@ SubtypeWitnessTarget = {
     superInterface: InterfaceInstanceKey
 }
 
+LookupRequirement<K: RequirementKind> = {
+    base: TypeId,
+    witness: SubtypeWitnessId,
+    requirement: InterfaceRequirementKeyOf<K>
+}
+
+LookupRequirementResultDomain<AssociatedTypeKind> = Type
+LookupRequirementResultDomain<AssociatedValueKind> =
+    ConstValue when signature.constantRequired
+  | TypedExpr otherwise
+LookupRequirementResultDomain<CallableKind> = CallableValue
+LookupRequirementResultDomain<PropertyKind> = NodeMap<AccessorRole, CallableValue>
+LookupRequirementResultDomain<SubscriptKind> = NodeMap<AccessorRole, CallableValue>
+LookupRequirementResultDomain<ConstructorKind> = CallableValue
+LookupRequirementResultDomain<ConformanceRequirementKind> = SubtypeWitness
+
 AssociatedTypeConstraint = Constraint
 
 AssociatedConstraintSlot = {
@@ -381,7 +397,6 @@ FuncTypeParamInfoEqualityProof = {
     valueType: TypeEqualityProof,
     mode: CanonicalFieldEquality<ParamPassingMode>,
     differentialParticipation: CanonicalFieldEquality<DifferentialParticipation>,
-    labelIdentity: ConditionalFieldEquality<ParameterLabelIdentity>,
     attributes: CanonicalFieldEquality<ParameterAttributeSet>
 }
 
@@ -656,6 +671,28 @@ RecoveryWitness<K> = {
 }
 ```
 
+`LookupRequirement<K>` is a schema family, not one untyped semantic node whose payload is inspected
+after construction. Each specialization is embedded directly in the result domain above.
+`AssociatedTypeProjection` is the codebase-aligned name of the concrete `Type` constructor whose
+payload is `LookupRequirement<AssociatedTypeKind>`; therefore generic node inspection and
+`as<Type>(x)` recognize it as a type without opening a witness payload. A callable specialization
+constructs chapter 12's `CallableValue` with `WitnessMethod` dispatch. A constant-required
+associated value constructs chapter 5's `LookupRequirementConst`; an ordinary associated value is
+a typed value expression. A conformance-requirement specialization constructs the canonical
+`LookupSubtypeWitness` candidate. There is no conversion among these result families merely because
+they share the lookup schema.
+
+`IFC-LOOKUP-001`: For every kind `K`, `lookup.base` is exactly the subtype endpoint of
+`lookup.witness`; the witness's super-interface is exactly `lookup.requirement.view`; and the key is
+an active kind-`K` entry in that view. The selected witness definition determines the operational
+table lookup. Requirement declaration names, source positions, or a desired result-domain cast
+cannot substitute for the complete key.
+
+`IFC-LOOKUP-002`: Lowering any specialization performs one witness lookup with the same witness and
+complete requirement key. The result-domain constructor determines how that result is consumed;
+only callable-like entries become dispatchable runtime slots, and only a
+`ConformanceRequirementKind` result is itself subtype evidence.
+
 ## Callable certificates and adapter endpoints
 
 The schemas above compose the type, conversion, effect, capability, and access-plan domains from
@@ -675,9 +712,10 @@ chapter 5 `FuncType` values. Its correspondence IDs must equal the proof endpoin
 proof compares alpha-normalized binders and constraints; the receiver proof covers both absence or
 every present receiver field; parameter proofs cover every expanded slot exactly once at the stored
 ordinals; result and error `TypeEqualityProof` endpoints equal the stored function fields; and
-traits and calling convention are canonically equal. Labels are compared or excluded only by the
-accepted label-identity rule. Effects, capabilities, visibility, dispatch, and source spelling are
-not function-equality operands.
+traits and calling convention are canonically equal. Parameter labels are read only while mapping a
+source argument to a `ParameterKey`; parameter and generic-parameter names never appear in this
+equality proof. Effects, capabilities, visibility, dispatch, and source spelling are not
+function-equality operands.
 
 `IFC-CALL-003`: In an equality proof, receiver correspondence is only `AbsentToAbsent` or
 `ReceiverToReceiver`, and ordinary parameter correspondence is a bijection after pack expansion.
@@ -981,7 +1019,9 @@ transport(e,k) = RequirementKey(I,O,r,[e] ++ p,K)
 
 `IFC-KEY-003`: Two requirement keys are equal only when all canonical fields above are equal. In
 particular, paths through two arms of a diamond remain distinct keys even when they end at the same
-source requirement.
+source requirement. This is requirement-occurrence identity inside one witness table; it does not
+create path-distinct `SubtypeWitnessId` values. Chapter 15 still selects one canonical outer witness
+and super-facet route for each endpoint pair.
 
 `IFC-KEY-004`: Equivalent diamond occurrences may share an immutable satisfaction value, but that
 sharing is recorded by a typed `Reused` satisfaction; it must not be achieved by dropping a key. If path
@@ -1038,7 +1078,7 @@ WitnessTableDefinition = {
 WitnessTableDefinitionPublication = {
     definition: WitnessTableDefinition,
     definitionReference: ValidatedWitnessTableRef,
-    witness: SubtypeWitnessRef<Published>
+    candidate: SubtypeWitnessCandidateAt<Published>
 }
 
 ConditionalRequirementWitnessAt<K, S: WitnessTableState> =
@@ -1059,10 +1099,24 @@ WitnessTableProjectionAt<S: WitnessTableState> = {
     proof: InterfaceRefinementProof
 }
 
+projectedWitnessTarget(p: WitnessTableProjectionAt<S>) = {
+    subtype = targetOf(p.derived).subtype,
+    superInterface = p.proof.base
+}
+
 projectedWitnessId(p: WitnessTableProjectionAt<S>) =
-    internWitness(LookupSubtypeWitness(
+    ContentId(CanonicalSubtypeWitness(projectedWitnessTarget(p)))
+
+projectedWitnessCandidate(p: WitnessTableProjectionAt<S>) =
+    let operation = LookupSubtypeWitness(
         base = p.derived.witness,
-        key = BaseInterfaceEntry(p.inheritance)))
+        key = BaseInterfaceEntry(p.inheritance))
+    in SubtypeWitnessCandidateAt<S>(
+        identity = resolve(projectedWitnessId(p)),
+        form = formFor(projectedWitnessTarget(p)),
+        operation = operation,
+        resolutions = requiredResolutionSetAt<S>(operation),
+        origin = originOf(p.inheritance))
 
 ProvisionalWitnessTableProjection = WitnessTableProjectionAt<Construction>
 WitnessTableProjection = WitnessTableProjectionAt<Published>
@@ -1079,16 +1133,19 @@ EffectiveConformanceContract = {
 value must carry the same index. It may be implemented as one tagged map or one map per kind, but
 the generic schema and serializer validate the dependency.
 
-`WitnessTableIdentity.id = ContentId(WitnessTableIdentity.key)`. The ID is therefore derived from
-provider identity and its concrete or generic witness-table form. The target alone is not an
-ID because two reachable providers for the same pair must remain distinguishable until coherence
-selects one or diagnoses ambiguity.
+`WitnessTableIdentity.id = ContentId(WitnessTableIdentity.key)`. A `WitnessTableId` is therefore
+derived from provider identity and its concrete or generic witness-table form. It identifies the
+provider table, not the language-level subtype witness. Provider identities remain distinguishable
+while coherence compares them; after selection, chapter 15 gives the target pair exactly one
+environment-qualified `SubtypeWitnessId` whose selected operation names the winning table.
 
 `IFC-CON-001`: Publishing a `WitnessTableIdentity` publishes no positive proof that the target
 conforms. A table-backed witness can discharge a constraint, pack an existential, or dispatch only
-after its required definition is validated. Bound parameters, specializations, keyed lookups, and
-existential extractions are positive witness values under their own chapter 15 constructors; they
-do not require manufacturing a new `WitnessTableDefinition`.
+after its required definition is validated and its candidate wins canonical coherence selection.
+Bound parameters, specializations, keyed lookups, and
+existential extractions are positive witness operations under their own chapter 15 constructors; they
+do not require manufacturing a new `WitnessTableDefinition`, but they are still selected under the
+same endpoint-uniqueness rule.
 
 `IFC-CON-002`: The identity/definition records form an immutable graph. Serialization permits
 forward and SCC references, but graph representability does not legalize circular reasoning.
@@ -1121,13 +1178,17 @@ referencing definitions together after validating the whole SCC; this is why the
 frozen definition record rather than recursively hashing its referenced definitions. The snapshot
 assigns `definitionOrdinal` after canonical `WitnessTableId` sorting, never task completion order.
 `WitnessTableDefinitionPublication` requires its definition identity/revision to equal its
-`definitionReference` exactly. Its witness operation is `GenericWitnessTable(identity)` for a
+`definitionReference` exactly. Its candidate operation is `GenericWitnessTable(identity)` for a
 `GenericWitnessTableForm` form and `WitnessTable(identity)` for a `ConcreteWitnessTableForm`
-otherwise; its resolution set maps that identity to the same `definitionReference`.
+otherwise; its resolution set maps that identity to the same `definitionReference`, and its
+candidate identity uses only the form target. The selection query's semantic environment controls
+candidate discovery but cannot change pair-only witness identity. The
+publication does not bypass coherence by claiming the pair-identified witness. Only
+`SelectCanonicalSubtypeWitness` may turn this candidate into the selected witness record.
 
 `IFC-CON-007`: `identityOf(ValidatedWitnessTableRef(id, revision)) = id`. The revision is an exact
 dependency stamp used to resolve and invalidate definition consumers; it is not a proof value and
-never enters `SubtypeWitnessId`. Canonical type, symbol, specialization-frame,
+never enters `WitnessTableId` or `SubtypeWitnessId`. Canonical type, symbol, specialization-frame,
 exported-signature, and mangled identity use stable semantic IDs, because a new immutable snapshot
 of the same canonical provider is not a new language-level conformance. Serialization retains the
 revision in witness resolution sets for dependency checking but excludes it from wire-stable
@@ -1149,11 +1210,13 @@ definition/reference publication.
 dictionary contains it. Its `InterfaceRefinementProof.path` is exactly the singleton `[inheritance]`; the
 proof's derived/base endpoints equal that step's endpoints and the step starts at the interface
 target of `derived`. Thus it proves one declared base-interface edge, not an unrelated multi-step route
-that merely contains the key. `projectedWitnessId` constructs exactly one
-`LookupSubtypeWitness` with that key. There is no
+that merely contains the key. `projectedWitnessId` is the canonical endpoint ID;
+`projectedWitnessCandidate` contributes exactly one `LookupSubtypeWitness` operation with that key.
+There is no
 independently selected base proof and no transitive-witness node. Publication rewrites only the
 derived witness's operational definition resolutions; both the derived and projected witness IDs
-remain unchanged.
+remain unchanged. If another inherited route contributes the same projected endpoint, chapter 15's
+canonical selection proves equivalence/specificity or diagnoses the conformance as ambiguous.
 
 `EffectiveConformanceContract` records the conditions, capabilities, visibility, and module
 environment under which the evidence is valid. These facts do not silently alter callable type
@@ -1183,6 +1246,22 @@ ConformanceCandidate = {
     semanticEnvironment: SemanticEnvironmentId,
     origin: Origin
 }
+
+ConformanceProviderSpecificityProof =
+    BoundEvidenceControlsAbstractTarget(
+        preferred: SubtypeWitnessId,
+        shadowed: WitnessTableId,
+        binder: CanonicalBinderRef,
+        slot: CanonicalConstraintSlot)
+  | StrictConformanceApplicabilitySubset {
+        preferred: ConformanceCandidateSource,
+        shadowed: ConformanceCandidateSource,
+        targetMatch: CanonicalSpecializationSpine,
+        constraintImplication: GenericConstraintImplicationProof,
+        strict: TargetStrict | ConstraintStrict | BothStrict
+    }
+  | RegisteredConformancePriority(rule: RuleId,
+                                  inputs: CanonicalArguments)
 
 ConformanceFailureReason =
     NoProvider | RejectedProvider | InaccessibleProvider | ProofCycle |
@@ -1220,9 +1299,11 @@ find an explicit conformance does not itself authorize synthesis.
 `IFC-FIND-003`: Reachable extension conformances are environment-scoped. A query key includes the
 semantic-environment revision; a result cached for one import graph cannot be reused in another.
 
-`IFC-FIND-004`: Multiple candidates for the same target are ambiguous unless they have the same
-canonical provider identity or an accepted specialization rule proves one strictly more specific.
-Source order and import order are never coherence rules.
+`IFC-FIND-004`: Multiple candidates for the same target are inputs to the single canonical-witness
+selection. Exact rediscovery of the same bound witness or `WitnessTableId` is deduplicated. Distinct
+source providers are not duplicate witnesses that may coexist: one must be strictly more specific,
+all lowering-observable operations must be proved equivalent, or the target is ambiguous. Source
+order and import order are never coherence rules.
 
 `IFC-FIND-005`: Public signatures and serialized generic evidence may use only conformances
 reachable through the module's exported semantic environment. A private body may capture local
@@ -1230,12 +1311,16 @@ extension evidence, which then becomes an explicit body and IR dependency.
 
 `IFC-FIND-006`: A provider is strictly more specialized only when matching its target pattern
 against the other's target produces a substitution, its required constraints imply the other's
-after that substitution, and at least one implication or target-pattern relation is strict. The
-proof records both pattern matching and constraint implication. If neither provider strictly
-specializes the other, they remain ambiguous.
+after that substitution, and at least one target or constraint relation is strict. Equivalently,
+the preferred provider's applicability set is a strict subset of the shadowed provider's set. A
+`StrictConformanceApplicabilitySubset` records both pattern matching and constraint implication.
+The current compiler's extension genericity and parameter-count heuristics are compatibility
+evidence, not this proof. If neither applicability set strictly includes the other, the providers
+remain ambiguous.
 
-`IFC-FIND-007`: `Unique` contains a stable witness value plus all definition resolutions that value
-requires, not the identity allocated by `DeclareWitnessTableIdentity`. If a selected table provider's
+`IFC-FIND-007`: `Unique` contains the pair-identified canonical witness plus all definition
+resolutions required by its selected operation, not the provider identity allocated by
+`DeclareWitnessTableIdentity`. If a selected table provider's
 definition is still under construction, `FindConformance` is blocked on that definition or
 participates in proof-cycle analysis; it never reports the allocated identity as successful
 evidence. `Recovered` retains a bare identity only for diagnostic graph continuity and cannot
@@ -1245,14 +1330,18 @@ discharge a constraint.
 recorded generic conditions are solved, and its source is either a target-equal bound witness or a
 table provider whose witness-table form specializes to that target. Its applicability predicate belongs to
 the query's capability universe and semantic environment. `Ambiguous` contains the maximal
-applicable candidates after source-key deduplication (`witness` ID or provider identity); `NotFound`
+applicable candidates after source-key deduplication (`witness` ID or provider identity) and pairwise
+strict-specificity comparison; `NotFound`
 retains all considered candidates and the dependency trace that rejected them.
 
 `IFC-FIND-009`: Evidence explicitly bound by the canonical generic context returns
-`DeclaredSubtypeWitness(binder, slot)` directly. Selecting an unspecialized generic conformance
-returns `GenericWitnessTable(provider)`; applying arguments and keyed constraint witnesses returns
-`SpecializedWitnessTable`. Neither case manufactures a nongeneric frozen conformance reference for
-an abstract proof.
+the `DeclaredSubtypeWitness(target)` candidate, with the source constraint slot retained only in
+the generic-evidence environment and inference trace. For an abstract target controlled by that
+constraint, `BoundEvidenceControlsAbstractTarget` prevents a static table from replacing the runtime
+generic argument. An unspecialized generic conformance contributes `GenericWitnessTable(provider)`;
+applying arguments and keyed constraint witnesses contributes `SpecializedWitnessTable`. Canonical
+selection then publishes the one endpoint-identified witness. None of these cases manufactures a
+nongeneric frozen conformance reference for an abstract proof.
 
 The initial specification recognizes no negative conformance and makes no closed-world inference
 from absence. Loading another module may add an extension candidate to a private environment, but
@@ -1473,15 +1562,17 @@ operational resolution becomes the newly frozen definition reference for the sam
 and the witness ID and every other plan field remain unchanged. Only the published form may occur
 in `RequirementWitness<K>`.
 
-## Associated type projections
+## Kind-indexed requirement lookup and associated type projections
 
-Chapter 5 is the sole authority for `Type::AssociatedTypeProjection`. Its `witness` field is the
-stable operational proof term used to reach the requirement. The containing `CanonicalTypeRecord`
-carries the exact frozen definition resolutions needed by that term in its dependency sidecar.
-Two environments may select different bound, specialized, lookup, or table witness terms for the
-same nominal `(base, interface)` endpoints, so endpoint equality alone does not make their
-projections equal. Definition revisions and source provenance are dependencies of the checked use,
-not operands in canonical `TypeId` hashing.
+Chapter 5 is the sole authority for `Type::AssociatedTypeProjection`. Its `lookup.witness` field is
+the pair-identified proof used to reach the requirement, and the constructor payload is exactly
+`LookupRequirement<AssociatedTypeKind>`. The containing `CanonicalTypeRecord` carries the exact
+frozen definition resolutions needed by the witness's selected operation in its dependency sidecar.
+Endpoint equality determines the one witness ID across semantic environments. Environments may
+discover different candidate operations, but composing them must select one strict specificity
+winner or diagnose a coherence error; it cannot create a second witness ID or reinterpret an
+existing associated-type projection. Definition revisions and source provenance are dependencies of
+the checked use, not additional operands in canonical `TypeId` hashing.
 
 When normalizing a published `CanonicalTypeRecord`, the caller supplies a
 `SubtypeWitnessRef<Published>` made from the projection's witness and
@@ -1498,7 +1589,7 @@ activeAssociatedTypeEntry(targetOf(W).superInterface, k)
 lookupWitnessEntry(W, RequirementEntry(k)) =
     type witnesses semantically equal to T with equivalent constraint proofs
 -------------------------------------------------------------------------------- WIT-PROJ-001
-normalize(AssociatedTypeProjection(B,k,w), W) = T
+normalize(AssociatedTypeProjection(LookupRequirement(B,w,RequirementEntry(k))), W) = T
 ```
 
 Requirement-map payloads are already instantiated: interface and lexical specialization frames,
@@ -1513,23 +1604,38 @@ substituted with it. Consumers do not re-run conformance search to rediscover th
 
 `WIT-PROJ-003`: Projection normalization is
 `NormalizeAssociatedTypeProjection(projection, witnessUse)`, where
-`witnessUse.witness = projection.witness`. The query key includes the complete resolution set, so
+`witnessUse.witness = projection.lookup.witness`. The query key includes the complete resolution set, so
 definition revisions invalidate the query without entering canonical projection identity. A bound
 or otherwise abstract witness whose associated-type entry is not yet available leaves the
 projection irreducible; missing or mismatched resolutions for a table-backed operation are a
 validation failure. An alias/projection cycle with no nominal constructor is rejected as an
 associated type cycle; it does not normalize to a provisional arbitrary type.
 
-`WIT-PROJ-006`: Constructing or deserializing `AssociatedTypeProjection(B, k, w)` validates the
+`WIT-PROJ-006`: Constructing or deserializing
+`AssociatedTypeProjection(LookupRequirement(B, w, RequirementEntry(k)))` validates the
 same three endpoint premises shown in `WIT-PROJ-001`: `B` is exactly the witness subtype, `k.view`
 is exactly its super-interface instance, and `k` is the active kind-correct associated-type entry
 under that view/base-interface path. An unrelated base or requirement cannot be retained as a hashed
 operand while normalization consults only the witness. Failed endpoint validation yields an error
 type and never performs witness lookup.
 
-`WIT-PROJ-004`: Equality of unresolved projections requires equal base type, canonical requirement
-key, and `SubtypeWitnessId`, or an explicit type-equality proof. Definition revisions do
-not change canonical type identity; equal endpoint types or declaration names are not enough.
+`WIT-PROJ-004`: Equality of unresolved projections requires equal
+`LookupRequirement<AssociatedTypeKind>` payloads or an explicit type-equality proof. Definition
+revisions do not change canonical type identity; declaration names without the complete specialized
+requirement key are not enough.
+
+`WIT-PROJ-007`: A value expression `a` whose checked type is an existential containing `IFoo` may be
+opened at a dominated use, and `a.AssocType` constructs an `AssociatedTypeProjection` using that
+opening's extracted witness and the active associated-type key. This preserves current Slang source
+syntax while making the generative opening and witness lookup explicit.
+
+`WIT-PROJ-008`: The first edition does not admit term-dependent callable signatures. A parameter
+type may depend on generic parameters and other type-level binders, but not on the identity or
+existential opening of an earlier value parameter. Thus
+`void foo(IBar a, a.AssocType b)` is rejected even though `a.AssocType` is legal in a dominated body
+scope. Supporting such signatures later requires an explicit dependent binder, substitution,
+mangling, calling-convention, and separate-compilation rule; it is not approximated by retaining a
+body-local `OpenedTypeId` in `FuncType`.
 
 `WIT-PROJ-005`: All guarded satisfactions for one associated-type key must produce semantically
 equal types and constraint proofs on overlapping or incomparable target alternatives. Target
@@ -1853,8 +1959,11 @@ adapted, default, builtin, or inherited dispatch. Dispatch is not recovered from
 declaration nesting, witness-table position, or an allocated-but-unvalidated witness-table identity.
 
 `WIT-USE-002`: Projecting a derived conformance to a refined interface follows the named
-`RefinementStepKey`. In a diamond, choosing a base interface without a path is ambiguous unless a
-proof establishes that all paths yield equivalent evidence.
+`RefinementStepKey`. In a diamond, every path contributes an operational
+`LookupSubtypeWitness` candidate for the same endpoint. The environment publishes the one canonical
+path only after deduplicating the exact same provider/path or proving one distinct path explicitly
+more specific; otherwise the endpoint is ambiguous. A use therefore consumes the canonical
+pair-identified witness and never chooses a path ad hoc.
 
 `WIT-USE-003`: IR may assign compact numeric slots after canonical sorting, but serialized IR
 retains the requirement key-to-slot map. Slot number is an encoding, never semantic identity.
@@ -1985,36 +2094,37 @@ coverage:
 - defaults used only after no applicable explicit candidate under `DefaultShadowPolicy`; and
 - strict rejection of unproductive conformance proof cycles.
 
-Whether `extension IFoo` extends the existential container or all conforming `This` types remains a
-separate source-language decision in the compatibility ledger. It must not be resolved by changing
-the conformance evidence model or by silently broadening extension reachability.
+`extension IFoo` is not part of this language: chapter 15 rejects an interface or existential
+extension target before it can contribute members or conformances. Generic extensions of concrete
+nominal patterns may use interface constraints, but that does not reinterpret the target as the
+interface or all conforming values.
 
 ## Rule-linked validation
 
 The test manifest uses `<rule-id>/<class>/<case>`, where `class` is `positive`, `negative`,
 `boundary`, `recovery`, `serialization`, `permutation`, or `mock`. At minimum it contains:
 
-| Rule family                 | Required concrete test IDs                                                                                                                                                                                                                                                                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| interface identity          | `IFC-INS-004/serialization/this-type-binder-id`, `IFC-INS-005/permutation/equal-inheritance-clause-discriminator`                                                                                                                                                                                                                                                   |
-| kind indexing               | `IFC-KIND-001/negative/type-in-callable-slot`, `IFC-KIND-002/positive/accessor-role-map`, `IFC-KIND-005/serialization/associated-constraint-slot`, `IFC-KIND-006/negative/detached-callable-contract`, `IFC-KIND-007/negative/incoherent-accessor-product`, `IFC-KIND-008/positive/constref-and-ref-coexist`, `IFC-KIND-008/negative/ref-does-not-satisfy-constref` |
-| callable equality/roles     | `IFC-CALL-001/negative/unequal-field-certificate`, `IFC-CALL-002/positive/alpha-equal-signatures`, `IFC-CALL-003/negative/duplicate-implementation-target`, `IFC-CALL-010/negative/accessor-index-map-disagreement`                                                                                                                                                 |
-| callable access/error       | `IFC-CALL-004/mock/access-plan-endpoints`, `IFC-CALL-004/negative/adapter-input-mismatch`, `IFC-CALL-005/boundary/catch-residual-error`, `IFC-CALL-008/negative/frame-owner-mismatch`, `IFC-CALL-011/positive/physical-constref-forward`, `IFC-CALL-011/negative/no-constref-temporary`                                                                             |
-| callable contracts          | `IFC-CALL-006/mock/local-vs-imported-checks`, `IFC-CALL-007/negative/omitted-adapter-operation-contract`                                                                                                                                                                                                                                                            |
-| specialization and diamonds | `IFC-KEY-003/boundary/diamond-distinct-paths`, `IFC-KEY-004/permutation/shared-evidence`                                                                                                                                                                                                                                                                            |
-| conformance graph           | `IFC-CON-001/negative/identity-is-not-proof`, `IFC-CON-002/serialization/forward-scc-refs`, `IFC-CON-006/negative/raw-id-is-not-evidence`, `IFC-CON-007/serialization/revision-not-type-identity`, `IFC-CON-008/negative/pending-map-publication`, `IFC-CON-009/positive/provisional-projection-rewrite`                                                            |
-| discovery/coherence         | `IFC-FIND-003/mock/extension-environment`, `IFC-FIND-004/permutation/import-order`, `IFC-FIND-007/mock/wait-for-definition`                                                                                                                                                                                                                                         |
-| matching                    | `IFC-MAT-002/negative/receiver-mode-adapter`, `IFC-MAT-003/permutation/candidate-order`, `IFC-MAT-006/mock/local-capability-fixpoint`, `IFC-MAT-007/mock/local-effect-fixpoint`, `IFC-MAT-008/serialization/candidate-identity`                                                                                                                                     |
-| absence/recovery            | `WIT-ABS-001/positive/optional-none`, `WIT-ABS-002/recovery/missing-is-not-absent`, `WIT-ABS-003/negative/unguarded-optional-use`                                                                                                                                                                                                                                   |
-| associated types            | `WIT-PROJ-001/positive/instantiated-projection`, `WIT-PROJ-003/negative/projection-cycle`, `WIT-PROJ-003/negative/mismatched-evidence-identity`, `WIT-PROJ-003/serialization/evidence-revision-key`                                                                                                                                                                 |
-| map algebra                 | `WIT-ALG-001/permutation/merge-laws`, `WIT-ALG-004/boundary/diamond-base-projections`, `WIT-ALG-005/boundary/complement-partition`                                                                                                                                                                                                                                  |
-| defaults                    | `IFC-DEF-003/negative/inherited-default-conflict`, `IFC-DEF-005/serialization/keyed-evidence`, `IFC-DEF-006/negative/entry-point-source-confusion`, `IFC-DEF-007/serialization/construction-to-published`                                                                                                                                                           |
-| synthesis                   | `SYN-GRP-001/recovery/atomic-failure`, `SYN-GRP-002/negative/provisional-ref-escape`, `SYN-GRP-003/permutation/parallel-idempotence`                                                                                                                                                                                                                                |
-| lambdas/wrappers            | `IFC-LAM-002/boundary/never-and-fallthrough`, `SYN-WRP-002/serialization/whole-group`, `SYN-WRP-003/negative/storage-endpoint-mismatch`, `SYN-WRP-004/negative/borrowed-wrapper-escape`, `SYN-WRP-005/serialization/all-kind-plan-map`                                                                                                                              |
-| runtime witness entries     | `WIT-USE-001/positive/property-get-set-distinct`, `WIT-USE-003/serialization/key-to-slot-map`, `WIT-USE-004/negative/operational-ref-in-published-ir`                                                                                                                                                                                                               |
-| all-kind witness entries    | `WIT-ENT-001/serialization/associated-type-entry`, `WIT-ENT-002/negative/associated-value-is-not-callable`, `WIT-ENT-003/serialization/metadata-and-runtime-projection`                                                                                                                                                                                             |
-| scheduler cycles            | `IFC-CYCLE-001/negative/self-proof`, `IFC-CYCLE-004/boundary/acyclic-key-growth`                                                                                                                                                                                                                                                                                    |
-| diagnostics                 | `IFC-DIAG-002/permutation/worker-count`, `IFC-DIAG-004/recovery/no-export`                                                                                                                                                                                                                                                                                          |
+| Rule family                 | Required concrete test IDs                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| interface identity          | `IFC-INS-004/serialization/this-type-binder-id`, `IFC-INS-005/permutation/equal-inheritance-clause-discriminator`                                                                                                                                                                                                                                                                                                                                                               |
+| kind indexing               | `IFC-KIND-001/negative/type-in-callable-slot`, `IFC-KIND-002/positive/accessor-role-map`, `IFC-KIND-005/serialization/associated-constraint-slot`, `IFC-KIND-006/negative/detached-callable-contract`, `IFC-KIND-007/negative/incoherent-accessor-product`, `IFC-KIND-008/positive/constref-and-ref-coexist`, `IFC-KIND-008/negative/ref-does-not-satisfy-constref`, `IFC-LOOKUP-001/positive/associated-lookup-is-type`, `IFC-LOOKUP-001/negative/callable-lookup-is-not-type` |
+| callable equality/roles     | `IFC-CALL-001/negative/unequal-field-certificate`, `IFC-CALL-002/positive/alpha-equal-signatures`, `IFC-CALL-003/negative/duplicate-implementation-target`, `IFC-CALL-010/negative/accessor-index-map-disagreement`                                                                                                                                                                                                                                                             |
+| callable access/error       | `IFC-CALL-004/mock/access-plan-endpoints`, `IFC-CALL-004/negative/adapter-input-mismatch`, `IFC-CALL-005/boundary/catch-residual-error`, `IFC-CALL-008/negative/frame-owner-mismatch`, `IFC-CALL-011/positive/physical-constref-forward`, `IFC-CALL-011/negative/no-constref-temporary`                                                                                                                                                                                         |
+| callable contracts          | `IFC-CALL-006/mock/local-vs-imported-checks`, `IFC-CALL-007/negative/omitted-adapter-operation-contract`                                                                                                                                                                                                                                                                                                                                                                        |
+| specialization and diamonds | `IFC-KEY-003/boundary/diamond-distinct-requirement-keys`, `IFC-KEY-004/permutation/shared-evidence`                                                                                                                                                                                                                                                                                                                                                                             |
+| conformance graph           | `IFC-CON-001/negative/identity-is-not-proof`, `IFC-CON-002/serialization/forward-scc-refs`, `IFC-CON-006/negative/raw-id-is-not-evidence`, `IFC-CON-007/serialization/revision-not-type-identity`, `IFC-CON-008/negative/pending-map-publication`, `IFC-CON-009/positive/provisional-projection-rewrite`, `IFC-CON-009/negative/incoherent-projection-paths`                                                                                                                    |
+| discovery/coherence         | `IFC-FIND-003/mock/extension-environment`, `IFC-FIND-004/permutation/import-order`, `IFC-FIND-004/negative/duplicate-endpoint-providers`, `IFC-FIND-006/positive/strict-applicability-subset`, `IFC-FIND-006/negative/incomparable-extension-providers`, `IFC-FIND-007/mock/wait-for-definition`                                                                                                                                                                                |
+| matching                    | `IFC-MAT-002/negative/receiver-mode-adapter`, `IFC-MAT-003/permutation/candidate-order`, `IFC-MAT-006/mock/local-capability-fixpoint`, `IFC-MAT-007/mock/local-effect-fixpoint`, `IFC-MAT-008/serialization/candidate-identity`                                                                                                                                                                                                                                                 |
+| absence/recovery            | `WIT-ABS-001/positive/optional-none`, `WIT-ABS-002/recovery/missing-is-not-absent`, `WIT-ABS-003/negative/unguarded-optional-use`                                                                                                                                                                                                                                                                                                                                               |
+| associated types            | `WIT-PROJ-001/positive/instantiated-projection`, `WIT-PROJ-003/negative/projection-cycle`, `WIT-PROJ-003/negative/mismatched-evidence-identity`, `WIT-PROJ-003/serialization/evidence-revision-key`, `WIT-PROJ-007/positive/value-associated-type`, `WIT-PROJ-008/negative/value-dependent-parameter-type`                                                                                                                                                                      |
+| map algebra                 | `WIT-ALG-001/permutation/merge-laws`, `WIT-ALG-004/boundary/diamond-base-projections`, `WIT-ALG-005/boundary/complement-partition`                                                                                                                                                                                                                                                                                                                                              |
+| defaults                    | `IFC-DEF-003/negative/inherited-default-conflict`, `IFC-DEF-005/serialization/keyed-evidence`, `IFC-DEF-006/negative/entry-point-source-confusion`, `IFC-DEF-007/serialization/construction-to-published`                                                                                                                                                                                                                                                                       |
+| synthesis                   | `SYN-GRP-001/recovery/atomic-failure`, `SYN-GRP-002/negative/provisional-ref-escape`, `SYN-GRP-003/permutation/parallel-idempotence`                                                                                                                                                                                                                                                                                                                                            |
+| lambdas/wrappers            | `IFC-LAM-002/boundary/never-and-fallthrough`, `SYN-WRP-002/serialization/whole-group`, `SYN-WRP-003/negative/storage-endpoint-mismatch`, `SYN-WRP-004/negative/borrowed-wrapper-escape`, `SYN-WRP-005/serialization/all-kind-plan-map`                                                                                                                                                                                                                                          |
+| runtime witness entries     | `WIT-USE-001/positive/property-get-set-distinct`, `WIT-USE-003/serialization/key-to-slot-map`, `WIT-USE-004/negative/operational-ref-in-published-ir`                                                                                                                                                                                                                                                                                                                           |
+| all-kind witness entries    | `WIT-ENT-001/serialization/associated-type-entry`, `WIT-ENT-002/negative/associated-value-is-not-callable`, `WIT-ENT-003/serialization/metadata-and-runtime-projection`                                                                                                                                                                                                                                                                                                         |
+| scheduler cycles            | `IFC-CYCLE-001/negative/self-proof`, `IFC-CYCLE-004/boundary/acyclic-key-growth`                                                                                                                                                                                                                                                                                                                                                                                                |
+| diagnostics                 | `IFC-DIAG-002/permutation/worker-count`, `IFC-DIAG-004/recovery/no-export`                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Pure matcher tests provide mock requirement slots, signatures, lookup results, conformance providers,
 and synthesis planners; they do not parse a module or construct a compiler session. Property tests

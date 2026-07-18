@@ -44,9 +44,8 @@ ComputeDeclaredVisibility(DeclaredVisibilityInput) -> CheckResult<DeclVisibility
 
 VisibilityDefaultRule =
     NamespaceScopeDefault
-  | LegacyPublicDefault(languageRules: LanguageRuleSetId)
   | ModuleDeclaredDefault(module: ModuleId, value: DeclVisibility)
-  | ModernImplicitInternalDefault(module: ModuleId)
+  | ImplicitInternalDefault(module: ModuleId)
 
 VisibilityDerivation =
     ExplicitModifier(origin: Origin)
@@ -63,9 +62,9 @@ DeclVisibilityFact = {
 }
 ```
 
-`VisibilityDefaultRule` is closed and records the exact compatibility rule that supplied an omitted
+`VisibilityDefaultRule` is closed and records the exact language rule that supplied an omitted
 modifier. `OwnerCappedVisibility` retains the derivation it capped, including an explicit invalid
-overexposure recovered by rule 6; it cannot contain the same owner twice and its chain follows
+overexposure recovered by rule 5; it cannot contain the same owner twice and its chain follows
 lexical ownership strictly outward. A valid or recovered fact whose `value` is `Private` has a
 `Some(privateOwner)`; an invalid module-level `private` recovers to the applicable module default
 rather than publishing a private fact with no access domain.
@@ -73,16 +72,18 @@ rather than publishing a private fact with no access domain.
 The default rules are evaluated in the following order:
 
 1. An explicit valid modifier supplies the value.
-2. An accessor, enum case, interface requirement, generic wrapper, generic parameter, or generic
-   constraint inherits the visibility of the declaration it belongs to.
+2. An accessor, enum case, interface requirement, generic parameter, or generic constraint inherits
+   the visibility of the declaration it belongs to.
 3. A namespace declaration is `Public` as a scope identity. This does not export its members;
    each member is classified independently.
-4. In legacy language mode, an otherwise unmodified declaration defaults to `Public`.
-5. In modern language mode, an otherwise unmodified declaration uses its module's declared
-   default, which is `Internal` when the module does not specify one.
-6. A defaulted nested declaration is capped by its enclosing named declaration using
+4. Every other unmodified source declaration uses its module's declared default, or `Internal`
+   when the module declares none. Slang 2026 has no legacy-public default branch.
+5. A defaulted nested declaration is capped by its enclosing named declaration using
    `meetVisibility`. An explicit nested visibility greater than its owner is diagnosed and
    recovered to the same meet.
+6. A synthesized declaration does not enter this omitted-source-modifier chain. Its synthesis rule
+   supplies the explicit `SynthesisVisibilityPlan` defined by `VIS-SYN-001`, including owner,
+   requirement, and exposed-operand caps.
 
 `VIS-DEF-001`: `private` is valid only when `privateOwner(d)` exists. A module-level declaration
 and a namespace declaration itself have no private owner. `internal` is valid at every named
@@ -92,11 +93,11 @@ declaration for which visibility is meaningful.
 attempts to make a requirement less or more visible is rejected; recovery uses the interface's
 visibility.
 
-`VIS-DEF-003`: Defaults depend only on the declaration's language mode, module default, and owner
-fact. Whether an unrelated declaration has an explicit visibility modifier cannot change them.
+`VIS-DEF-003`: Slang 2026 defaults depend only on the declaration kind, module default, and owner
+fact. A dialect flag or an unrelated declaration's explicit visibility modifier cannot change them.
 
-These rules preserve the current `Private < Internal < Public` ordering and legacy-public/modern
-module default split. The owner cap is specified as a value rather than being reconstructed later
+These rules preserve the `Private < Internal < Public` ordering while giving Slang 2026 one
+module-default policy. The owner cap is specified as a value rather than being reconstructed later
 by `checkVisibility`.
 
 ## Reachability and access
@@ -889,8 +890,8 @@ Arguments inside one `[require(a, b, ...)]` attribute denote `requireAll(a, b, .
 `[require(...)]` attributes on the same declaration denote `allowEither` alternatives.
 Requirements contributed by lexically enclosing declarations denote `requireAll` constraints.
 Thus an incompatible parent/local combination is `FalseFormula`, not an instruction to preserve
-the local target alternative. This is a proposed principled change from current
-`nonDestructiveJoin` behavior and requires a compatibility decision in chapter 13.
+the local target alternative. This strict conjunction is the accepted language rule and
+intentionally replaces current `nonDestructiveJoin` behavior.
 
 An unconstrained declaration has `declared(d) = TrueFormula`. A declaration is **constrained** when
 it has either an explicit local origin or at least one inherited origin; inherited constraints are
@@ -1209,8 +1210,9 @@ requirements, which is conservative. A compiler must not silently approximate wi
 `allowEither`.
 
 `CAP-TGT-003`: Exhaustiveness, overlap, and residual/default computation are relative to the
-capability-universe revision in the query key. Adding a target or stage invalidates those results;
-an old serialized module retains its original universe revision until explicitly migrated.
+capability-universe identity in the query key. Adding a target or stage changes that identity and
+invalidates those results. A serialized module whose capability-universe identity differs from the
+current standard environment is rejected before any semantic fact is published.
 
 ## Interfaces, class bases, extensions, and availability
 
@@ -1278,9 +1280,9 @@ concrete availability than the target only when the route evidence retains and p
 candidate selection retains a failed concrete proof for diagnostics.
 
 The current checker additionally requires equal abstract target/stage atoms in some class-base and
-interface-refinement comparisons. The proposed rules replace that positional/keyhole check with logical
-implication. Compatibility tests must identify any intended behavior not expressible by
-`CAP-IFC-001` or `CAP-INH-001` before implementation freeze.
+interface-refinement comparisons. The accepted rules replace that positional/keyhole check with
+logical implication. No additional equality premise is part of the language; compatibility tests
+record the intentional difference.
 
 ## Queries, recursion, and fixpoints
 
@@ -1442,14 +1444,15 @@ VisibilityFailure = {
 universe content hash. Generated enum values, pointer identities, insertion order, and target
 driver enumeration order are absent from the wire form.
 
-`CAP-DET-002`: Deserializing under the identical universe revision preserves canonical bytes.
-Migrating to a new universe resolves atoms by stable name, re-expands named aliases, revalidates
-keyholes, and re-canonicalizes. Migration failure is explicit; unknown atoms are not discarded.
+`CAP-DET-002`: Deserializing under the identical capability-universe identity preserves canonical
+bytes. Any identity mismatch is an atomic compatibility failure; the semantic snapshot format does
+not define capability-universe migration or reinterpret atoms under a different standard
+environment.
 
-`CAP-DET-003`: The capability universe is closed for one compilation snapshot and open between
-revisions. Adding an implication edge, incompatibility edge, alias expansion, target, or stage
-changes the universe hash and invalidates every formula operation that depends on it. It does not
-retroactively reinterpret cached module artifacts.
+`CAP-DET-003`: The capability universe is closed for one compilation snapshot. Adding an implication
+edge, incompatibility edge, alias expansion, target, or stage changes the universe hash and
+invalidates every formula operation that depends on it. Cached or serialized artifacts carrying the
+old identity are rejected rather than reinterpreted.
 
 `VIS-DET-001`: `DeclVisibility` and exposure results serialize declaration IDs, module identities,
 semantic field paths, and module-graph revision. Reordering independent declarations, imports with
@@ -1581,8 +1584,8 @@ Required direct suites include:
 - interface, inheritance, extension, and capability-specialized overload directions;
 - self and mutual recursive call-graph fixpoints, newly discovered edges, and acyclic generic
   growth limits, including an assertion that no effective-contract query enters the SCC;
-- one-worker/many-worker, insertion-order, serialization, migration, and universe-revision
-  determinism; and
+- one-worker/many-worker, insertion-order, serialization, exact-identity rejection, and
+  universe-revision determinism; and
 - diagnostics with multiple alternatives and cyclic provenance.
 
 `TST-CAP-001`: Algebra property tests generate small validated universes as well as formulas. A
@@ -1612,17 +1615,14 @@ The current implementation is primarily in `source/slang/slang-capability.{h,cpp
 conjunction, `unionWith` approximates disjunction, and `nonDestructiveJoin` preserves incompatible
 alternatives. The new names above state the logic rather than the storage mutation.
 
-Before accepting this chapter, differential tests must resolve these explicit compatibility
-questions in chapter 13:
+All four former compatibility questions are resolved by this edition:
 
-1. whether enclosing/local capability attributes use strict logical conjunction or preserve
-   incompatible local target alternatives;
-2. whether current abstract-target/stage equality checks express an intended rule beyond logical
-   contract implication;
-3. the complete default-visibility table for namespaces, nested declarations, and every
-   synthesized declaration family; and
-4. which target/capability switch predicates can produce a non-monotone valid-world set in current
-   source and how those cases should be diagnosed.
-
-They are review decisions, not implementation freedom. Once accepted, the named rules and their
-manifest tests are the language contract.
+1. enclosing/local capability attributes use strict logical conjunction;
+2. interface/base compatibility uses logical implication with no extra abstract-target/stage
+   equality rule;
+3. namespace identities default to `Public`; accessors, enum cases, requirements, generic
+   parameters/constraints inherit their owner's visibility; every other source declaration
+   uses the module-declared default or implicit `Internal`, followed by the owner cap; synthesized
+   declarations use their explicit `SynthesisVisibilityPlan`; and
+4. a target/capability switch whose selected valid-world set is non-monotone is diagnosed and
+   recovers with conservative `requireAll` as required by `CAP-TGT-002`, never `allowEither`.

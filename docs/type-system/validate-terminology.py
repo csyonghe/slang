@@ -22,6 +22,8 @@ REPOSITORY_ROOT = TYPE_SYSTEM_DIR.parent.parent
 TERMINOLOGY_CHAPTER = "00-terminology.md"
 MACHINE_READABLE_SPEC_FILES = (
     "cst-production-profile.json",
+    "decl-cst-production-profile.json",
+    "decl-outline-grammar.ebnf",
     "generate-cst-production-schema.py",
     "grammar.ebnf",
 )
@@ -538,6 +540,16 @@ FORBIDDEN_TERMS = (
     ForbiddenTerm("ScopedFile", "ScopeWiring", _schema_root("ScopedFile")),
     ForbiddenTerm("ScopedAST", "ScopeWiring", _schema_root("ScopedAST")),
     ForbiddenTerm("BoundAST", "integrated parse/check queries", _schema_root("BoundAST")),
+    ForbiddenTerm(
+        "DialectId",
+        "SlangLanguageVersion / LanguageRuleSetId",
+        _schema_root("DialectId"),
+    ),
+    ForbiddenTerm(
+        "@dialect grammar annotation",
+        "@language-version",
+        re.compile(r"@dialect(?=\()"),
+    ),
     ForbiddenTerm(
         "IRWitnessLookupKey",
         "first-class interface-requirement key operand",

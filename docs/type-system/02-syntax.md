@@ -2,11 +2,18 @@
 
 This chapter specifies the lossless syntax boundary and the parser's contract. The companion
 [`grammar.ebnf`](grammar.ebnf) is a structural EBNF baseline for the full surface grammar. It is
-derived from official source at `4f4ec505761e2e56a45da873d5c169ff6e512f52` and corrects known
+derived from official source at `aaa07fe296560ffefeaf2e39d0aed5658b641a21` and corrects known
 errors in the older generated grammar.
 Its productions and island predicates are mechanically readable; exhaustive `@recover`,
-`@version`, and `@dialect` annotations remain an explicitly blocking grammar-freeze item in
+and `@language-version` annotations remain an explicitly blocking grammar-freeze item in
 chapter 13 rather than an implicit parser-generator default.
+
+`SYN-SCOPE-001`: This grammar accepts the Slang 2026 source language. Legacy HLSL and GLSL input
+dialects are outside its normative language, even when the current parser happens to share a path
+with them. A traditional declaration or cast spelling appears here only when Slang 2026 itself
+retains that spelling. A source form whose only justification is input-dialect compatibility must
+be rejected or handled by a separate compatibility frontend, never surfaced as a successful node
+of this grammar.
 
 Declaration outlining is syntax-only. Fine parsing is a scheduler query and may request name
 lookup or checked semantic facts when the language's grammar is name-directed. Every such request
@@ -70,7 +77,7 @@ DeclGrammar = {
 GrammarWord = {
     id: QualifiedName,
     spelling: Utf8String,
-    role: FixedGrammarWord | ContextualGrammarWord,
+    role: ReservedGrammarWord | ContextualGrammarWord,
     rule: RuleId
 }
 
@@ -117,7 +124,7 @@ query publishes a `Parsed` CST fragment and node-local immutable AST results. `P
 does not mean that the entire file passed through a bulk phase. A whole-file parsed view is an
 optional derived tooling/serialization assembly.
 
-`SyntaxDisambiguationProvider` is injectable. Unit tests can answer generic-head, syntax-declaration,
+`SyntaxDisambiguationProvider` is injectable. Unit tests can answer generic-head, registered-syntax,
 member, blocked, and recovery queries without constructing a compiler session. The production
 provider delegates to the centralized scheduler. Every option, vocabulary revision, scope-wiring
 identity, and semantic context used by a query participates in its key; resource limits are
@@ -164,8 +171,11 @@ internal sentinel; `Invalid` is a source token with physical spelling and a diag
 backslash-newline absorbed while recognizing one token is instead a line-continuation splice in
 that token's spelling map; it is not a hidden `Trivia` value.
 
-All language words are initially `Identifier` tokens. The parser recognizes fixed and contextual
-spellings through `GrammarVocabulary`; callback/source-declared syntax is separately provided by
+All language words are initially `Identifier` tokens. `GrammarVocabulary` then classifies a spelling
+as reserved or contextual for the selected Slang language rules. Reservedness is a parser/name
+formation rule rather than a second lexer token kind: a `ReservedGrammarWord` cannot be accepted by
+an `IDENTIFIER` field, while a `ContextualGrammarWord` is recognized only in the production position
+that requests it. Versioned compiler-provided syntax metadata is separately provided by
 `SyntaxParseInfoSet`. Builtin type and function names remain ordinary declarations
 in the standard environment.
 
@@ -182,9 +192,9 @@ backslash-newline sequence.
 
 ## Identifiers
 
-Compatibility lexing accepts an underscore, ASCII letter, or non-ASCII scalar as the first
-character, followed by those characters or ASCII digits. This matches the current lexer more
-closely than claiming Unicode XID behavior it does not implement.
+Slang 2026 lexing accepts an underscore, ASCII letter, or non-ASCII scalar as the first character,
+followed by those characters or ASCII digits. This states the language accepted by this edition
+rather than claiming Unicode XID behavior the language has not adopted.
 
 ```text
 identifier-start    ::= '_' | ASCII-LETTER | NON-ASCII-SCALAR ;
@@ -193,8 +203,36 @@ identifier          ::= identifier-start { identifier-continue } ;
 ```
 
 `LEX-ID-001`: Identifier equality is defined on the decoded scalar sequence without Unicode
-normalization in compatibility mode. A future modern mode may adopt XID and normalization only as
-an intentional language-version change.
+normalization. A later language edition may adopt XID and normalization only as an intentional
+language-version change.
+
+### Reserved and contextual words
+
+The following `GrammarVocabulary` entries are `ReservedGrammarWord` values in Slang 2026:
+
+```text
+declaration introducers:
+    module import implementing namespace using typedef typealias
+    struct class enum interface extension func operator property
+    get set ref constref associatedtype cbuffer tbuffer
+
+statement/control introducers:
+    if else for while do catch switch case default
+    break continue return discard defer throw try
+
+binding introducers:
+    var let
+```
+
+The corresponding implementation-reserved spellings beginning with `__` are also reserved.
+`syntax`, `attribute_syntax`, and `type_param` are reserved for compiler-owned source but are not
+user-definable declaration forms. Other grammar words remain `ContextualGrammarWord` unless a rule
+explicitly adds them to the versioned reserved set.
+
+`LEX-ID-002`: An `IDENTIFIER` terminal cannot consume a reserved word, including in a declaration
+name, parameter name, member name, or qualified-name component. A contextual word remains a valid
+identifier outside the exact production position that recognizes it. Reservedness therefore cannot
+depend on name lookup, declaration order, or which overload is selected.
 
 ## Literals
 
@@ -203,8 +241,7 @@ The lexical grammar distinguishes spelling from semantic validation:
 ```text
 integer-literal ::= decimal-integer integer-suffix?
                   | binary-integer integer-suffix?
-                  | hex-integer integer-suffix?
-                  | legacy-octal integer-suffix? ;
+                  | hex-integer integer-suffix? ;
 
 floating-literal ::= decimal-float float-suffix?
                    | hex-float float-suffix?
@@ -216,8 +253,10 @@ char-literal   ::= "'" character-or-escape "'" ;
 
 Digit separators, exponent forms, escape syntax, raw-string delimiters, recognized suffixes, range
 selection, and malformed-literal diagnostics are rule-table data generated from the lexical schema.
-Compatibility tokenization accepts an alphanumeric suffix and leaves unsupported-suffix rejection
-to literal checking, matching current source behavior.
+Slang tokenization accepts an alphanumeric suffix and leaves unsupported-suffix rejection to
+literal checking. A multi-digit leading-zero integer is tokenizable but is not included in the
+successful literal forms above while the separately named chapter 13 language-owner decision
+remains open; current implementation acceptance alone cannot make it a Slang 2026 value.
 
 `LEX-LIT-001`: The token stores exact physical and logical spelling. The pure, memoizable
 `DecodeLiteral(TokenRef, LanguageRuleSetId)` query from chapter 7 produces the decoded value or
@@ -235,7 +274,7 @@ Trivia elements occur directly in `TokenList`. Classification rules are:
 - each source newline sequence → `NewLine` with exact physical spelling;
 - backslash followed by a newline sequence → `LineContinuation`;
 - `//` through its terminating newline boundary → `LineComment` plus the separate newline trivia;
-- `/* ... */` → `BlockComment`; comments do not nest in compatibility mode; and
+- `/* ... */` → `BlockComment`; comments do not nest; and
 - a comment matching a versioned documentation marker retains `LineComment`/`BlockComment` and sets
   `isDocumentation=true`.
 
@@ -282,7 +321,7 @@ layout              ::= active-trivia | maximal-inactive-content
 
 outline-declaration ::= import | namespace | aggregate | interface | extension
                       | buffer | callable | property | variable | type-alias
-                      | associated | syntax | explicit-generic | empty
+                      | associated | explicit-generic | empty
                       | c-style/fallback | recovered
 
 known-decl-head     ::= modifiers? introducer trivia* identifier? unparsed-header
@@ -346,9 +385,10 @@ boundary is a named terminal or non-terminal of the enclosing production, never 
 `ScanDeferredBody` then consumes exactly the selected semicolon or one brace group, including nested
 balanced groups, into a single `UnparsedContent` for later fine parsing.
 
-Outline alternatives have a fixed precedence: exact introducer productions, then the C-style/
-compatibility fallback, then recovery. A soft keyword counts as an introducer only when the exact
-`GrammarVocabulary` input assigns it that role. The fallback is selected by this pure primitive:
+Outline alternatives have a fixed precedence: exact introducer productions, then the retained
+C-style declaration fallback, then recovery. A grammar word counts as an introducer only when the
+exact `GrammarVocabulary` input assigns it that role. The fallback is selected by this pure
+primitive:
 
 ```text
 FallbackDeclaratorPartition = {
@@ -607,9 +647,9 @@ node data. Every category/production kind, field, choice/quantifier group, and
 variant alternative carries a non-zero stable wire tag. Tags are the big-endian UInt32 prefix of
 SHA-256 over the versioned namespace, tag domain, and stable semantic name; an explicit profile
 override may pin a reviewed value. Zero is reserved, and generation rejects a collision instead of
-probing for a different value. Renaming a published semantic role or changing the derivation
-namespace requires a schema-version change and an explicit migration; adding an unrelated
-production cannot renumber existing tags.
+probing for a different value. Renaming a semantic role or changing the derivation namespace
+requires a compiler/schema-version change; adding an unrelated production cannot renumber existing
+tags within that version. Older serialized artifacts are rejected rather than migrated implicitly.
 
 For example, the exact override for `if-statement` generates:
 
@@ -647,22 +687,22 @@ component fields are not a conforming representation.
 
 `PAR-CST-002`: The profile pins the exact digest of the grammar's canonical UTF-8/LF text, so
 checkout line-ending policy is not a schema change. Changing that canonical grammar requires a
-schema version change and comparison of the old and new generated descriptors. A published field name may
-remain unchanged or be covered by an explicit `SchemaMigrationDescriptor.fieldRemaps` entry; a
-collision suffix or structural-path shift may not silently rename it. The profile override is the
-authority for preserving a semantic role when grammar structure changes. Published kind, field,
-group, and alternative wire tags obey the same no-reuse rule.
+compiler/schema-version change and comparison of the old and new generated descriptors. A field name
+may remain unchanged when its semantic role is unchanged; a collision suffix or structural-path
+shift may not silently rename it inside one schema. The profile override is the authority for
+preserving a semantic role when grammar structure changes. This review discipline supports
+determinism and tooling but does not promise cross-compiler deserialization.
 
 ## Surface grammar
 
-[`grammar.ebnf`](grammar.ebnf) defines declarations, statements, expressions, types, generics,
-attributes, semantics, and internal compatibility forms. Important boundaries are:
+[`grammar.ebnf`](grammar.ebnf) defines Slang 2026 declarations, statements, expressions, types,
+generics, attributes, semantics, and retained traditional Slang forms. Important boundaries are:
 
 - a `module` declaration accepts no name, one identifier, or one string literal; dotted module
   names are not part of the current grammar;
 - `import`, `__import`, `__include`, and `implementing` accept dotted identifier paths or strings;
-- `struct`, `enum`, interface, extension, and callable forms may have the generic syntax shown in
-  the grammar; current `class` parsing does **not** accept inline generics;
+- `struct`, `class`, `enum`, interface, extension, and callable forms may have the generic syntax
+  shown in the grammar;
 - colon clauses have role-specific productions: struct/extension clauses are interface
   conformances, interface clauses are refinements, class clauses may contain one class base plus
   conformances, and enum clauses describe their registered base roles;
@@ -672,10 +712,10 @@ attributes, semantics, and internal compatibility forms. Important boundaries ar
   only a type;
 - a property or subscript accessor block accepts the soft spellings `get`, `set`, `ref`, and
   `constref`; the last two are distinct reference-accessor roles rather than modifiers;
-- attribute separators are optional for compatibility;
+- adjacent attribute items require an explicit comma; `[A B]` is recovered invalid syntax rather
+  than an alternate spelling of `[A, B]`;
 - `__require_capability` declaration syntax is an unparenthesized `+`/`,`-separated name list;
-- `syntax` and `attribute_syntax` use the forms in `grammar.ebnf`, not the forms previously shown in
-  generated grammar; and
+- user-defined `syntax` and `attribute_syntax` declarations are not Slang language forms; and
 - builtin type names are resolved declarations, not grammar terminals.
 
 `PAR-AGG-001`: The proposed grammar has no concrete struct-inheritance production. The tokens after
@@ -685,9 +725,10 @@ it does not construct a successful surface/checked inheritance node or a base fa
 
 `PAR-INI-001`: A braced initializer occurs only in an initializer grammar position and may nest.
 It is not a `primary-expression`. `T(args)` remains postfix syntax until binding classifies `T` as a
-type, while `(T)e` is represented by the cast alternative of
-`AmbiguousCastOrParenthesized`. Both successful one-input forms map to chapter 16's
-`ExplicitSingle` initialization request.
+type and may then form an initialization request. `(T)e` is represented by the cast alternative of
+`AmbiguousCastOrParenthesized` and is checked by the cast/conversion rules. In particular, `(T)0`
+has no aggregate-initialization meaning: it succeeds only when the ordinary Slang cast from the
+integer operand to `T` succeeds.
 
 ### Reference-accessor spellings
 
@@ -720,27 +761,32 @@ alone.
 
 From lowest to highest:
 
-| Level          | Forms                                                       | Associativity                                          |
-| -------------- | ----------------------------------------------------------- | ------------------------------------------------------ |
-| comma          | `,`                                                         | left (Slang 2026 uses tuple syntax inside parentheses) |
-| assignment     | `=` and compound assignment                                 | right                                                  |
-| conditional    | `?:`                                                        | right by grammar                                       |
-| logical        | `\|\|`, `&&`                                                | left                                                   |
-| bitwise        | `\|`, `^`, `&`                                              | left                                                   |
-| equality       | `==`, `!=`                                                  | left                                                   |
-| relational     | `<`, `>`, `<=`, `>=`, `is`, `as`                            | left                                                   |
-| shift          | `<<`, `>>`                                                  | left                                                   |
-| additive       | `+`, `-`                                                    | left                                                   |
-| multiplicative | `*`, `/`, `%`                                               | left                                                   |
-| prefix         | registered prefix operators, `new`, keyword prefix forms    | right                                                  |
-| postfix        | call, index, member, generic application, postfix operators | left                                                   |
+| Level          | Forms                                                       | Associativity    |
+| -------------- | ----------------------------------------------------------- | ---------------- |
+| assignment     | `=` and compound assignment                                 | right            |
+| conditional    | `?:`                                                        | right by grammar |
+| logical        | `\|\|`, `&&`                                                | left             |
+| bitwise        | `\|`, `^`, `&`                                              | left             |
+| equality       | `==`, `!=`                                                  | left             |
+| relational     | `<`, `>`, `<=`, `>=`, `is`, `as`                            | left             |
+| shift          | `<<`, `>>`                                                  | left             |
+| additive       | `+`, `-`                                                    | left             |
+| multiplicative | `*`, `/`, `%`                                               | left             |
+| prefix         | registered prefix operators, `new`, keyword prefix forms    | right            |
+| postfix        | call, index, member, generic application, postfix operators | left             |
 
 `PAR-EXP-001`: Operator spellings resolve through the standard environment after parsing. Parsing
 constructs an operator-application CST non-terminal and does not select a builtin or user declaration.
 
+`PAR-EXP-002`: Slang 2026 has no comma operator. A comma is accepted only by a production that
+names a separated sequence, such as an argument list, tuple expression, initializer list, generic
+argument list, or declarator group. Such punctuation belongs to that enclosing non-terminal and
+never constructs a binary operator application. Consequently `a, b;` is not a valid expression
+statement, while `(a, b)` is the explicitly delimited tuple form.
+
 ## Named ambiguities
 
-Fine parsing retains explicit alternatives only for compatibility conflicts whose active language
+Fine parsing retains explicit alternatives only for name-directed conflicts whose active language
 rules permit more than one syntax after the available lookup facts have been requested:
 
 ```text
@@ -756,8 +802,8 @@ production; equal terminals are shared by reference. Alternative edges are exclu
 primary concrete-order projection and therefore cannot duplicate formatting output.
 
 `PAR-AMB-001`: Fine parsing first requests the name/scope/type facts declared by the production's
-disambiguation rule. An ambiguity node is published only when the active compatibility dialect
-explicitly preserves alternatives after those facts are available or when recovery from a failed
+disambiguation rule. An ambiguity node is published only when the active Slang language rules
+preserve alternatives after those facts are available or when recovery from a failed
 lookup must retain both interpretations. A blocked lookup blocks the parse query rather than
 silently choosing an alternative.
 
@@ -800,28 +846,37 @@ The first terminal refers to a `TokenSlice` covering the first spelling byte and
 second covers the second byte. `TrailingTrivia(parent)` remains an adjacency view after the unsplit
 parent token. In shift context the same token remains one whole-token terminal.
 
+### Explicit generic wrapper syntax
+
+The retained `__generic<...> declaration` spelling has a concrete wrapper non-terminal so its
+keyword, binder delimiters, parameters, and enclosed declaration remain lossless. That wrapper is
+only a source-syntax arrangement; it does not introduce a semantic `GenericDecl` that owns the
+enclosed declaration.
+
+`PAR-GEN-005`: Outlining projects the enclosed declaration's name and `DeclKind` into its normal
+scope position. Fine header checking translates both `__generic<P...> D` and an inline generic
+clause on `D` to the same `GenericBinder` field of `D`, with source provenance identifying the
+spelling used. Every later declaration, declaration-reference, partial-application, and function-
+type rule consumes that binder representation. A declaration with both wrapper and inline binder
+syntax is ill-formed rather than producing nested semantic generic declarations.
+
 ### Syntax declarations
 
 The fixed/contextual grammar is parameterized by immutable `GrammarVocabulary`. The separate
-`SyntaxParseInfoSet` contains builtin entries corresponding to
-today's `g_parseSyntaxEntries` are versioned standard-environment data. A
-`SerializedSyntaxParseInfo` is the immutable/callback-free form of the existing `SyntaxParseInfo`;
-its `syntaxClass` retains the established `SyntaxClass` classification. A source `SyntaxDecl`
-remains a declaration and contributes an entry when its compatibility scope is active; none of
-these terms is renamed to a generic “syntax feature.”
+`SyntaxParseInfoSet` contains versioned compiler-provided entries corresponding to today's
+`g_parseSyntaxEntries`. A `SerializedSyntaxParseInfo` is the immutable/callback-free form of the
+existing `SyntaxParseInfo`; its `syntaxClass` retains the established `SyntaxClass` classification.
 
-Source-defined `syntax` declarations are an unresolved compatibility feature. The explicit staged
-model is:
+`PAR-SYN-001`: `syntax` and `attribute_syntax` are not user-definable declarations in Slang 2026.
+They do not appear in the public surface grammar, do not create declaration outlines or scope
+bindings, and cannot change how later user tokens are parsed. A written occurrence is diagnosed as
+an implementation-reserved construct and retained only through ordinary recovery nodes.
 
-1. declaration outlining recognizes `syntax` declarations using fixed grammar;
-2. `ScopeWiring` records their declaration fragment and binding position;
-3. checking a `SyntaxDecl` functionally derives a `SyntaxParseInfoSet` entry for the exact scope
-   range in which it is visible;
-4. compatibility fine parsing may interpret an identifier through that scoped set; and
-5. modern mode restricts aliases to fixed parse shapes or rejects them.
-
-This preserves a testable transformation and makes order-dependence explicit. The ledger must close
-the modern-mode policy before parser implementation freezes.
+`PAR-SYN-002`: An implementation may bootstrap `SyntaxParseInfoSet` from compiler-owned tables or
+compiler-owned source, but that translation occurs while constructing the versioned standard
+environment, before parsing a user module. Its result is an explicit immutable parser input. The
+bootstrap representation and any internal `SyntaxDecl` nodes are implementation details and cannot
+be observed through source lookup, imported outlines, or user module serialization.
 
 ## Recovery grammar
 
@@ -869,7 +924,7 @@ Parsing does not perform semantic desugaring. In particular:
   struct/wrapper/variable declarations;
 - default interface methods remain their written generic shape and are never reparsed from copied
   tokens;
-- compatibility declaration/expression ambiguities remain explicit until their checking query; and
+- name-directed declaration/expression ambiguities remain explicit until their checking query; and
 - function bodies have immutable CST roots, whether parsed eagerly or on demand.
 
 `PAR-NRM-001`: A CST-to-surface translation may remove punctuation from AST structural fields, but
@@ -888,7 +943,7 @@ CI checks:
 
 1. every token kind is classified by the lexical schema;
 2. every builtin syntax spelling maps to a grammar production or declared extension hook;
-3. every parser spelling and dialect/version gate maps back to the grammar;
+3. every parser spelling and Slang language-version gate maps back to the grammar;
 4. every non-terminal kind has a production/transformation/recovery constructor;
 5. every terminal and non-terminal occurrence in every production has one named, typed field;
 6. every grammar alternative has positive and recovery witnesses;

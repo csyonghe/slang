@@ -52,14 +52,26 @@ not the same form as omitting an initializer.
 It is checked separately for each proposed target and initialization strategy. It cannot first
 acquire a magic initializer-list type and then participate in unrestricted conversion search.
 
-`INI-SYN-004`: Cast-versus-parenthesized-expression ambiguity is retained in the CST. Modern syntax
-resolves it through grammar/name classification rules; a compatibility dialect may use a declared
-ambiguity query. A successful cast alternative always produces `ExplicitSingle`.
+`INI-SYN-004`: Cast-versus-parenthesized-expression ambiguity is retained in the CST and resolved
+through the Slang 2026 grammar/name-classification rules. A successful cast alternative always
+produces `ExplicitSingle`; there is no dialect-specific ambiguity query.
 
 `INI-SYN-005`: A designator preserves only the written member name or constant element index.
 Resolving it to an `AggregateSlotKey` is target- and strategy-dependent and therefore occurs while
 building an aggregate candidate. A designator never stores a declaration discovered under one
 candidate and reuses it for another.
+
+`INI-SYN-006`: For declaration syntax `T x = {a0, ... an}`, a target with one or more explicit user
+`__init` constructors, including applicable extension constructors, treats the list elements as the
+arguments of `__init(a0, ... an)` and selects through the ordinary constructor candidate machinery.
+An overload failure does not retry C-style aggregate initialization. A target with no user
+constructor may instead use its admitted aggregate strategy. The checker never synthesizes an
+implicit `__init` merely to make this syntax callable.
+
+`INI-SYN-007`: `(T)e` is explicit cast syntax that reuses the shared `ExplicitSingle` selection
+machinery. There is no special `(T)0` aggregate initialization candidate. In particular,
+`(StructType)0` is rejected unless an ordinary explicit conversion or explicit constructor
+independently accepts the integer source.
 
 ## Requests, goals, and results
 
@@ -335,7 +347,7 @@ InitializationRankDetailFor<SynthesizedConstructorStrategy> =
 
 InitializationRankDetailFor<AggregateStrategy> =
     AggregateInitializationRank(defaultedSlots: BoundedNat,
-                                legacyFlatteningSteps: BoundedNat)
+                                flatteningSteps: BoundedNat)
 
 InitializationRankDetailFor<StandardInitializationStrategy(r)> =
     RegisteredInitializationRank(
@@ -440,6 +452,12 @@ the `DeclaredConstructorDescriptor` callable group before the model freezes. Lat
 create or mutate that descriptor, alter an aggregate descriptor's slots, or remove an existing
 strategy. The compatibility ledger freezes the default policy per language version.
 
+`INI-MOD-002a`: Ordinary structs and classes receive no implicit or memberwise `__init` declaration.
+A `SynthesizedConstructorDescriptor` exists only for a separately named language synthesis rule
+whose product is an actual constructor declaration; aggregate eligibility alone never creates one.
+Any explicit source or applicable-extension `__init` is a user constructor for aggregate-eligibility
+purposes.
+
 `INI-MOD-003`: A standard rule declares its operand schema, permitted forms/sites, result target,
 rank, selection effects, ordinary inferred-capability requirement, optional concrete availability,
 and plan constructor. “Builtin type” is not permission for a hidden checker branch, and an ordinary
@@ -492,24 +510,10 @@ AggregateSlotKey =
   | TupleSlot(index: UInt32)
   | ShapeSlot(index: ShapeIndex)
 
-DefaultMemberRecipe = {
-    owner: DeclId,
-    slot: AggregateSlotKey,
-    binder: Option<CanonicalGenericBinder>,
-    expression: AnyASTNodeId<Typed>,
-    resultType: TypeId,
-    readablePredecessors: CanonicallyOrderedSet<AggregateSlotKey>,
-    origin: Origin
-}
-
-DefaultMemberRecipeId = ContentId<DefaultMemberRecipe>
-
 AggregateSlot = {
     key: AggregateSlotKey,
     type: TypeId,
     writtenName: Option<Name>,
-    defaultRecipe: Option<DefaultMemberRecipeId>,
-    required: Bool,
     origin: Origin
 }
 
@@ -522,9 +526,12 @@ AggregateInitializationShape = {
 
 AggregateInitializationShapeId = ContentId<AggregateInitializationShape>
 
+AggregateInitializationStyle = CStyleAggregate | NonCStyleAggregate
+
 AggregateInitializationPolicy = {
-    missing: RequireAll | FillFromMemberDefaultsThenTypeDefault,
-    nesting: StrictNested | VersionedLegacyFlattening(rule: RuleId),
+    style: AggregateInitializationStyle,
+    missing: RequireAll | ZeroInitializeMissing,
+    nesting: StrictNested | CStyleFlattening,
     designators: DisallowDesignators | AllowDeclaredDesignators
 }
 
@@ -533,8 +540,6 @@ AggregateEligibilityFailure =
   | IncompleteAggregateDefinition(type: TypeId)
   | InvalidAggregateSlot(slot: AggregateSlotKey,
                          reason: NonInitializableReason)
-  | InvalidDefaultMemberRecipe(slot: AggregateSlotKey,
-                               error: ErrorId)
   | DuplicateAggregateSlot(slot: AggregateSlotKey)
   | AggregateRejectedByLanguageRule(type: TypeId, rule: RuleId)
   | RecursiveAggregateShape(cycle: NonEmpty<TypeId>)
@@ -550,29 +555,31 @@ an aggregate slot because it is excluded from the language.
 order and destination-subobject initialization order are stored separately in the selected plan;
 neither is inferred from map iteration.
 
-`INI-AGG-003`: A missing slot follows the model's exact policy: instantiate its checked
-default-member recipe, request type default initialization when permitted, or return
-`MissingRequiredSlot`. The checker never clones and rechecks an unchecked source expression under
-the caller's context.
+`INI-AGG-003`: A `CStyleAggregate` has `ZeroInitializeMissing`; every unwritten slot receives an
+explicit zero-initialization plan for that slot type. A `NonCStyleAggregate` has `RequireAll`; every
+unwritten slot returns `MissingRequiredSlot`. Missing fields never acquire an implicit `__init` call,
+and the checker never clones and rechecks an unchecked source expression under the caller's context.
 
 `INI-AGG-004`: Nested braces select a nested target shape. Flattening across subobjects exists only
-under its named version rule and records the consumed input-to-slot path mapping.
+for `CStyleAggregate` under `CStyleFlattening` and records the consumed input-to-slot path mapping.
+Every non-C-style aggregate uses `StrictNested`.
 
 `INI-AGG-005`: A `ShapeIndex` is a non-empty canonical coordinate tuple in the semantic shape's
 declared axis order. It is neither a flattened storage offset nor a source-list position. Coordinate
 bounds are validated against the target shape, so layout changes cannot alter slot identity.
 
-`INI-AGG-006`: A default-member recipe is content-identified, belongs to exactly its stored owner
-and slot, and is checked once under its canonical binder. Its result type equals the slot type after
-specialization. `readablePredecessors` contains only slots strictly earlier in `positionalOrder` and
-states the partial-target reads admitted while checking the expression. Instantiating a recipe
-applies the exact specialization, creates a nested initialization plan, and retains every semantic
-use of evaluating the checked expression and initializing its result.
+`INI-AGG-006`: A member declaration's initializer is not part of
+`AggregateInitializationShape` and cannot satisfy an omitted aggregate slot. If an explicit
+constructor or another separately named initialization rule admits that initializer, its checked
+operation belongs to that rule's constructor/initialization plan. C-style missing slots still use
+zero initialization, and non-C-style missing slots still fail.
 
 `INI-AGG-007`: `AggregateEligibilityFailure` reports a stable property of shape derivation. A
-blocked dependency is a blocked query, not an eligibility failure. The presence or failure of a
-user initializer also cannot make a type aggregate-ineligible: when the model contains both a
-declared/synthesized initializer descriptor and an aggregate descriptor, both remain candidates.
+blocked dependency is a blocked query, not an eligibility failure. A type with any user constructor,
+including an applicable extension `__init`, is not eligible for C-style aggregate initialization.
+Constructor and C-style aggregate strategies are therefore never competing candidates for one
+target definition. A non-C-style aggregate strategy exists only when a separate named language or
+standard-environment rule declares its shape and always uses strict nesting and required fields.
 
 ## Initializer declarations and fresh storage
 
@@ -898,7 +905,8 @@ ConstructorCallCompletionAt<S: WitnessTableState> =
   | TransferReturnedValueToTarget(transfer: TransferPlanAt<S>)
 
 InitializationPlanOutputAt<S: WitnessTableState> =
-    InitializedRequestedStorage
+    UninitializedRequestedStorage
+  | InitializedRequestedStorage
   | ProducedDirectValue
   | ProducedFromPlanStorage(storage: PlanInitializationStorageId,
                             transfer: TransferPlanAt<S>)
@@ -909,15 +917,13 @@ AggregateBindingAt<S: WitnessTableState> =
     WrittenAggregateBinding(input: InitializationInputId,
                             destination: InitializationEndpointAt<S>,
                             plan: InitializationPlanIdAt<S>)
-  | DefaultMemberAggregateBinding(recipe: DefaultMemberRecipeId,
-                                  destination: InitializationEndpointAt<S>,
-                                  plan: InitializationPlanIdAt<S>)
-  | TypeDefaultAggregateBinding(rule: RuleId,
-                                destination: InitializationEndpointAt<S>,
-                                plan: InitializationPlanIdAt<S>)
+  | ZeroAggregateBinding(rule: RuleId,
+                         destination: InitializationEndpointAt<S>,
+                         plan: InitializationPlanIdAt<S>)
 
 InitializationOperationAt<S: WitnessTableState> =
-    ExpressionInitialization(operation: InitializationPath,
+    LeaveStorageUninitialized(destination: InitializationDestination)
+  | ExpressionInitialization(operation: InitializationPath,
                              source: InitializationInputId,
                              conversion: ConversionPlan<S>,
                              transfer: TransferPlanAt<S>)
@@ -1068,7 +1074,8 @@ InitializationEntryStateEvidenceAt<S: WitnessTableState> =
   | DirectValueEntry(request: InitializationRequestId, type: TypeId)
 
 RequiredSubobjectDerivationAt<S: WitnessTableState> =
-    RootValueRequirement(type: TypeId)
+    OmittedMutableLocalRequirement(destination: InitializationDestination)
+  | RootValueRequirement(type: TypeId)
   | ConstructorTargetRequirement(target: InitializationTargetSlot)
   | AggregateShapeRequirement(shape: AggregateInitializationShapeId)
   | StandardRuleRequirement(execution: RegisteredInitializationExecutionId<S>)
@@ -1221,7 +1228,7 @@ authorized synthesis/conformance scope. Atomic publication rewrites them to publ
 values without changing form, strategy, target, mapping, or execution order.
 
 `INI-PLN-005`: `semanticUses` is the exact canonical union of uses introduced directly by the
-operation and by every resolved nested conversion, call plan, registered execution, default recipe,
+operation and by every resolved nested conversion, call plan, registered execution,
 allocation provider/cleanup, destructor, transfer, and initialization plan. It is rootless because
 the request's checking context already assigns each use owner and because the plan is awaiting
 aggregation, not defining a second callable contract. When elaboration installs the selected plan in
@@ -1241,6 +1248,14 @@ starts with its required subobject `Uninitialized`, and with respectively `PlanS
 representation required at the initialization-completion checkpoint. A client cannot omit a field,
 class base, registered subobject, or root merely to make an exit proof pass.
 
+`INI-PLN-006a`: A `LeaveStorageUninitialized(destination)` plan is the sole exception that has no
+initialization-completion checkpoint. Its execution target and entry evidence name that exact
+requested mutable-local destination, `requiredSubobjects.derivation` is
+`OmittedMutableLocalRequirement(destination)`, and the required-subobject set is empty. Its only exit
+is `NormalInitializationExit` with no transitions, `DidNotCompleteInitialization`, and a state
+byte-identical to entry; it has no nested executions, exceptional exits, cleanup steps, or semantic
+uses. The output is `UninitializedRequestedStorage`.
+
 `INI-PLN-007`: `ClassBaseInitializationSubobject` is valid only for a declared class-base
 subobject. Concrete struct inheritance is excluded and cannot acquire a subobject key through this
 schema. Delegating initialization is a state transition over the root and declared subobjects; an
@@ -1259,7 +1274,10 @@ denote. IRReady creates this storage explicitly before the constructor call and 
 from the storage ID.
 
 `INI-PLN-009`: `output` agrees with the request goal. `InitializeStorage` uses
-`InitializedRequestedStorage` and every final target is the request's exact physical destination.
+`UninitializedRequestedStorage` only for the Slang 2026 mutable-local `OmittedDecl` plan whose sole
+operation is `LeaveStorageUninitialized` for the request's exact destination. Every other
+`InitializeStorage` plan uses `InitializedRequestedStorage` and every final target is the request's
+exact physical destination.
 Non-allocation `ProduceValue` uses `ProducedDirectValue` only when the selected operation directly
 returns the initialized target value; otherwise it uses `ProducedFromPlanStorage` with an existing
 fully initialized plan storage and an explicit transfer plan. That plan's source is the named storage
@@ -1275,16 +1293,17 @@ result temporary, call, or load merely because the goal is `ProduceValue`.
 the `RecoveredInitialization` result governed by `INI-IR-006`.
 
 `INI-PLN-010`: The operation algebra contains no `DefaultInitialization(strategy, optionalPlan)` or
-equivalent flag-like wrapper. A default/value/omitted-site policy must select one mandatory executable
-alternative: a zero-input constructor call, aggregate bindings whose default source is explicit, a
-registered standard execution, or another model-declared closed operation. If no such alternative
-exists, resolution rejects the candidate. Strategy identity is retained by the candidate/rank and is
-never consulted by lowering to reinterpret an operation.
+equivalent flag-like wrapper. A default/value policy must select one mandatory executable
+alternative: an explicit zero-input constructor call, aggregate bindings whose source is explicit,
+a registered standard execution, or another model-declared closed operation. The one admitted
+omitted-local case selects `LeaveStorageUninitialized`; it does not synthesize a constructor or
+zeroing operation. If no admitted alternative exists, resolution rejects the candidate. Strategy
+identity is retained by the candidate/rank and is never consulted by lowering to reinterpret an
+operation.
 
 `INI-PLN-011`: An aggregate operation's binding-map domain equals the selected shape's complete slot
-domain. `WrittenAggregateBinding` names exactly the mapped source input;
-`DefaultMemberAggregateBinding` names the slot's specialized checked recipe; and
-`TypeDefaultAggregateBinding` names the rule that admitted type default. Every alternative contains
+domain. `WrittenAggregateBinding` names exactly the mapped source input, and
+`ZeroAggregateBinding` names the C-style rule that admitted zero initialization. Every alternative contains
 a mandatory nested plan whose request goal is `InitializeStorage` of its exact projected physical
 slot destination and whose target type equals the slot type. The source-evaluation and
 storage-initialization orders are independent
@@ -1477,21 +1496,22 @@ strategy comparison is proof-carrying and independent of enumeration order.
 initialization under the target model. It is not equivalent to no initializer unless a named
 site/version rule says so.
 
-`INI-FRM-005`: `OmittedDecl` is decided by `InitializationSite`. Local `let`, local `var`,
-field, global/static, parameter, and synthesized storage have separate registered policies. The
-policy returns a plan or an explicit `OmittedInitializationNotPermitted`; target backend defaults
-and command-line zeroing options do not silently define source semantics.
+`INI-FRM-005`: The Slang 2026 policy admits `T x;` only for mutable local storage. It leaves that
+storage `Uninitialized`, emits no initialization operation, and relies on definite-initialization
+analysis to reject every read before a later explicit initialization or assignment. It never calls
+`__init`. Local `let`, fields that are not initialized by their enclosing constructor/aggregate,
+parameter defaults, and synthesized storage require an explicit plan; globals/statics use their
+declared zero-initialization policy. Target backend defaults and command-line zeroing options do not
+silently define source semantics.
 
-`INI-FRM-006`: The legacy `(Struct)0` to empty aggregate initialization rewrite is not a core rule.
-If retained in a compatibility dialect, one rule ID records the exact target eligibility, literal
-spelling/value, warning, and produced empty-brace plan. It never participates in ordinary modern
-conversion search.
+`INI-FRM-006`: The legacy `(Struct)0` to empty aggregate initialization rewrite is eliminated from
+Slang 2026. `(T)e` is checked as an ordinary explicit cast/`ExplicitSingle` request and succeeds
+only through independently applicable explicit conversion or constructor rules.
 
 `INI-FRM-007`: `RequestedDefault` enumerates the target model's registered default/value
-initialization strategies with zero source inputs. The compatibility profile that equates `T()`
-with an empty initializer list gives those two source forms the same candidate set and comparison
-relation, while preserving their distinct origins. Neither is equivalent to
-`OmittedDecl`.
+initialization strategies with zero source inputs. Under the Slang 2026 rules, `T()` and an empty
+initializer list have the same target-dependent candidate set and comparison relation while
+preserving their distinct origins. Neither is equivalent to `OmittedDecl`.
 
 `INI-FRM-008`: `AllocatingArguments` first selects the allocation strategy and then nests the
 zero-, one-, or many-input initialization form appropriate to the written arguments. Allocation
@@ -1505,7 +1525,6 @@ InitializationPathStep =
     SourceInputStep(input: InitializationInputId)
   | AggregateSlotStep(slot: AggregateSlotKey)
   | ConstructorParameterStep(parameter: ParameterKey)
-  | DefaultMemberStep(recipe: DefaultMemberRecipeId)
   | AllocationPayloadStep
   | ResultTransferStep
 
@@ -1652,6 +1671,11 @@ InitializationInstSemanticPlan = {
 }
 ```
 
+`INI-IR-000`: `LeaveStorageUninitialized` produces no runtime instruction and no
+`IRReadyInitializationPlanStep`. Its IR-ready local declaration retains
+`UninitializedRequestedStorage` so `BuildControlFlow` begins that storage in the uninitialized state.
+The first later assignment/initialization, not declaration lowering, produces the state transition.
+
 `INI-IR-001`: The `IRReady` node form has distinct closed plan steps for plan-storage creation, transfer,
 constructor call, aggregate construction, registered execution, allocation, and cleanup. These are
 operational plans, not source strategies. `IRReadyExpr.Initialize` contains
@@ -1733,7 +1757,7 @@ initialization-plan dependency always
 resolves an applicable `Selected` winner, never a recovered plan whose operation would need to be
 reinterpreted as successful code.
 
-## Validation obligations and freeze decisions
+## Validation obligations and accepted policies
 
 Unit/property suites cover every form × strategy × admissible-rank-detail × goal combination;
 physical versus abstract endpoints; all aggregate binding/missing/nesting policies; executable
@@ -1746,14 +1770,15 @@ selection with independent ordinary capability use and concrete availability (in
 true availability); capability-selection merge/replay; recovery-tooling rejection; and
 serialization/lowering replay.
 
-Before schema freeze, chapter 13 must choose per language version:
+This edition fixes the formerly open policy choices as follows:
 
-- omitted local/field/global initialization and zero-initialization options;
-- which type definitions admit nominal, aggregate, extension, and synthesized strategies;
-- partial and flattened brace policy;
-- copy/move eligibility and explicitness;
-- the legacy `(Struct)0` rule; and
-- throwing/delegating initializer cleanup.
+- `T x;` is the one admitted uninitialized mutable-local form and invokes no `__init`;
+- no ordinary type receives an implicit `__init`;
+- `T x = {args}` calls an explicit `__init(args)` when user constructors exist;
+- C-style aggregate initialization is admitted only without user constructors, zero-initializes
+  missing fields, and alone permits flattened braces; non-C-style aggregate rules require every
+  field and strict nesting; and
+- `(Struct)0` has no aggregate-zero rewrite or compatibility escape hatch.
 
-Those choices populate `InitializationModel` and registered site policies; they do not change the
-algebra in this chapter.
+Copy/move eligibility and throwing/delegating cleanup continue to follow their explicit checked
+call/plan contracts; they cannot introduce another initialization strategy implicitly.

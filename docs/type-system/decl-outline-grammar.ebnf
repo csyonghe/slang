@@ -22,7 +22,6 @@ outline-declaration = outline-import-declaration
                     | outline-variable-declaration
                     | outline-type-alias-declaration
                     | outline-associated-declaration
-                    | outline-syntax-declaration
                     | outline-explicit-generic-declaration
                     | outline-empty-declaration
                     | outline-fallback-declaration
@@ -141,12 +140,6 @@ outline-associated-introducer = SOFT("associatedtype")
                               | SOFT("type_param")
                               | SOFT("__generic_value_param")
                               | SOFT("__constraint") ;
-
-outline-syntax-declaration = outline-modifier-prefix,
-                             SOFT("syntax"), outline-layout-run,
-                             IDENTIFIER,
-                             outline-unparsed-header,
-                             outline-deferred-body ;
 
 outline-explicit-generic-declaration = outline-modifier-prefix,
                                        SOFT("__generic"),

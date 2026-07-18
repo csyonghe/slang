@@ -4,7 +4,7 @@
     "minor": 0
   },
   "grammar": "grammar.ebnf",
-  "grammarSha256": "4278d65076ac835febba66881daa2e25d3af9b605f09ed1862758d65ab60cadc",
+  "grammarSha256": "ec6d77976897e931daf7233ad0d27765e8e1478da15f2f77de304f3135a4c01b",
   "grammarNamespace": "slang.surface",
   "stage": "Parsed",
   "validationSentinels": [

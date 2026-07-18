@@ -1591,12 +1591,20 @@ derived views over the independently published nodes.
 
 ## Uniform node schema and generic editing
 
-All node types are generated from a versioned schema. Each field declares a name, closed value
-kind (including presence and collection shape), edge category, representation-domain availability,
-and serialization policy:
+All node types are generated from a versioned schema. `SchemaVersion` is an internal generator and
+validation coordinate, not a promise that serialized modules survive a compiler update. Each field
+declares a name, closed value kind (including presence and collection shape), edge category,
+representation-domain availability, and serialization policy:
 
 ```text
 SchemaVersion = (major: UInt16, minor: UInt16)
+CompilerVersionId = exact identity reported by this compiler version
+SerializationCompatibilityId = {
+    compiler: CompilerVersionId,
+    schema: SchemaVersion,
+    registry: NodeSchemaRegistryId,
+    standardEnvironment: StandardEnvironmentId
+}
 RepresentationDomain = Concrete(CSTStage) | Abstract(NodeForm) | SemanticDomain
 DomainSet = BitSet<RepresentationDomain>
 
@@ -1780,21 +1788,10 @@ NodeSchemaRegistry = {
     grammarProductions: CanonicallyOrderedMap<ProductionId, NodeKind>,
     cstProductionDescriptors:
         CanonicallyOrderedMap<ProductionId, CSTProductionDescriptor>,
-    domainKinds: NodeMap<RepresentationDomain, CanonicallyOrderedSet<NodeKind>>,
-    migrations: NodeList<SchemaMigrationDescriptor>
+    domainKinds: NodeMap<RepresentationDomain, CanonicallyOrderedSet<NodeKind>>
 }
 
 NodeSchemaRegistryId = ContentId<NodeSchemaRegistry>
-
-SchemaMigrationDescriptor = {
-    from: SchemaVersion,
-    to: SchemaVersion,
-    kindRemaps: NodeMap<NodeKind, NodeKind>,
-    fieldRemaps: NodeMap<(NodeKind, FieldName), FieldName>,
-    insertedDefaults: NodeMap<(NodeKind, FieldName), FieldValue>,
-    removedOptionalFields: CanonicallyOrderedSet<(NodeKind, FieldName)>,
-    validationRules: NonEmpty<RuleId>
-}
 ```
 
 For a production descriptor `p`, let `directSlots(p)` be the ordered fields of
@@ -1906,7 +1903,7 @@ variant has exactly one valid tag and its selected payload; an optional explicit
 stores one or more. A missing product binding is never used as optionality, and an unselected
 variant field is not represented as an absent optional. Validation recursively matches every value
 to its one declared kind and rejects a parallel leaf projection as a second authority. This same
-law controls migration defaults and wire deserialization, so an inactive variant field, absent
+law controls wire deserialization, so an inactive variant field, absent
 optional, empty list/map, and malformed missing required field are distinct states.
 
 `REP-SCH-007`: A `SerializedField` is present in the wire record. A `DerivedField` names a total,
@@ -2079,14 +2076,16 @@ freezing rewrites handles to `TypeId` in nodes, query keys, and exported data.
 
 ## Serialization and copying
 
-Each snapshot serializes as a versioned collection of content-addressed chunks. The wire schema uses
-stable numeric node/field/variant tags, length-delimited field payloads, canonical tag order, an
-unknown-optional-field extension bag, and indexed graph records that permit forward/SCC references.
-Required unknown tags fail loading; optional unknown payloads round-trip byte-for-byte.
+Each snapshot serializes as a collection of content-addressed chunks headed by its exact
+`SerializationCompatibilityId`. The wire schema uses numeric node/field/variant tags,
+length-delimited field payloads, canonical tag order, and indexed graph records that permit
+forward/SCC references. Those tags make serialization deterministic within one compiler version;
+they are not a public binary-compatibility commitment. A compiler rejects data produced by any
+other `CompilerVersionId`, and every unknown tag is malformed input rather than an extension bag.
 
 The chunks are:
 
-1. schema version and feature bits;
+1. serialization compatibility identity and feature bits;
 2. string/name table;
 3. source snapshot references and line maps;
 4. node records grouped by representation domain;
@@ -2103,10 +2102,13 @@ Copying a snapshot is constant-time reference sharing. Editing uses a builder th
 nodes; `freeze()` validates all invariants and publishes a new immutable snapshot. Builders are
 single-owner values and cannot expose mutable nodes through the public AST API.
 
-`REP-SER-001`: Deserialize followed by serialize without schema migration is byte-identical.
+`REP-SER-001`: For one `SerializationCompatibilityId`, deserialize followed by serialize is
+byte-identical.
 
-`REP-SER-002`: Unknown optional fields survive a load/save round trip through their raw extension
-bag; unknown required fields produce a version diagnostic and no partially loaded snapshot.
+`REP-SER-002`: A compiler-version, schema, registry, or standard-environment mismatch is diagnosed
+before any snapshot is published. Unknown fields, including fields that another version considered
+optional, are rejected. The frontend provides no cross-version module migration or user-visible
+binary-stability guarantee.
 
 `REP-SER-003`: Deserialization validates node kind, field type, edge target, graph identity/
 definition completeness, representation domain, and declared invariants before publishing the

@@ -107,7 +107,7 @@ LiteralValue =
   | NullPtrLiteralValue
   | NoneLiteralValue
 
-LiteralRadix = Binary | Octal | Decimal | Hexadecimal
+LiteralRadix = Binary | Decimal | Hexadecimal
 
 ExactFloatingPointLiteral = {
     significand: BigInt,
@@ -116,7 +116,8 @@ ExactFloatingPointLiteral = {
 }
 
 LiteralFailure = {
-    kind: InvalidSpelling | InvalidEscape | InvalidSuffix | InvalidUnicodeScalar,
+    kind: InvalidSpelling | UnsupportedLegacySpelling |
+          InvalidEscape | InvalidSuffix | InvalidUnicodeScalar,
     token: TokenRef,
     spellingRange: ByteRange,
     offendingText: Utf8String
@@ -147,6 +148,13 @@ language rules classify as `BoolLiteralValue`, `NullPtrLiteralValue`, or `NoneLi
 representable for macro-pasted and synthesized tokens without inventing a physical `SourceRange`.
 The token's `TokenOriginId` supplies diagnostic provenance. The query is pure and its result may be
 cached by `(TokenRef, LanguageRuleSetId)`; no decoded payload is stored as competing token authority.
+
+`EXP-LIT-002`: In the current Slang 2026 draft, a multi-digit integer spelling beginning with `0`
+that is neither an explicit binary nor hexadecimal form returns
+`InvalidLiteral(UnsupportedLegacySpelling, ...)`; no successful `Octal` radix exists. Chapter 13
+keeps retention of the current C-style octal behavior as an explicit language-owner decision, so a
+future decision must change this rule and its manifest tests rather than inheriting lexer behavior
+silently.
 
 ```text
 decode(tok, rules(Σ)) = { value = v, suffixSpelling = s }
@@ -215,6 +223,15 @@ loads and ordinary proof-carrying physical projections but cannot be written, pa
 `OutMode`/`InOutMode`/`RefMode`, or escape its activation. A `RefMode` formal permits operations
 proved by its read/write view. A property reached through either physical receiver still produces
 its ordinary `AbstractStorage`; it does not expose the receiver location as the property's storage.
+
+`EXP-PAR-004`: The five source passing modes are the product of two independent axes. `InMode` is
+abstract immutable input; `OutMode` and `InOutMode` are abstract mutable access, with `InOutMode`
+also requiring an initial read; `ConstRefMode` is physical immutable access; and `RefMode` is
+physical mutable exclusive access. “Immutable” restricts operations through the formal and does not
+assert that the caller's underlying object was declared immutable. “Exclusive” is a caller contract
+for the invocation lifetime: a statically provable overlap with another incompatible argument is a
+diagnostic, while an overlap the frontend cannot prove is accepted under that contract and is
+undefined behavior if it occurs at runtime.
 
 `EXP-PAR-003`: Stored-field, builtin-element, vector-element, dereference, and registered projection
 rules applied to a physical formal use the same ordinary physical-projection applications as any
@@ -312,10 +329,11 @@ forming the abstract storage invokes no accessor and evaluates no captured runti
 second time.
 
 `EXP-MEM-004`: `PlanStorageAccessAt<S>` is total over `StorageAccessIntentAt<S>`. `ReadValueAccess`
-uses a getter when present and may use a ref-accessor call plus explicit internal dereference only
-under the named language fallback. `WriteValueAccess` carries the already checked source,
-conversion, and completion condition and analogously uses a setter before its named ref-accessor
-fallback. Parameter-mode planning is not a storage-access intent; chapter 8's `PlanArgumentAccess`
+uses a getter when present and otherwise may call the exact `constref` accessor and explicitly
+dereference its result. `WriteValueAccess` carries the already checked source, conversion, and
+completion condition, uses a setter when present, and otherwise may call the exact `ref` accessor
+and explicitly dereference its result. A present but invalid getter or setter is diagnosed rather
+than bypassed. Parameter-mode planning is not a storage-access intent; chapter 8's `PlanArgumentAccess`
 owns the parameter type, structural domain/access mode, adaptation, invocation environment,
 abstract-mode materialization/write-back, or `PhysicalParameterBindingProofAt<S>`. Explicit reference
 formation is likewise not a storage-access intent: it uses `CheckReferenceFormationAt<S>` and a
@@ -1584,11 +1602,12 @@ neither may carry `PassArgument` or manufacture a dummy `RuntimeArgument`.
 `EXP-STO-002`: For `ReadValueAccess` on `AbstractStorage(a)`, a present getter is the primary
 authority. The query either validates and stores that getter invocation or returns
 `StoragePrimaryAccessorFailed`; it never retries through the ref accessor after a present getter
-fails. Only when the getter is absent may a versioned language rule authorize
-`ReadThroughRefAccessor`. `WriteValueAccess(w)` is symmetric: a present setter is final, and the
-named `WriteThroughRefAccessor` fallback is considered only when the setter is absent. Missing
-primary and fallback accessors and a forbidden fallback have distinct failures. No parameter-mode
-plan can inherit either fallback accidentally.
+fails. When the getter is absent, the language authorizes `ReadThroughRefAccessor` exactly when the
+property/subscript has `RefAccessor(ReadAccess)`. `WriteValueAccess(w)` is symmetric: a present setter
+is final, and `WriteThroughRefAccessor` is considered only when the setter is absent and
+`RefAccessor(ReadWriteAccess)` exists. The fallback is a fixed language rule, not a versioned search
+preference. Missing primary and fallback accessors have distinct failures. No parameter-mode plan
+can inherit either fallback accidentally.
 
 `EXP-STO-003`: An authorized ordinary-storage fallback selects
 `a.accessors.referenceAccessors[authorization.requirement.access] = Some(r)` exactly, then derives
@@ -1990,18 +2009,23 @@ joinExprTypes(τa, τb, expected) = (τ, πa, πb)
 ```
 
 The join operation is a named primitive with symmetric tests; it is not “try converting left to
-right, then right to left” unless that policy is explicitly specified for a compatibility mode.
+right, then right to left.”
 
 ## Tuples and initialization syntax
 
 Tuple expressions have one typed child per element and an ordinary `TupleType`. Empty tuple syntax
-in Slang 2026 yields `void`; legacy comma-expression behavior is selected by language version before
-typing.
+yields `void`. The comma operator is absent from Slang 2026 and cannot reinterpret tuple syntax.
 
 A braced initializer is expectation-directed syntax and is checked only by chapter 16's published
 `ResolveInitialization(request)` query. It retains nested brace/designator/source order but has no
 independent classifier. `T(e)` and `(T)e` are the same `ExplicitSingle` request after binding, while
 `T()` and omitted initialization remain distinct forms.
+
+`EXP-INIT-000`: `(T)e` is ordinary explicit Slang cast syntax. It shares conversion and
+`ExplicitSingle` candidate machinery with other explicit-single initialization only so both use one
+typed selection relation. The spelling `(Struct)0` has no aggregate-zero rewrite: it succeeds only
+when the ordinary explicit-cast/explicit-single candidates independently accept the source and
+target, and otherwise is rejected.
 
 `EXP-INIT-001`: A braced initializer without enough expectation to choose a unique target remains
 `MissingTargetType`; it is not a magic untyped expression accepted by arbitrary conversions.
@@ -2444,6 +2468,13 @@ analysis runs.
 These are mandatory frontend queries even if implemented on initial IR. Their diagnostics cite
 source/IR-ready origins and are independently unit-testable. Expression/statement rules do not grow
 ad hoc flow state to duplicate them.
+
+`EXP-FLOW-001`: An abstract `OutMode` or `InOutMode` argument may use an exact-type transport buffer
+only as the operational implementation of its already-selected abstract storage accessor plan. It
+is not a conversion temporary and cannot make an rvalue, mismatched type, or otherwise ineligible
+argument applicable. The corresponding `EndFlowWriteback` exists only on `NormalCompletion` paths;
+an exceptional exit performs cleanup but never commits the abstract destination. A flow graph that
+contains exceptional write-back for either mode is invalid.
 
 ## Constant evaluation
 

@@ -7,8 +7,16 @@ elaboration, synthesis, and initial IR generation are independently testable imp
 rules in this directory.
 
 The source baseline for the first edition is official `master` at
-`4f4ec505761e2e56a45da873d5c169ff6e512f52` (2026-07-16). Existing behavior is evidence, not an
+`aaa07fe296560ffefeaf2e39d0aed5658b641a21` (2026-07-17). Existing behavior is evidence, not an
 excuse to preserve accidental implementation details.
+
+`SPEC-SCOPE-001`: The first edition specifies the Slang 2026 source language. It does not specify
+the legacy HLSL or GLSL input dialects, and behavior that exists only to accept one of those
+dialects is not a Slang rule. Traditional declarator and cast spellings that remain part of Slang
+2026 are covered as Slang syntax; this does not import the remainder of C, HLSL, or GLSL. When
+source inspection cannot establish whether a form is intentional Slang 2026 syntax or an input-
+dialect compatibility feature, its disposition remains open for language-owner review instead of
+being accepted from implementation behavior alone.
 
 `SPEC-AUTH-001`: The current implementation is never a semantic authority merely because it is the
 only implementation. A proposed rule must state an observable language invariant or an operational
@@ -51,7 +59,7 @@ The language is defined by four inputs:
 1. this core syntax and semantic specification;
 2. a versioned **standard environment** containing builtin declarations, conversion declarations,
    operator declarations, capability atoms, and target facts;
-3. a language-version and compatibility-mode configuration; and
+3. the Slang language-version configuration; and
 4. the source module graph.
 
 Treating builtins as declarations in a standard environment keeps the core rules finite and makes
@@ -63,6 +71,12 @@ state and macro invocation expansion, because those rules determine concrete syn
 provenance. Target layout, optimization, and final code
 emission are downstream of the frontend and out of scope, except for the contract imposed on
 frontend IR.
+
+`SPEC-SER-001`: Serialized modules and serialized frontend representations are compiler-internal
+artifacts. A reader accepts an artifact only when its exact `CompilerVersionId`, schema identities,
+and standard-environment identity match the writer. This edition promises neither cross-version
+module loading nor a stable user-facing binary format; a mismatch is a typed incompatibility result,
+not an attempt at best-effort deserialization.
 
 ## Representation pipeline
 
@@ -122,8 +136,9 @@ The following invariants apply throughout this specification.
    exact inputs. A query cannot mark an old node, declaration, or whole tree as checked.
 5. **Keyed evidence.** Conceptually unordered mappings, especially interface requirement
    witnesses, are keyed by stable requirement identity and are never interpreted by position.
-6. **Determinism.** The same source snapshots, standard environment, options, and dependency
-   versions produce byte-identical serialized results and diagnostics, independent of scheduling.
+6. **Determinism.** Within one compiler version, the same source snapshots, standard environment,
+   options, and dependency versions produce byte-identical serialized results and diagnostics,
+   independent of scheduling.
 7. **Total error recovery.** An error is a first-class result with typed recovery data. Null, a
    partially initialized node, or an unchecked field is never the representation of failure.
 8. **One semantic owner.** Each derived fact is produced by exactly one named query. Other rules
@@ -190,7 +205,7 @@ properties. The recommended implementation is generated from a declarative schem
 - immutable arena-allocated nodes with structural sharing;
 - typed wrappers over a uniform operand API;
 - stable IDs rather than process pointers in semantic edges;
-- versioned deterministic serialization;
+- deterministic same-compiler-version serialization with exact compatibility checks;
 - pure query implementations with explicit service dependencies; and
 - a centralized dependency scheduler implementing the cycle policies in chapter 11.
 

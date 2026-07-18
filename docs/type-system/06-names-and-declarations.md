@@ -83,7 +83,7 @@ identity.
 `DeclFragmentId`. There is no bulk operation that rewrites every scope to logical declaration IDs.
 Lookup collects eligible outline fragments, requests `ResolveLogicalDecl` for the candidates it
 actually needs, and deduplicates equal logical declarations only after those results are available.
-The resulting `BoundDeclUse` retains the selected fragment origin and lookup path. If several
+The resulting `CandidateDeclUse` retains the selected fragment origin and lookup path. If several
 fragments in one scope resolve to the same entity, its effective binding point for that lookup is
 their earliest eligible point; reopened physical scopes retain their own positions.
 
@@ -101,9 +101,16 @@ header checking replaces the opaque clause with chapter 5's `GenericParameterSor
 
 `DEC-HDR-002`: `BindDeclHeader` requests chapter 5's `GetGenericBinder` query and stores only the
 resulting stable `GenericBinderId` in `DeclHeader`. The binder's `owner` equals the header
-declaration, and redeclaration compatibility uses the alpha-normalized `GenericBinderShape`, never
-an embedded binder copy, a snapshot-local table index, or declaration-outline arity as a semantic
-parameter sort.
+declaration. Header compatibility compares the alpha-normalized binder where required, but generic
+parameter names and constraints are not independent function-identity fields. No embedded binder
+copy, snapshot-local table index, or declaration-outline arity becomes a second identity authority.
+
+`DEC-HDR-002a`: A written `__generic<...> declaration` retains its wrapper terminals and
+nonterminal in the CST, but its checked declaration is the inner declaration and its binder is
+`GenericBinderOf(innerDecl)`. No semantic `GenericDecl` parent is allocated. The same
+declaration-owned representation is used for angle-bracket generic syntax on structs, classes,
+interfaces, functions, methods, and every other admitted declaration kind. Thus the source spelling
+does not change owner chains, specialization-frame keys, or `DeclRef` shape.
 
 `DEC-HDR-003`: `BindDeclHeader` obtains `DeclHeader.concreteAvailability` only from chapter 10's
 `ComputeConcreteAvailability(declaration, modifiers, environment)` product. A successful `Some`
@@ -128,6 +135,13 @@ from a body return or use-site expectation. For a ref accessor, the authority ki
 agree on the entire authority after alpha-normalization. Resolving a specialized header performs
 the signature-and-authority substitution in `TYP-FUN-011`; it cannot reuse an equal-signature
 authority anchored to another declaration.
+
+`DEC-HDR-006`: A callable header also publishes chapter 5's declaration-keyed
+`CallableSignatureSourceInfo`. Its signature ID equals the header signature; its generic source map
+connects the declaration-owned binder to canonical bound variables; and its parameter-label map is
+the sole semantic input for named argument mapping. Because this record is keyed by `DeclId`, two
+equal `CallableSignatureId` values never force source names or labels from unrelated declarations to
+share one sidecar.
 
 This permits mutually recursive functions and nominal types without publishing partially filled
 mutable declarations or giving two compatible redeclarations different permanent identities.
@@ -281,9 +295,23 @@ is the stable concatenation of the local overload set and permitted outer overlo
 order is scope distance, declaration source order, then stable `DeclId`; order is diagnostic and
 tie-break metadata, not a substitute for semantic ranking.
 
-`NAM-LKP-002`: Candidate deduplication uses normalized `(DeclRef, LookupPathRole)`.
-Discovering the same declaration through semantically distinct base/witness paths retains distinct
-paths until the ambiguity/identity rule proves them equivalent.
+`NAM-LKP-002`: Candidate deduplication uses normalized `(DeclRefCandidate, LookupPathRole)`.
+For an unapplied generic target, normalization includes the logical declaration, completed owner
+frames, pending declaration-owned binders, and explicitly supplied argument mapping; it never
+manufactures a partial `DeclRef`. Discovering the same declaration through semantically distinct
+base/witness paths retains distinct candidates until the canonical witness/facet rule selects one
+by strict priority or diagnoses the conflict. Only byte-identical rediscovery of the same
+provider/path is deduplicated.
+
+`NAM-LKP-004`: Lookup of a generic declaration returns
+`UnappliedDeclRefCandidate(UnappliedDeclRef(...))` until all required generic applications are
+complete. `genericFunc(1, 2, 3)` therefore enters overload inference with the direct function binder
+pending. Chapter 8 maps explicit and inferred arguments to that binder, and only
+`FreezeDeclUse` may replace the target with a complete `DeclRef`. Member/visibility/facet lookup
+does not need argument deduction and cannot publish a guessed specialization merely to fit the
+final reference type. Every generic owner frame is already complete; member lookup on a partially
+applied owner generic is rejected until that owner is completed, so one inference state always
+solves exactly the referenced declaration's direct binder.
 
 `NAM-LKP-003`: A completion query may request inaccessible or recovery candidates, but an ordinary
 lookup query returns their `VisibilityDecision` and cannot silently treat them as accessible.
@@ -374,8 +402,8 @@ ClassifyGenericApplicationHead(head, position, wiring, expressionContext)
     -> QueryStep<GenericHeadClassification>
 ```
 
-For an unqualified identifier these queries read `ParserDeclStub` records and an explicit
-compatibility syntax environment. They do not build a semantic `GenericBinder`, type-check an
+For an unqualified identifier these queries read `ParserDeclStub` records and the explicit Slang
+2026 grammar vocabulary. They do not build a semantic `GenericBinder`, type-check an
 expression, or force a declaration definition. A qualified/member head may explicitly request its
 base expression's checked classifier; that dependency is part of the fine-grained query graph.
 
@@ -384,15 +412,16 @@ application when `ClassifyGenericApplicationHead` returns `GenericHead`, meaning
 candidate has a direct generic declaration outline. Any non-generic candidates remain available for
 later overload filtering. `NonGenericHead` leaves `<` to relational/operator parsing.
 `UnresolvedHead` blocks or produces the grammar's explicit recovery/ambiguity form according to its
-stored failure and dialect rule; the parser never guesses by declaration order or a speculative
+stored failure and Slang language rule; the parser never guesses by declaration order or a speculative
 parser copy.
 
 `NAM-AMB-001`: If classification is `Unknown` and both syntax alternatives are structurally valid,
-modern mode preserves ambiguity for semantic diagnosis; it does not choose based on whitespace or
-declaration order.
+the Slang 2026 grammar preserves ambiguity for semantic diagnosis; it does not choose based on
+whitespace or declaration order.
 
-Legacy HLSL behavior that requires prior type-name knowledge is isolated under a compatibility rule
-and covered by differential tests.
+This Slang 2026 specification has no legacy-HLSL fallback for this decision. An input requiring
+such a fallback is outside the language and cannot alter a Slang `LookupResult`, generic-head
+classification, or checked AST.
 
 ## Redeclarations and overload groups
 
@@ -403,41 +432,37 @@ RedeclarationClass =
   | NonCallableEntity(kind: DeclKind)
   | StandardRedeclarationEntity(QualifiedName)
 
-GenericBinderShape =
-    NonGenericShape
-  | GenericShape {
-        parameters: NodeList<GenericParameterSort>,
-        overloadConstraints: CanonicalConstraintSet
-    }
-
 ReceiverOverloadShape =
     NoOverloadReceiver
   | OverloadReceiver(selfType: TypeId, mode: ParamPassingMode)
 
 OverloadParameterShape = {
     valueType: TypeId,
-    mode: ParamPassingMode,
-    labelIdentity: ParameterLabelIdentity
+    mode: ParamPassingMode
+}
+
+CallableGenericParameterShape = {
+    sort: GenericParameterSort
 }
 
 CallableShape = {
+    genericParameters: NodeList<CallableGenericParameterShape>,
     receiver: ReceiverOverloadShape,
     parameters: NodeList<OverloadParameterShape>,
-    registeredDiscriminators: CanonicalArguments
+    result: TypeId
 }
 
 RedeclarationKey = {
     logicalParent: DeclId,
     name: NameKey,
     declarationClass: RedeclarationClass,
-    genericShape: GenericBinderShape,
     callableShape: Option<CallableShape>
 }
 
 OverloadGroup = {
     name: NameKey,
-    members: CanonicallyOrderedSet<DeclRef>,
-    presentationOrder: NodeList<DeclRef>
+    members: CanonicallyOrderedSet<DeclId>,
+    presentationOrder: NodeList<DeclId>
 }
 ```
 
@@ -447,13 +472,14 @@ partitions equal compatible keys into logical declarations; it neither scans unr
 publishes a module-wide declaration index. The key uses only facts required by the language to
 decide whether declarations are attempts to denote the same entity. A checked
 `CallableSignature` then validates compatible declarations/definitions.
-`GenericBinderShape` is the alpha-normalized overload-identity projection: it retains parameter
-sorts and only constraints that the versioned language rule declares overload-discriminating;
-defaults are excluded. `CallableShape` retains receiver/input facts that can distinguish overloads.
-Result/error types, parameter defaults and non-overload attributes, callable traits, calling
-convention, inferred contracts, dispatch, origins, and parameter slots are excluded and are checked
-later for header compatibility within a group. `registeredDiscriminators` is empty unless an
-explicit ledger-approved language rule names another overload discriminator. `OverloadGroup`'s
+`CallableShape` retains exactly the alpha-normalized generic parameter arity/sorts,
+receiver/parameter types and modes, and return type that can distinguish function identities.
+Parameter labels and source parameter/generic-parameter names participate only in argument mapping
+or diagnostics; generic constraints and defaults participate in applicability/deduction or header
+compatibility; none enters this key independently.
+Error types, parameter defaults and non-overload attributes, callable traits, calling convention,
+inferred contracts, dispatch, origins, and parameter slots are excluded and are checked later for
+header compatibility within a group. `OverloadGroup`'s
 `presentationOrder` is a duplicate-free bijection onto `members` sorted by stable source order.
 
 `DEC-RED-000`: A successful `RedeclarationPartition.fragmentToDecl` domain is exactly the
@@ -468,18 +494,31 @@ entity with one `DeclId` plus multiple fragment origins. Conflicting headers pro
 they do not become overloads merely because their types failed to match.
 
 `DEC-OVL-001`: Distinct callable signatures sharing an overloadable name form an `OverloadGroup`.
-The group is an immutable set of canonical declaration references. Source order is retained only as
-stable presentation metadata.
+The group is an immutable set of logical declaration identities. Lookup instantiates each member as
+a `DeclRefCandidate` under the use's owner specialization; generic members remain unapplied until
+inference. Source order is retained only as stable presentation metadata.
 
 `DEC-RED-002`: At most one non-external definition supplies a function body for a canonical
 declaration in one module revision, except for explicitly capability-specialized definitions whose
 coexistence rule is part of the standard environment.
 
 `DEC-RED-003`: Building a redeclaration key is a named projection, not full-header equality. A
-difference in result/error type, default argument, non-overload attribute, trait, or calling
-convention cannot turn conflicting declarations into overloads. Such fragments first receive the
-same identity key and then `BindDeclHeader` reports the field-specific compatibility error. Only a
-field admitted by `CallableShape` or a registered discriminator may separate overload identities.
+difference in generic parameter arity/sort, return type, or in a receiver/parameter type or mode
+produces a distinct function identity. `CallableShape.genericParameters` is the ordered,
+alpha-normalized sort projection of the declaration-owned binder, so renaming a generic parameter
+does not change identity and an otherwise-unused type/value/pack parameter still does. A difference
+only in parameter labels/names, generic parameter names, generic defaults/constraints, error type,
+default argument, non-overload attribute, trait, or calling convention cannot do so; such fragments
+first receive the same identity key and then `BindDeclHeader` reports any field-specific
+compatibility error. Only a field admitted by `CallableShape` may separate function identities in
+this edition.
+
+`DEC-RED-004`: Parameter labels are declaration surface metadata used by source argument mapping,
+not identity operands. All successful fragments of one logical callable nevertheless provide the
+same label for each canonical `ParameterKey`; a disagreement is a conflicting redeclaration
+diagnostic, never a new overload or a rule that silently chooses one fragment's labels. Ordinary
+parameter names and generic parameter names need not agree because neither is consulted by call
+argument mapping.
 
 ## Aggregate relations, facets, and extensions
 
@@ -528,12 +567,15 @@ only.
 
 `NAM-FAC-001`: Every non-self facet has a complete `FacetRouteKey`. Folding its route from the
 queried type yields the facet owner and exact member-access evidence. Each interface-refinement
-step performs one `LookupSubtypeWitness` with its stored requirement key.
+step performs one `LookupSubtypeWitness` with its stored requirement key and validates that the
+stored projected witness is the canonical witness for the resulting endpoint.
 
-`NAM-FAC-002`: Facets reached by different representation, conformance, refinement, existential,
-or extension routes remain distinct even when their endpoint declarations and substitutions are
-equal. They merge only with a typed `FacetEquivalenceProof`; map insertion, endpoint equality, and
-source order are not equivalence proofs.
+`NAM-FAC-002`: Different representation, conformance, refinement, existential, or extension routes
+remain distinct candidates. For a fixed concrete root and super-interface endpoint, chapter 15
+publishes exactly one canonical route/witness after byte-identical duplicate discovery or
+strict-priority comparison; a tied or incomparable maximum is a lookup-environment error. Unrelated
+extension/member facets may remain distinct. Map insertion, endpoint equality by itself, and source
+order are not priority proofs.
 
 `NAM-FAC-003`: Lookup retains all maximal incomparable providers. One maximum is selected;
 overloadable maxima form an overload set; multiple non-overloadable maxima are ambiguous. Import
@@ -542,8 +584,9 @@ orders diagnostics.
 
 `NAM-FAC-004`: There is no C3 merge across representation bases, interface refinements,
 conformances, and extensions. Classes have a single representation-base chain. Interface diamonds
-retain their keyed witness-lookup routes, and extensions are compared only by named semantic
-specificity or override proofs.
+retain every keyed witness-lookup route as a construction candidate, then select one canonical
+super-facet route by named semantic equivalence/specificity or diagnose ambiguity. Extensions are
+compared only by named semantic specificity or override proofs.
 
 `NAM-FAC-005`: Committing a member candidate copies every extension applicability ID in its lookup
 path into the `BoundDeclUseAt<S>.extensionUses` domain and calls chapter 15's
@@ -571,6 +614,10 @@ defines the corresponding conformance and existential rules.
 Extension-introduced conformances are part of the semantic environment in which the extension is
 reachable. They are not globally attached to the nominal declaration.
 
+An extension target must be a permitted concrete nominal pattern. An interface/existential target,
+including `extension IFoo`, is rejected while binding the extension header and never enters the
+environment's extension or conformance candidate sets.
+
 The proposed coherence rule is:
 
 `DEC-CONF-001`: A public declaration's checked signature and body may rely only on conformances
@@ -578,9 +625,10 @@ reachable through its module's exported semantic environment. A private/internal
 locally reachable conformance, but that conformance evidence is captured explicitly in its checked
 body and IR dependencies.
 
-Two reachable conformances for the same canonical `(type, interface)` pair are an ambiguity unless
-one is the same canonical declaration or a language rule establishes specialization. Import order
-never chooses one.
+Two reachable conformance providers for the same canonical `(type, interface)` pair contribute
+candidates to the one pair-identified witness. Exact rediscovery of the same provider is deduplicated;
+distinct providers require a strict specialization proof or are an ambiguity. Import order never
+chooses one, and a successful environment cannot contain duplicate canonical witnesses.
 
 This makes separate compilation deterministic but is a proposed rule requiring review against
 current extension behavior.
@@ -617,10 +665,13 @@ The name/declaration validator checks:
 - sequential scopes obey binding positions;
 - every lookup-capable `UnparsedContent` has one exact entry position in `ScopeWiring`;
 - each redeclaration partition covers exactly one seed's eligible fragments and maps each once;
-- normalized decl-refs target declarations visible in their snapshot/module interface;
+- `DeclRefCandidate` values partition required binders into a valid completed prefix and pending
+  sequence, while normalized final decl-refs are complete and target declarations visible in their
+  snapshot/module interface;
 - lookup paths' substitutions and evidence compose to the selected declaration;
 - overload and redeclaration groups have canonical keys and no duplicate members;
-- every facet route validates and the priority graph contains only proved, acyclic dominance edges;
+- every facet route validates, every reachable super-interface endpoint has exactly one canonical
+  facet/witness selection, and the priority graph contains only proved, acyclic dominance edges;
   presentation order is a duplicate-free view of the same facets; and
 - exported facts use only exported/reachable declaration and conformance identities.
 

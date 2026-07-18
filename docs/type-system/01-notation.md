@@ -42,9 +42,10 @@ predicate  = <semantic-or-lookahead-predicate> ;
 ```
 
 Uppercase names denote token kinds. `snake-case` names denote nonterminals. A production annotated
-with `@recover(...)` declares its parser recovery set. A production annotated with `@version(V)` or
-`@dialect(D)` is present only under that language configuration. Contextual keywords are spelled as
-identifier text in the grammar and are never silently added to the lexer keyword set.
+with `@recover(...)` declares its parser recovery set. A production annotated with
+`@language-version(V)` is present only under that Slang language version. HLSL/GLSL dialect gates
+are not part of this edition's grammar notation. Contextual keywords are spelled as identifier text
+in the grammar and are never silently added to the lexer keyword set.
 
 The grammar defines accepted token sequences, not typing. For example, a syntactically valid type
 expression may later classify as a value and produce a semantic diagnostic.

@@ -226,8 +226,6 @@ Scope = {
 
 ScopeWiringId = ContentId<ScopeWiring>
 
-SemanticVersion = (major: UInt32, minor: UInt32, patch: UInt32)
-DialectId = QualifiedName
 StandardEnvironmentId = ContentId<SchemaValue>
 
 StandardEnvironmentRuleKey = {
@@ -252,8 +250,7 @@ RegisteredDataOperationRegistration = {
 }
 
 LanguageRuleSet = {
-    version: SemanticVersion,
-    dialects: CanonicallyOrderedSet<DialectId>,
+    version: SlangLanguageVersion,
     enabledRules: CanonicallyOrderedSet<RuleId>,
     standardEnvironment: StandardEnvironmentId
 }
@@ -295,7 +292,7 @@ StableOrderKey =
   | SynthesizedOrder(id: SynthesizedSemanticId)
 
 LookupCandidate = {
-    use: BoundDeclUse,
+    use: CandidateDeclUse,
     lexicalDistance: UInt32,
     sourceOrder: StableOrderKey
 }
@@ -305,8 +302,8 @@ LookupAmbiguityKind =
   | IndistinguishableMaxima
 
 LookupCandidateComparison = {
-    left: BoundDeclUse,
-    right: BoundDeclUse,
+    left: CandidateDeclUse,
+    right: CandidateDeclUse,
     result: MemberCandidatePriorityResult
 }
 
@@ -462,15 +459,10 @@ CanonicalConstraintSlot = {
     kind: ConstraintKind
 }
 
-SpecializationFrameRole = LexicalBinder | TypeBinder | CallableBinder | MemberOwnerBinder
-
-SpecializationFrameKey = {
-    role: SpecializationFrameRole,
-    owner: DeclId,
-}
+SpecializationFrameKey = GenericBinderId
 
 CanonicalBinderRef = {
-    frame: SpecializationFrameKey,
+    sourceBinder: GenericBinderId,
     binder: CanonicalGenericBinderId
 }
 
@@ -485,6 +477,34 @@ SpecializationFrame = {
 CanonicalSpecializationSpine = {
     frames: NodeMap<SpecializationFrameKey, SpecializationFrame>,
     outerToInner: NodeList<SpecializationFrameKey>
+}
+
+CanonicalSpecializationPrefix = {
+    frames: NodeMap<SpecializationFrameKey, SpecializationFrame>,
+    outerToInner: NodeList<SpecializationFrameKey>
+}
+
+PendingGenericArgument = {
+    parameter: GenericParameterKey,
+    value: GenericArg,
+    origin: Origin
+}
+
+PendingSpecializationFrame = {
+    binder: GenericBinderId,
+    suppliedArguments:
+        NodeMap<GenericParameterKey, PendingGenericArgument>
+}
+
+CanonicalPartialSpecializationFrame = {
+    binder: CanonicalBinderRef,
+    boundArguments: NodeMap<UInt32, GenericArg>,
+    provenEvidence: NodeMap<CanonicalConstraintSlot, ConstraintEvidence>,
+    optionalEvidence: NodeMap<CanonicalConstraintSlot, OptionalEvidence>,
+    residualBinder: CanonicalGenericBinder,
+    residualParameterForSourceOrdinal: NodeMap<UInt32, UInt32>,
+    residualConstraintForSourceSlot:
+        NodeMap<CanonicalConstraintSlot, CanonicalConstraintSlot>
 }
 
 OptionalAbsenceReason =
@@ -530,10 +550,26 @@ an unexpanded parameter, while nested paths such as `[2, 0]` remain stable acros
 
 `SubstitutionSet`, `GenericParameterKey`, and `ConstraintKey` are query-working views used by
 mapping and solving. Freezing alpha-normalizes the binder, orders arguments by canonical parameter
-ordinal, rewrites evidence to `CanonicalConstraintSlot`, and assigns a named frame role.
+ordinal, and rewrites evidence to `CanonicalConstraintSlot`.
 `SpecializationFrame` is the only applied-binder form stored in `DeclRef`; an unapplied
 constraint assumption uses `CanonicalBinderRef`. No snapshot-local binder/parameter ID leaks into
 semantic hashes, query keys, or the wire format.
+
+A binder is the semantic quantifier and scope boundary for one declaration's generic parameters,
+defaults, and constraints. `GenericBinder` retains source identities so lookup, diagnostics, and
+argument mapping can name those declarations. `CanonicalGenericBinder` replaces those identities
+with depth/ordinal variables so alpha-equivalent signatures compare equal. A
+`SpecializationFrame` is an application of that quantifier: it supplies every argument and every
+required constraint proof. These are three views of one concept, not wrapper declarations in the
+AST.
+
+The source spelling `__generic<...> declaration` is preserved by the CST, but checking assigns its
+parameters and constraints to `GenericBinderOf(declaration)`. The `__generic` wrapper has no
+semantic `DeclId`, binder, or specialization frame of its own. The same rule applies to a generic
+struct, class, interface, function, method, or other declaration kind admitted by the grammar.
+Because a logical declaration owns at most one direct binder, the binder owner is already a complete
+frame key; an additional lexical/type/callable/member-owner role would duplicate information and
+would permit two names for the same application.
 
 `TYP-BND-001`: A canonical parameter's list position equals its `ordinal`, and its `sort` is the
 alpha-normalized source parameter sort. A canonical constraint map is built by alpha-normalizing
@@ -562,6 +598,30 @@ exact endpoints. Solver blocking, cancellation, resource exhaustion, recovery di
 ill-formed predicate are not refutations and cannot become `Absent`; they leave the specialization
 query incomplete or erroneous. Absence therefore cannot silently stand for evidence that has not
 been computed.
+
+`TYP-BND-002b`: A `CanonicalSpecializationPrefix` has the same key/frame invariants as a complete
+spine, but its `outerToInner` list is an exact prefix of the declaration's required binder sequence.
+A `PendingSpecializationFrame` names the immediately following binder. Every supplied-argument map
+key belongs to that binder, equals its payload's `parameter`, and has a sort-correct value; omitted
+parameters are inference holes rather than implicit error arguments. Constraint evidence is not
+stored in this pending form. Chapter 8's inference state owns provisional bounds and obligations,
+and freezing creates a complete `SpecializationFrame` only after all arguments and evidence exist.
+
+`TYP-BND-002c`: A `CanonicalPartialSpecializationFrame` is derived uniquely from the canonical
+binder named by `binder`, never accepted as an independently authored residual signature. The
+domains of `boundArguments` and `residualParameterForSourceOrdinal` are disjoint and partition every
+source parameter ordinal. The residual-parameter map is order-preserving and a bijection onto every
+`residualBinder.parameters` ordinal. Applying the bound arguments capture-avoidantly and then
+renumbering through that map produces exactly each residual parameter's sort/default. The domains
+of `provenEvidence`, `optionalEvidence`, and `residualConstraintForSourceSlot` are disjoint and
+partition every source constraint slot: required discharged slots occur only in `provenEvidence`,
+decided optional slots occur only in `optionalEvidence`, and every unresolved required or optional
+slot occurs only in the residual map. That map is a bijection onto the residual constraint slots,
+preserves kind and optionality, and maps each source predicate to exactly its bound-argument-
+substituted, residual-ordinal-renumbered predicate. Every stored proof/absence validates the
+corresponding substituted source predicate under `TYP-BND-002`/`TYP-BND-002a`. These equations are
+the serialization validator and the sole constructor for a residual binder; no client may supply a
+second residual-constraint list.
 
 `TYP-BND-003`: `PackId` is an alpha-normalized bound-pack variable, not a snapshot-local
 `GenericBinderId` or declaration. Its depth/ordinal selects exactly one type- or value-pack
@@ -603,8 +663,8 @@ have exhaustive constructor-pair tests plus alpha-renaming, serialization, and e
 tests. Unless a versioned language rule explicitly enables one, a source pack parameter's
 `default` is `None`.
 
-`TYP-BND-006`: `CanonicalBinderRef.frame` names the declaration/role that owns the referenced
-canonical binder and `binder = ContentId(resolve(frame))`. It contains no arguments or constraint
+`TYP-BND-006`: `CanonicalBinderRef.sourceBinder` names the declaration that owns the referenced
+canonical binder and `binder = ContentId(canonicalizeBinder(sourceBinder))`. It contains no arguments or constraint
 evidence. Bound witness parameters, declared pack facts, lifetime assumptions, and generic equality
 assumptions use this ref plus a `CanonicalConstraintSlot`, so naming an assumption never requires a
 `DeclRef` whose complete specialization frame would recursively require evidence for that
@@ -722,9 +782,7 @@ Type =
   | BoundTypeVariable(variable: CanonicalBoundVariable)
   | ThisType(interface: DeclId, binder: ThisTypeBinderId)
   | AssociatedTypeProjection(
-        base: TypeId,
-        requirement: RequirementKey<AssociatedTypeKind>,
-        witness: SubtypeWitnessId)
+        lookup: LookupRequirement<AssociatedTypeKind>)
   | FuncTypeValue(FuncType)
   | TupleType(NodeList<TypeId>)
   | PtrType(value: TypeId, addressSpace: AddressSpace, access: AccessQualifier)
@@ -769,13 +827,22 @@ hashing.
 but is not a proof for inheritance, refinement, conformance, or conversion and never wins overload
 ranking over a non-error candidate.
 
-An `AssociatedTypeProjection` is a first-class type, not an eagerly substituted spelling. Its
-`RequirementKey` identifies the associated-type declaration under the exact inherited interface
-specialization and its `SubtypeWitnessId` identifies the exact operational proof term.
-That term may be a concrete witness table, a bound generic witness, a specialization of a generic
-table, a nested `LookupSubtypeWitness`, or an existential extraction. A projection through a bound
-generic witness therefore remains representable and lowers to a lookup on the runtime witness
-parameter; the checker does not invent a static conformance definition.
+An `AssociatedTypeProjection` is the `Type`-domain specialization of chapter 9's kind-indexed
+`LookupRequirement<K>` family, not an eagerly substituted spelling. Its complete requirement key
+identifies the associated-type declaration under the exact inherited interface specialization, and
+its `SubtypeWitnessId` selects the canonical witness for that subtype/super-interface pair. The
+selected witness definition may use a concrete witness table, a bound
+generic witness, specialization of a generic table, nested `LookupSubtypeWitness`, or existential
+extraction. A projection through a bound generic witness therefore remains representable and
+lowers to a lookup on the runtime witness parameter; the checker does not invent a static
+conformance definition.
+
+There is no untyped `LookupRequirement` node that sometimes happens to be a type. Schema
+specialization makes `LookupRequirement<AssociatedTypeKind>` a `Type` constructor, callable lookup a
+`CallableValue`, a required associated constant a `ConstValue`, and a nested-conformance lookup a
+`SubtypeWitness`. Consequently a generic `as<Type>(x)` succeeds for the associated-type constructor
+and fails for callable/value/witness constructors without inspecting a requirement payload at
+runtime.
 
 A published `CanonicalTypeRecord` contains one resolution stamp for every direct witness ID in its
 payload. The stamp contains the exact frozen witness-table-definition revisions reachable from that
@@ -788,9 +855,11 @@ snapshot revisions needed to resolve any concrete tables in it.
 `TYP-ID-001`: `CanonicalTypeRecord.id = ContentId(record.value)` using chapter 1's complete exact
 discriminator. For every direct associated projection in `value`, the dependency map contains
 exactly the matching witness ID and resolution stamp. Definition-revision changes
-invalidate/rebuild the record and its dependent queries but cannot change `TypeId`; changing the
-witness operation or lookup key does change `TypeId`. Two unequal `Type` payloads never share an ID
-even when their digest accelerators collide.
+invalidate/rebuild the record and its dependent queries but cannot change `TypeId`. Changing the
+requirement key or endpoint pair changes the lookup and therefore its `TypeId`; changing the
+semantic environment may invalidate candidate selection or dependencies but cannot mint another
+pair-identical `TypeId`. A different operational candidate cannot coexist for the same witness ID. Two unequal
+`Type` payloads never share an ID even when their digest accelerators collide.
 
 `TYP-OPEN-001`: An `ExtractExistentialType(identity, source)` satisfies
 `resolve(identity).opening = source`. Its key's interface is one of the source existential's
@@ -831,11 +900,8 @@ FuncTypeParamInfo = {
     valueType: TypeId,
     mode: ParamPassingMode,
     differentialParticipation: DifferentialParticipation,
-    labelIdentity: ParameterLabelIdentity,
     attributes: ParameterAttributeSet
 }
-
-ParameterLabelIdentity = LabelExcluded | IdentityLabel(NameKey)
 
 CallableSignature = {
     functionType: FuncTypeId,
@@ -847,10 +913,19 @@ CallableSignatureId = ContentId<CallableSignature>
 
 CallableSignatureRecord = {
     id: CallableSignatureId,
-    value: CallableSignature,
+    value: CallableSignature
+}
+
+CallableSignatureSourceInfo = {
+    declaration: DeclId,
+    signature: CallableSignatureId,
+    parameterLabels: NodeMap<ParameterKey, Option<NameKey>>,
     sourceGenericBindings:
         NodeMap<GenericParameterKey, CanonicalBoundVariable>
 }
+
+GetCallableSignatureSourceInfo(declaration: DeclId)
+    -> QueryStep<CallableSignatureSourceInfo>
 
 DynamicDispatchKey = {
     introducer: DeclId,
@@ -968,6 +1043,14 @@ directPhysicalLocationRequirement(rule, sourceRequirement) = {
 }
 ```
 
+`FuncType.binder` is the alpha-normalized quantifier that makes a generic function type a single
+closed semantic value. It mirrors a function declaration's direct `GenericBinder`, but it is not a
+second source binder: `DeclHeader.genericBinder` names the declaration-owned source scope, while
+`FuncType.binder` is its canonical, rename-insensitive projection used by type equality. A
+non-generic function has `None`. A generic nominal declaration likewise owns a source
+`GenericBinder`, but its canonical binder belongs to the nominal declaration/type-constructor
+signature rather than being wrapped around the declaration by a synthetic `GenericDecl`.
+
 `DifferentialParticipation`, `DifferentiabilityPromise`, and the callable derivative contract are
 defined in chapter 17. `CallablePurpose` and its explicit initialization target are defined in
 chapter 16. They are referenced here because both are structural parts of the checked function
@@ -1048,10 +1131,12 @@ callable differentiability promise, and calling convention participate in functi
 `ParameterKey` exists only on
 `CallableSignature`, while source spelling/origin remains on parameter AST metadata; neither is an
 operand of the interned `FuncType`. Slots associate arguments and evidence with parameters
-after pack expansion. A checked language rule constructs
-`IdentityLabel(NameKey)` when labels participate in callable identity and `LabelExcluded`
-otherwise; source spelling/origin remains on parameter AST nodes. That compatibility decision is
-tracked in chapter 13 and never leaves an undecided source `Name` inside `FuncType`.
+after pack expansion. `CallableSignatureSourceInfo.parameterLabels` is total over those slots and
+participates only in source argument mapping; it is excluded from `CallableSignatureId`. Parameter
+labels/names and generic parameter names never
+participate in `FuncType`, declaration, overload, redeclaration, conformance-signature, mangling, or
+ABI identity; generic names are removed by alpha-normalization and parameter names remain AST
+metadata.
 Mode equality is fieldwise over `ParamPassingMode.domain` and `ParamPassingMode.access`; a
 `PhysicalOperand(location)` includes all lifetime, address-space, and source fields of `location`.
 No source spelling or compatibility alias replaces those structural equality operands.
@@ -1091,11 +1176,16 @@ the body whose references are being type-checked.
 ordinal occurs exactly once. An unexpanded source parameter has an empty expansion path; each
 materialized pack element has one unique path and preserves the source parameter key. Validation,
 serialization, argument mapping, adapters, and `FunctionAbiMap` all check this same invariant.
-`CallableSignatureRecord.id = ContentId(record.value)`. Its `sourceGenericBindings` is a noncanonical
-snapshot sidecar: keys belong to the source binder and values form a bijection onto the depth-zero
-`CanonicalBoundVariable` values in `functionType.binder` by parameter ordinal. The sidecar is
-serialized for source tooling but is excluded from signature/type/query identity exactly as
-required by `TYP-BND-001`.
+`CallableSignatureRecord.id = ContentId(record.value)`. A separate
+`CallableSignatureSourceInfo` is keyed by logical declaration rather than signature ID: its
+`signature` equals that declaration's canonical signature, its source-generic keys belong to the
+declaration's source binder, and their values form a bijection onto the depth-zero
+`CanonicalBoundVariable` values in `functionType.binder` by parameter ordinal. `parameterLabels` has
+exactly the same key domain as `parameterSlots` and retains the checked source label (or `None`) for
+argument mapping. These source bindings are serialized for source tooling but excluded from
+signature/type/query identity, conformance equality, mangling, and ABI identity. Thus two
+equal-signature declarations may have distinct source names/labels without making resolution of one
+`CallableSignatureId` ambiguous.
 
 The following relations must name their fields instead of sharing an accidental byte comparison:
 
@@ -2351,13 +2441,17 @@ type, and chapter 8's conversion-free `PhysicalStorageIdentityProof`. The chapte
 retains those facts, the exact `AccessEnvironmentId`, and whether the physical endpoint was direct
 or produced by the stored accessor plan.
 
-`TYP-ACC-003`: “Overlapping” means `CompareAliasOverlap` returned `MayOverlap`; syntax similarity or
-container order is never an alias test. Two `ConstRefMode` read claims may overlap. An exclusive
-`OutMode`/`InOutMode` claim conflicts with every overlapping live read/write claim. `RefMode`
-aliasing is permitted only by the versioned rule stored with its exact read/write access mode and
-still obeys atomic discipline. Chapter 8's
-`CheckCallAliasClaims` applies this algebra to all receiver/argument plans together, and the
-selected candidate stores either every pairwise compatibility proof or the structured conflict.
+`TYP-ACC-003`: Syntax similarity and container order are never alias tests. Two `ConstRefMode`
+shared physical reads may overlap. `OutMode`, `InOutMode`, and `RefMode` each impose an exclusive
+invocation contract, with `RefMode` represented as
+`ExclusivePhysicalAccess(ReadWriteAccess)`. If `CompareAliasOverlap` proves
+`CommonAliasRegion`, an exclusive claim conflicts with every overlapping live read/write claim and
+the checker diagnoses the call. `OneUnknownAlias` or `BothUnknownAliases` does not prove overlap, so
+the call is accepted with `UnprovenDisjointUnderExclusiveContract`; execution has undefined behavior
+if those arguments overlap at runtime. No language-version policy can make a proved-overlapping
+`RefMode` pair valid. Chapter 8's `CheckCallAliasClaims` applies this algebra to all
+receiver/argument plans together, and the selected candidate stores either every pairwise
+compatibility proof or the structured conflict.
 
 `TYP-ACC-004`: Access inclusion, meet/join within a discipline, immutable/unknown write removal, call-claim
 compatibility, and atomic/ordinary incompatibility have exhaustive table and algebra property tests.
@@ -2372,6 +2466,9 @@ neither. Failure is reported as direct nonphysical storage, missing/wrong access
 checking failure, forbidden nonidentity conversion, or the exact failed physical-proof dimension,
 not collapsed to a generic l-value diagnostic. `OutMode` and `InOutMode` remain distinct because
 their explicit abstract write-back contracts are valid language behavior.
+Physicality and mutability are orthogonal: both physical modes preserve one physical endpoint;
+`ConstRefMode` grants read access and `RefMode` grants exclusive read/write access. `InMode` is the
+abstract immutable mode, while `OutMode` and `InOutMode` are abstract mutable modes.
 
 `TYP-ACC-006`: A `PhysicalStorageProof` is valid only when its storage and requirement are the
 stored endpoints, `accessProof` proves `provides(effectiveAccess(storage), requirement.access)`,
@@ -2438,6 +2535,7 @@ CanonicalConstAtom =
 CanonicalConstOperation =
     LiteralConst(CanonicalConstAtom)
   | BoundConst(CanonicalBoundVariable)
+  | LookupRequirementConst(lookup: LookupRequirement<AssociatedValueKind>)
   | ApplyPureConst(rule: RuleId, operands: NodeList<CanonicalConstExprId>)
   | SelectConst(condition: CanonicalConstExprId,
                 whenTrue: CanonicalConstExprId,
@@ -2476,6 +2574,12 @@ constant rule whose operand and result types match the expression DAG. The DAG i
 canonicalizer applies only algebraic traits declared by that rule, so commutativity or folding is
 never inferred from a host operator. `SymbolicBoolValue.expression` resolves to the standard
 environment's canonical Boolean type.
+
+`TYP-CON-001a`: `LookupRequirementConst` is constructible only for an associated-value requirement
+whose checked signature has `constantRequired = true`. Its result type is that signature's
+instantiated type, and its witness/requirement endpoints satisfy chapter 9's kind-indexed lookup
+rule. An ordinary associated value is a checked value expression instead; it cannot be interned as
+a `ConstValue` merely because its witness table is statically known.
 
 `TYP-CON-002`: A `BinaryFloatFormat` has positive storage/exponent/significand widths and a
 versioned standard rule that defines its sign, exponent, significand, special-value, rounding, and
@@ -2597,12 +2701,18 @@ TypeCoercibilityEvidence = {
     environment: ConversionEnvironmentId
 }
 
-GenericSolutionAt<S: WitnessTableState> = {
-    specializations: CanonicalSpecializationSpine,
-    witnessResolutions: WitnessResolutionSetAt<S>,
-    residual: NodeList<Constraint>,
-    trace: InferenceTraceId
-}
+GenericSolutionAt<S: WitnessTableState> =
+    CompleteGenericSolution {
+        specializations: CanonicalSpecializationSpine,
+        witnessResolutions: WitnessResolutionSetAt<S>,
+        trace: InferenceTraceId
+    }
+  | ResidualGenericSolution {
+        completed: CanonicalSpecializationPrefix,
+        residual: CanonicalPartialSpecializationFrame,
+        witnessResolutions: WitnessResolutionSetAt<S>,
+        trace: InferenceTraceId
+    }
 
 GenericSolution = GenericSolutionAt<Published>
 ```
@@ -2632,20 +2742,27 @@ whose instantiated premise at each slot equals the conclusion of the referenced 
 referenced witnesses are themselves valid and their dependency graph is finite and acyclic. Thus
 an abstract nonempty pack is backed by a generic-context constraint or a replayable registered
 derivation, not the same placeholder used for a known concrete pack.
+There is no bare `NonEmptyPackWitness` marker: a known pack uses the concrete constructor, an
+abstract source assumption uses the declared constructor, and every derived case retains its
+premises just as subtype and pack-count evidence do.
 
 `TYP-PACK-003`: First/last/trim and nonempty pack-branch rules consume a
 `NonEmptyPackWitnessId` whose `pack` is their exact operand. Count/nonempty evidence is substituted,
 serialized, and compared structurally; container length or a runtime bounds guard cannot replace
 it.
 
-A complete call solution has no residual constraints unless the output is explicitly a partially
-applied generic value. Ordinary arguments and constraint evidence remain together in each
-`SpecializationFrame` and are later passed to generic IR as needed. Composed substitution and
-evidence maps are derived views, not a second stored authority. A solution's
-`witnessResolutions` is the stage-correct minimal union for every subtype witness in its
-spine; consuming the solution copies that sidecar into the selected `BoundDeclUseAt<S>`. There is no
-free-standing `SolutionQuality` scalar: completeness is determined by `residual`, and any
-language-defined inference preference is a proof-bearing component of the enclosing overload rank.
+`CompleteGenericSolution` is the only solution accepted by an ordinary call or complete generic
+application. Its spine contains only total `SpecializationFrame` values. A deliberately partial
+generic application instead produces `ResidualGenericSolution`: `completed` contains total owner
+frames, while `residual` is the sole partial direct-binder authority. Ordinary arguments and
+constraint evidence remain together in either the total frame or that typed partial frame and are
+later passed to generic IR as needed. Composed substitution and evidence maps are derived views, not
+a second stored authority. A solution's `witnessResolutions` is the stage-correct minimal union for
+every subtype witness reachable from its completed frames and, for a partial result, its bound
+arguments/evidence. Consuming the solution copies that sidecar into the selected use/value. There is
+no free-standing `SolutionQuality` scalar: completeness is determined by the sum constructor, and
+any language-defined inference preference is a proof-bearing component of the enclosing overload
+rank.
 
 ## Declaration identity and use provenance
 
@@ -2655,6 +2772,16 @@ DeclRef = {
     specializations: CanonicalSpecializationSpine
 }
 
+UnappliedDeclRef = {
+    declaration: DeclId,
+    completed: CanonicalSpecializationPrefix,
+    pending: PendingSpecializationFrame
+}
+
+DeclRefCandidate =
+    AppliedDeclRefCandidate(DeclRef)
+  | UnappliedDeclRefCandidate(UnappliedDeclRef)
+
 ResolvedDeclRefAt<S: WitnessTableState> = {
     target: DeclRef,
     witnessResolutions: WitnessResolutionSetAt<S>
@@ -2662,8 +2789,8 @@ ResolvedDeclRefAt<S: WitnessTableState> = {
 
 ResolvedDeclRef = ResolvedDeclRefAt<Published>
 
-BoundDeclUseAt<S: WitnessTableState> = {
-    target: DeclRef,
+DeclUseAt<Target, S: WitnessTableState> = {
+    target: Target,
     lookupPath: LookupPath,
     memberEvidence: Option<MemberVisibilityEvidence>,
     extensionUses:
@@ -2674,24 +2801,32 @@ BoundDeclUseAt<S: WitnessTableState> = {
     origin: Origin
 }
 
+CandidateDeclUseAt<S: WitnessTableState> = DeclUseAt<DeclRefCandidate, S>
+BoundDeclUseAt<S: WitnessTableState> = DeclUseAt<DeclRef, S>
+
+CandidateDeclUse = CandidateDeclUseAt<Published>
 BoundDeclUse = BoundDeclUseAt<Published>
 
 SubstitutionChain = CanonicalSpecializationSpine
 ```
 
-Frames correspond only to named generic binder roles needed to specialize the declaration and its
-owners. Member lookup paths, opened-existential identities/evidence, access results, and source
+Frames correspond one-to-one with the declaration-owned generic binders needed to specialize the
+declaration and its owners. Member lookup paths, opened-existential identities/evidence, access results, and source
 origins are properties of `BoundDeclUse`; they cannot affect canonical declaration identity. A
 decl-ref normalizes to a declaration plus alpha-normalized specialization frames, and clients do
 not pattern-match on an implementation linked-list shape.
 
-`BoundDeclUse` is the immutable checked successor to the codebase's `LookupResultItem`;
+`CandidateDeclUse` is the immutable lookup-time successor to the codebase's `LookupResultItem`;
 `LookupPath` retains the ordered semantic equivalent of its `LookupResultItem::Breadcrumb` chain.
+It deliberately does not pretend that a generic declaration is already a `DeclRef`. For example,
+lookup of `genericFunc` in `genericFunc(1, 2, 3)` produces an `UnappliedDeclRef` whose enclosing
+owner frames are complete and whose direct function binder is pending. Explicit generic arguments,
+if any, are mapped by parameter identity into that pending frame; call arguments then constrain the
+same binder in chapter 8's inference problem.
 
 `specializationRequirements(declaration)` is the sole authority for its frame spine. It walks the
-lexical owner chain outermost to innermost and emits each non-empty canonical binder in the declared
-role order `LexicalBinder`, `TypeBinder`, `MemberOwnerBinder`, `CallableBinder`. A requirement is
-identified by `(role, owner)`; the same pair cannot occur twice.
+lexical owner chain outermost to innermost and emits each declaration's non-empty direct binder.
+Each requirement is identified by `GenericBinderOf(owner)` and cannot occur twice.
 
 `TYP-DRF-001`: Resolving a canonical declaration reference applies ordinary arguments and keyed
 constraint evidence to every referenced semantic fact and preserves requirement identity. A bound
@@ -2710,9 +2845,33 @@ binder for that key. Missing, extra, reordered, or duplicate frames are invalid;
 provides argument/evidence totality. Thus equivalent references have one serialized spine and frame
 application always proceeds from the outermost owner to the referenced declaration.
 
-`TYP-DRF-004`: A `ResolvedDeclRefAt<S>` or `BoundDeclUseAt<S>` resolution map has exactly the
+`TYP-DRF-003a`: An `UnappliedDeclRef` is valid only for a declaration with a direct binder. Its
+`completed` prefix equals every required owner-binder frame, and `pending.binder` is the one final
+requirement `GenericBinderOf(declaration)`. Lookup through an unspecialized owner generic is not
+permitted: that owner must first be completed or represented as its own partially applied generic
+value, so inference never receives an accidental multi-binder problem. The pending frame contains
+no completed constraint-evidence map. `FreezeDeclRef(candidate, CompleteGenericSolution(...))`
+succeeds only when the solution agrees with every completed owner frame and supplies one total
+direct frame; it returns the unique complete `DeclRef`. A `ResidualGenericSolution` produces a
+separately typed partially applied generic value; it is not smuggled into `DeclRef` with missing
+frames.
+
+`TYP-DRF-003b`: `FreezeDeclUse(candidateUse, genericSolution)` changes only the target from
+`DeclRefCandidate` to the `DeclRef` produced by `FreezeDeclRef`. It preserves lookup path, member
+evidence, visibility, origin, extension-use provenance, and the exact union of witness-definition
+dependencies. Overload comparison may inspect a candidate's declaration and pending binder, but a
+selected call, type, symbol, or serialized public signature contains only a complete `DeclRef`.
+
+`TYP-DRF-003c`: `UnappliedDeclRef`, `DeclRefCandidate`, and `CandidateDeclUseAt<S>` are ordinary
+immutable schema values. They are structurally copyable and serializable for checked-intermediate
+snapshots and contain no mutable solver pointer, scheduler task, or host address. Provisional bounds
+and work items remain in the separately keyed inference product; replaying that product against the
+same candidate cannot mutate the candidate.
+
+`TYP-DRF-004`: A `ResolvedDeclRefAt<S>`, `CandidateDeclUseAt<S>`, or `BoundDeclUseAt<S>` resolution map has exactly the
 canonical union of `requiredDefinitions` for every subtype witness reachable from its
-specialization spine, lookup path, member evidence, and referenced accessor selector. Map keys and
+complete specialization prefix or pending supplied arguments, lookup path, member evidence, and
+referenced accessor selector. Map keys and
 definition refs obey chapter 15's stage rule; unrelated definitions are forbidden. The map is a
 dependency/materialization sidecar and never participates in `DeclRef`, `LookupPathRole`,
 `FacetKey`, overload identity, or mangling. Projecting a selected bound use to a callable preserves
@@ -2812,10 +2971,13 @@ published module interface. No constructor implicitly converts one evidence fami
 chapter 8 names every permitted bridge.
 
 `TYP-EVD-001`: Resolving a proof ID yields a payload whose canonical encoding exactly matches the
-typed `ContentId`; recursive proof edges form a finite DAG. `TypeEqualityProofId`,
-`RepresentationAdjustmentPathId`, `InterfaceRefinementProofId`, and
-`SubtypeWitnessId` cannot resolve to another evidence family, and all premise endpoints
-compose with the parent constructor. Digest equality alone never selects proof payloads.
+typed `ContentId`; recursive proof edges form a finite DAG. For `SubtypeWitnessId`, chapter 15's
+content payload is the environment-qualified endpoint identity, and the environment resolves it to
+exactly one coherently selected operation/definition whose target matches that identity. The
+operation is not a second identity operand. `TypeEqualityProofId`,
+`RepresentationAdjustmentPathId`, `InterfaceRefinementProofId`, and `SubtypeWitnessId` cannot
+resolve to another evidence family, and all premise endpoints compose with the parent constructor.
+Digest equality alone never selects proof payloads.
 
 `TYP-EVD-002`: The extension in an `ExtensionIntrinsicApplicabilityEvidence` is fully specialized,
 so its canonical frames are the sole ordinary-argument and constraint-evidence authority. Applying
@@ -2868,7 +3030,9 @@ references for abstract proof values.
 `WIT-MAP-001`: A requirement map is keyed by canonical `InterfaceRequirementKeyOf<K>`, including the viewed and
 declaring interface specializations and refinement path. Interface source order is presentation
 metadata only. Path-distinct diamond occurrences remain addressable; sharing requires explicit
-typed reuse evidence, never map insertion order.
+typed reuse evidence, never map insertion order. These are requirement-occurrence keys inside the
+one selected witness table, not path-distinct subtype-witness identities; chapter 15 admits only one
+canonical witness/super-facet route for an endpoint pair.
 
 `WIT-MAP-002`: For every active condition, a conformance is complete only when each required
 requirement has exactly one kind-correct `RequirementWitness`. Conditional alternatives form a canonical,
@@ -2913,6 +3077,9 @@ FacetOrigin = TypeOrigin(TypeId, DeclRef) | ExtensionOrigin(DeclRef)
 FacetId = ContentId<FacetKey>
 FacetSet = {
     byKey: CanonicallyOrderedMap<FacetKey, Facet>,
+    canonicalSuperFacets:
+        CanonicallyOrderedMap<CanonicalSuperFacetKey,
+                              CanonicalSuperFacetSelection>,
     equivalence:
         CanonicallyOrderedSet<(left: FacetKey,
                                right: FacetKey,
@@ -2926,8 +3093,10 @@ FacetSet = {
 ```
 
 Distance and provider class are derived from `route`. Semantic priority is a proof-carrying partial
-order; `presentationOrder` exists only for deterministic serialization and diagnostics. Uniqueness
-is by the complete semantic `FacetKey`, not object address or endpoint type.
+order; `presentationOrder` exists only for deterministic serialization and diagnostics. General
+facet uniqueness is by the complete semantic `FacetKey`, not object address. Super-interface facets
+have the stronger chapter 15 invariant that `canonicalSuperFacets` selects exactly one route and
+witness for each `(root, superInterface)` key.
 
 `TYP-FAC-000`: `Facet.id = ContentId(keyOf(facet))`, where `keyOf` is the exact projection shown
 above. `memberScope` and relation-specific evidence are derived facts: two producers that reach the
@@ -2942,6 +3111,14 @@ equivalence classes and a proof whose facet endpoints match them; the quotient e
 acyclic. Maximal incomparable facets remain simultaneously visible and may produce ambiguity.
 Canonical map/source/import iteration never defines semantic lookup order.
 
+`TYP-FAC-004`: Every `canonicalSuperFacets` value has a key equal to its map key, names one present
+facet rooted at the same type and ending at the same interface instance, and names the canonical
+pair-identified witness selected for those endpoints. No two successful facets
+for that map key may survive. The stored comparisons identify byte-identical rediscovery of the
+same provider/path or prove strict priority over every distinct discarded route candidate; a tied
+or incomparable maximal route makes facet construction erroneous. General facet-equivalence proofs
+cannot collapse two operationally distinct subtype-witness paths.
+
 `TYP-FAC-001`: Facet closure is computed separately from the class representation chain, interface
 conformances/refinements, existential openings, and applicable extensions. Every route step carries
 the correctly typed representation adjustment, subtype witness/lookup key,
@@ -2954,9 +3131,10 @@ that sidecar into its `BoundDeclUseAt<S>`.
 query return chapter 11's `QueryStep::Blocked` with that dependency, not a semantic facet result or
 a silently shortened inheritance list.
 
-Path-distinct diamond routes therefore have different keys even when they end at the same provider.
-This replaces the current mutable linked-list/cache state and totalized inheritance ordering with
-an immutable route-keyed set and explicit partial priority.
+Path-distinct diamond routes may therefore exist while constructing candidates, but only the proved
+canonical route for a super-interface endpoint is published. This replaces the current mutable
+linked-list/cache state and incidental inheritance ordering with immutable route values, explicit
+priority proofs, and compile-time ambiguity for an incoherent endpoint.
 
 ## Conversion and overload domains
 
@@ -2994,8 +3172,7 @@ ApplicableCallSlotPlan<S: WitnessTableState> = {
 CallAliasAccessKind =
     SharedPhysicalRead(access: StorageAccessMode)
   | ExclusiveAbstractAccess(access: StorageAccessMode)
-  | AliasablePhysicalAccess(access: StorageAccessMode,
-                            rule: StandardEnvironmentRuleId)
+  | ExclusivePhysicalAccess(access: StorageAccessMode)
 
 CallAliasClaim = {
     slot: BoundCallSlot,
@@ -3007,10 +3184,11 @@ CallAliasClaim = {
 AliasPairCompatibilityProof =
     DisjointAliasPair(proof: AliasDisjointnessProof)
   | OverlappingPhysicalReadPair(left: BoundCallSlot, right: BoundCallSlot)
-  | OverlappingVersionedPhysicalAccesses(
+  | UnprovenDisjointUnderExclusiveContract(
         left: BoundCallSlot,
         right: BoundCallSlot,
-        rules: NonEmpty<CanonicallyOrderedSet<StandardEnvironmentRuleId>>)
+        uncertainty: AliasOverlapReason where
+            uncertainty is OneUnknownAlias | BothUnknownAliases)
 
 CompatibleCallAliasClaims = {
     comparisons: NodeList<AliasPairCompatibilityProof>
@@ -3021,9 +3199,6 @@ ConflictingCallAliasClaims = {
     right: CallAliasClaim,
     overlap: AliasOverlapReason,
     reason: ExclusiveAccessOverlap |
-            PhysicalAccessRuleRejected(
-                rules: NonEmpty<CanonicallyOrderedSet<
-                    StandardEnvironmentRuleId>>) |
             IncompatibleReferenceDisciplines
 }
 
@@ -3105,14 +3280,26 @@ Unqualified `ConversionResult`, `ConversionPlan`, `TypeCoercionWitness`, `Applic
 `PlanSemanticUses` mean their `<Published>` forms. Construction-only forms are confined to the
 synthesis transaction and are rewritten together with their operational witness edges.
 
+`TYP-ACC-008`: `CompatibleCallAliasClaims.comparisons` contains exactly one proof for every
+unordered live-claim pair. `ConstRefMode` produces exactly
+`SharedPhysicalRead(ReadAccess)`, `RefMode` produces exactly
+`ExclusivePhysicalAccess(ReadWriteAccess)`, and the two abstract mutable modes produce
+`ExclusiveAbstractAccess` with their exact access. `OverlappingPhysicalReadPair` requires two
+`SharedPhysicalRead` claims and `CommonAliasRegion`.
+`UnprovenDisjointUnderExclusiveContract` requires at least one exclusive claim and exactly the
+stored unknown-overlap reason; it is a recorded source contract, not a disjointness proof.
+`ConflictingCallAliasClaims` requires `CommonAliasRegion` and at least one exclusive claim (or the
+named incompatible reference disciplines). An unknown-alias reason cannot inhabit a conflict, and a
+proved common region cannot inhabit the unproven-disjoint alternative.
+
 There is no "committed candidate" reconstruction step: `Selected.winner` contains every plan and
 piece of evidence needed to construct the typed call. Failures are structured data so diagnostics
 and tests need not scrape text. Candidate ranking is the partial order defined in chapter 8; it does
 not depend on container iteration order.
 
 `ApplicableOverloadCandidate.use.target` is the sole stored owner of the selected declaration's
-complete specialization frames. Freezing consumes the intermediate `GenericSolution` to construct
-that canonical reference; the candidate retains only its trace ID. Signature, argument map, and
+complete specialization frames. Freezing consumes the intermediate `CompleteGenericSolution` to
+construct that canonical reference; the candidate retains only its trace ID. Signature, argument map, and
 plans are validated projections of that specialized target, not competing specialization maps.
 
 `TYP-OVL-001`: `ApplicableOverloadCandidate.callSlots` has exactly one entry for the receiver when

@@ -183,7 +183,7 @@ that exact storage. `InvokeAbstractGetter` is valid only for `AbstractStorage(st
 selected getter in its accessor contract, and retains the getter's effects, capabilities, receiver,
 and index evaluation requirements. `ResolveAbstractStorageThroughReference` is valid only when
 `PlanStorageAccessAt<S>` selected it for `ReadValueAccess` under rule `EXP-STO-002`, where the getter was absent,
-a versioned fallback rule authorized the operation, and the stored internal plan immediately
+the fixed Slang 2026 getter-to-`constref` fallback rule authorized the operation, and the stored internal plan immediately
 dereferences the raw ref-accessor result. A failed present getter can never produce this alternative.
 None of these read plans changes the source expression's abstract-storage classifier or makes it
 eligible for a physical operand mode.
@@ -194,6 +194,12 @@ abstract property/subscript, getter/setter plan, write-back temporary, or rvalue
 physical-operand parameter normally records the proof for its invocation-instantiated physical
 storage requirement in the `StorageAccessPlan`; it does not rely on an implicit conversion to manufacture
 referenceability.
+
+`CVR-PLAN-008`: An implicit conversion plan contains at most one `UserDefined` operation. The
+`before` and `after` children of that operation contain only standard conversion operations; neither
+may contain another `UserDefined` operation. This is a language invariant, not a configurable search
+budget. An explicit cast may invoke a separately declared explicit conversion, but it does not make
+a two-user-defined-step implicit path applicable.
 
 Conversion failure is structured output, not diagnostic text:
 
@@ -208,7 +214,8 @@ ConversionFailure<S: WitnessTableState> =
                                    failure: CapabilityFailure)
   | AccessNotPermitted(decision: VisibilityDecision)
   | RecursiveUserConversion(declaration: DeclRef,
-                            source: TypeId, target: TypeId)
+                             source: TypeId, target: TypeId)
+  | MultipleUserDefinedImplicitConversions(path: NonEmpty<DeclRef>)
   | ConversionSearchLimit(visitedStates: UInt32,
                           configuredLimit: UInt32)
   | InvalidRecoveryOnly(error: ErrorId)
@@ -228,58 +235,104 @@ BoundedNat = {
 }
 
 ConversionCost = {
-    class: RankClass,
-    standardPriority: BoundedNat,
+    category: ConversionCostCategory,
     distance: BoundedNat,
-    userDefinedSteps: BoundedNat,
     tieProperties: NodeMap<RankPropertyId, BoundedNat>
 }
 
-RankClass = Identity < Qualification < Promotion < Standard < Shape < Existential < UserDefined
+ConversionEdgeRank = {
+    cost: ConversionCost,
+    isUserDefined: Bool
+}
+
+ConversionSearchRank = {
+    cost: ConversionCost,
+    userDefinedStepUsed: Bool
+}
+
+ConversionSearchRankComposition =
+    RankedConversionPath(rank: ConversionSearchRank)
+  | UserDefinedStepOverflow
+
+ConversionCostCategory = StandardEnvironmentConversionCostCategoryId
 ```
 
 Every component in one ranking query uses the same versioned `maximum` and satisfies
-`value <= maximum`. Rank arithmetic that would exceed it returns structured
-`ConversionSearchLimit`; it never wraps or saturates into a semantically equal rank. Comparison
-first validates equal maxima, then compares exact values under the named rank relation.
+`value <= maximum`. Comparison first validates equal maxima, then compares exact values under the
+named rank relation. The standard environment registers the established `kConversionCost_*`
+categories (`None`, generic-parameter/lambda/array/layout/reference adjustments, literal and numeric
+conversions, interface/optional/pointer conversions, rank/shape conversions, parameter-pack/default/
+general/explicit/type-coercion categories, and `Impossible`) under stable names. Composite names such
+as `ScalarIntegerToFloatMatrix` are categories in that registry rather than arithmetic expressions
+in this algebra. Their numeric encodings are not an ABI, mangling input, serialized calling
+convention, or promise that the implementation will preserve particular integer constants.
 
-Smaller is better lexicographically within one conversion. `standardPriority` is supplied by the
-versioned standard environment for scalar/builtin conversion declarations. `distance` counts a
-well-defined inheritance, shape, or optional depth only inside the corresponding class. An implicit
-plan contains at most one user-defined conversion step unless a specific language rule permits a
-composition.
+`CVR-RANK-000`: `ConversionCost` is canonical. `tieProperties` stores only nonzero values, is keyed
+and ordered by the versioned property registry, and omits every missing/zero entry; each stored
+`BoundedNat.maximum` equals the registry maximum used by the other scalar components in that
+ranking query. Consequently two costs that compare equal are byte-identical. Construction,
+deserialization, and registered edge loading all perform this validation before search.
+
+The registry supplies a versioned total order over categories, preserving the existing relative cost
+order. Smaller is better. After category comparison, `distance` and registered tie properties compare
+lexicographically. Whether an edge is user-defined is search metadata, not another rank dimension;
+the user-defined edge's registered category already supplies its semantic cost. An implicit plan
+contains at most one user-defined conversion step.
 
 Explicit-only conversions have the same rank domain but are inapplicable to implicit requests.
 Recovery conversions do not have a semantic rank.
 
-Path composition is one named monotone operation:
+Path composition takes the single worse whole cost under that total order; it never sums costs or
+constructs a synthetic component-wise tuple:
 
 ```text
-zeroRank = (Identity, 0, 0, 0, {})
+zeroRank = ConversionCost(category(None), 0, {})
+zeroSearchRank = ConversionSearchRank(zeroRank, false)
+zeroSearchRankComposition = RankedConversionPath(zeroSearchRank)
 
-extendRank(path, edge) = {
-    class: max(path.class, edge.class),
-    standardPriority: checkedAdd(path.standardPriority, edge.standardPriority),
-    distance: checkedAdd(path.distance, edge.distance),
-    userDefinedSteps: checkedAdd(path.userDefinedSteps, edge.userDefinedSteps),
-    tieProperties: checkedPointwiseAdd(path.tieProperties, edge.tieProperties)
-}
+combineSearchRanks(left, right) =
+    UserDefinedStepOverflow
+        when left = UserDefinedStepOverflow or right = UserDefinedStepOverflow
+    UserDefinedStepOverflow
+        when left = RankedConversionPath(l) and
+             right = RankedConversionPath(r) and
+             l.userDefinedStepUsed and r.userDefinedStepUsed
+    RankedConversionPath(ConversionSearchRank(
+        cost = worseByConversionCostOrder(l.cost, r.cost),
+        userDefinedStepUsed = l.userDefinedStepUsed or r.userDefinedStepUsed))
+        when left = RankedConversionPath(l) and
+             right = RankedConversionPath(r)
+
+edgeSearchRank(edge) =
+    RankedConversionPath(ConversionSearchRank(edge.cost, edge.isUserDefined))
+extendSearchRank(path, edge) =
+    combineSearchRanks(RankedConversionPath(path), edgeSearchRank(edge))
 ```
 
 Tie-property keys and their comparison priority are versioned standard-environment data; missing
-entries are zero and vectors compare lexicographically by that declared key order after the four
-main fields. Every component is non-negative. Overflow or a configured semantic bound produces a
-structured `ConversionSearchLimit` failure and never wraps.
+entries are zero and vectors compare lexicographically by that declared key order after category and
+distance. Every component is non-negative. `worseByConversionCostOrder` returns one of its two
+operands: the greater cost, or their byte-identical canonical value when they compare equal. For an
+implicit request, composition rejects a path when the prefix already used a user-defined edge and
+the next edge is user-defined; the resulting bit therefore proves zero-or-one rather than recording
+an additive count.
 
-`CVR-RANK-001`: Rank constants are semantic categories/data in the standard environment, not
-arbitrary integers summed across arguments. Changing an ordering is a language-version change.
+`CVR-RANK-001`: Rank values preserve the existing semantic cost categories in the standard
+environment. Only their ordered comparison is observable; their numeric encoding has no ABI status.
+Changing the order is a language-version change. Costs are never added either along one conversion
+path or across call arguments.
 
 `CVR-RANK-002`: Structurally different minimal plans with identical rank are an ambiguous conversion
 unless the canonical-plan rule proves they denote the same operation.
 
-`CVR-RANK-003`: `extendRank` is associative, has `zeroRank` as identity, and is monotone in both
-arguments under rank order. Unit/property tests establish these laws for every registered rank
-property; best-first pruning is valid only because the extension cannot improve an existing path.
+`CVR-RANK-003`: `combineSearchRanks` is a closed, associative operation on
+`ConversionSearchRankComposition` with `zeroSearchRankComposition` as identity and
+`UserDefinedStepOverflow` as an absorbing value. For ranked inputs its cost is monotone in both
+arguments under rank order; combining any path containing two user-defined steps yields overflow
+independent of grouping. Search converts that overflow plus the separately accumulated edge trace
+to `MultipleUserDefinedImplicitConversions(path)`. `extendSearchRank` is the left-fold specialization
+for one edge. Unit/property tests establish these laws for every registered rank property;
+best-first pruning is valid only because extension cannot improve an existing path.
 
 ## Conversion search
 
@@ -292,15 +345,21 @@ and error recovery are registered by rule ID through the same interface.
 PlanCoercion(request) -> ConversionResult
 ```
 
-Search states are `(type, category, userStepUsed, site)`. A deterministic best-first search explores
-edges in rank and stable rule-ID order, prunes a state when an equal/better path was seen, and stops
-only after every path that could tie the best result is known.
+Search states are `(type, valueCategory, ConversionSearchRank, site)`. A deterministic best-first
+search explores edges in whole-cost and stable rule-ID order, prunes a state when an equal/better
+cost with the same-or-weaker user-step usage was seen, and stops only after every path that could tie
+the best result is known.
 
 ```text
-edge(τ,q,ρ,q',π,r)    allowed(edge, request)    p' = extendRank(p,r)
------------------------------------------------------------------ CVR-STEP-001
+edge(τ,q,ρ,q',π,r)    allowed(edge, request)
+extendSearchRank(p,r) = RankedConversionPath(p')
+------------------------------------------------ CVR-STEP-001
 (τ,q,p) --π--> (ρ,q',p')
 ```
+
+`CVR-STEP-002`: When `extendSearchRank` returns `UserDefinedStepOverflow`, that path is rejected as
+`MultipleUserDefinedImplicitConversions` with the exact accumulated user-defined edge trace. It
+does not enter the search-state queue with an invented worst cost.
 
 `CVR-SRCH-001`: Conversion cycles terminate by rank/state dominance, not an “impossible” cache
 sentinel that changes meaning during recursion.
@@ -351,8 +410,9 @@ ArgumentMap = {
 ```
 
 Argument mapping checks positional/label rules, arity, defaults, packs, and duplicate assignments
-without examining argument types. Labels participate only when enabled by the callable's language
-version; otherwise source arguments are positional.
+without examining argument types. A source label is used only to choose a `ParameterKey` in this
+mapping step. Labels never participate in function identity, redeclaration, overload identity,
+function conversion, mangling, or ABI.
 
 `SourceArgument`, `SourceArgumentId`, and `SourceCallRole` are the shared chapter 5 domains. The
 same identities are retained when property/subscript syntax captures sources and when an accessor
@@ -383,6 +443,16 @@ a winner does not look a default expression up or check it again.
 the explicit-argument sources assigned to that parameter in source order. Ranking projections must
 recompute these views from the map and cannot accept an independently supplied default set.
 
+`OVL-MAP-005`: Callable declaration identity contains the declared function `NameKey`, result type,
+ordered alpha-normalized generic parameter sorts, structural receiver slot when present, and ordered
+checked parameter types. A receiver/parameter type includes its structural passing mode; a
+parameter label does not. Renaming a generic parameter cannot create another function or distinguish
+overloads, while changing generic arity or a type/value/pack parameter sort does so even when that
+parameter is otherwise unused. Generic constraints/defaults, parameter names/defaults, and
+parameter labels do not independently enter declaration identity; they remain checked
+declaration/applicability facts. Any bound variables occurring in the identity fields use their
+canonical alpha-normalized form.
+
 Argument-map failures are equally explicit:
 
 ```text
@@ -410,20 +480,26 @@ RecoveryArgumentMap = {
 
 ## Passing-mode applicability
 
-Argument preparation branches first on the structural domain of `ParamPassingMode`. An
-`AbstractOperand` may use ordinary conversion search. A `PhysicalOperand` selects a direct or exact
-accessor-produced physical endpoint first and then checks storage identity; it never asks ordinary
-conversion search to manufacture referenceability.
+Argument preparation branches first on the complete structural `ParamPassingMode`. `InMode` may use
+ordinary conversion search; `OutMode` and `InOutMode` require exact storage identity despite sharing
+the abstract operand domain. A `PhysicalOperand` selects a direct or exact accessor-produced physical
+endpoint first and then checks storage identity; it never asks ordinary conversion search to
+manufacture referenceability.
 
-| Mode              | Required source                                                                              | Plan                                                                |
-| ----------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `InMode`          | any convertible value/storage                                                                | load if needed, implicit conversion, pass value                     |
-| `OutMode`         | writable physical or abstract destination, or permitted temporary/write-back                 | abstract-domain uninitialized-destination plan plus post-conversion |
-| `InOutMode`       | exclusive readable/writable physical or abstract storage, or permitted temporary/write-back  | abstract-domain pre/post-conversion plan plus exclusive claim       |
-| `ConstRefMode(r)` | direct physical storage or exact `ReadAccess` reference accessor, with storage identity      | pass the exact physical endpoint through a read view                |
-| `RefMode(r)`      | direct physical storage or exact `ReadWriteAccess` reference accessor, with storage identity | pass the exact physical endpoint through a read/write view          |
+| Mode              | Required source                                                                              | Plan                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `InMode`          | any convertible value or storage; abstract immutable input                                   | load if needed, implicit conversion, pass value                 |
+| `OutMode`         | writable physical or abstract destination of exactly the parameter value type                | abstract mutable output; no pre-read; normal-return commit only |
+| `InOutMode`       | exclusive readable/writable physical or abstract storage of exactly the parameter value type | abstract mutable input/output; normal-return commit only        |
+| `ConstRefMode(r)` | direct physical storage or exact `ReadAccess` reference accessor, with storage identity      | pass the exact physical endpoint through an immutable read view |
+| `RefMode(r)`      | direct physical storage or exact `ReadWriteAccess` reference accessor, with storage identity | pass the exact physical endpoint under mutable exclusive access |
 
 The receiver uses the same table with any receiver-specific restrictions.
+
+`OVL-MODE-011`: The source parameter-mode spellings are exactly `in`, `out`, `inout`,
+`__constref`, and `__ref`, mapping respectively to the five rows above. `in out` and `borrow` are not
+aliases and are diagnosed. `readonly` and `writeonly` retain their separately registered
+access-qualifier roles and never synthesize a `ParamPassingMode`.
 
 ```text
 AccessEnvironment = {
@@ -525,14 +601,23 @@ ApplicableAbstractConversionAt<S: WitnessTableState> = {
     rank: ConversionCost
 }
 
+ExactStorageAdaptation = {
+    source: TypedExpr,
+    storage: PhysicalStorageRef | AbstractStorageRef,
+    parameterValueType: TypeId,
+    equality: TypeEqualityProofId
+}
+
 ArgumentAdaptationAt<S: WitnessTableState> =
     AbstractConversion(conversion: ApplicableAbstractConversionAt<S>)
+  | ExactStorageIdentity(adaptation: ExactStorageAdaptation)
   | PhysicalIdentity(adaptation: PhysicalIdentityAdaptationAt<S>)
 
 ArgumentAdaptationFailureAt<S: WitnessTableState> =
     InvalidArgumentPlanningContext(failure: ArgumentPlanningContextFailure)
   | AbstractConversionInapplicable(failure: ConversionFailure<S>)
   | AbstractConversionRecovered(plan: ConversionPlan<S>, error: ErrorId)
+  | ExactStorageAdaptationFailed(failure: ParamPassingModeFailureAt<S>)
   | PhysicalAdaptationFailed(failure: ParamPassingModeFailureAt<S>)
 
 ArgumentAdaptationResultAt<S: WitnessTableState> =
@@ -589,9 +674,9 @@ CheckCallAliasClaims(plans: NodeMap<BoundCallSlot, StorageAccessPlan<Published>>
     -> CallAliasCheck
 ```
 
-The successful output is the shared `StorageAccessPlan` defined in chapter 12, including evaluate-once,
-any abstract-mode temporary/write-back, the exact physical endpoint for a physical mode, cleanup
-condition, and alias class.
+The successful output is the shared `StorageAccessPlan` defined in chapter 12, including
+evaluate-once behavior, any exact-type abstract-storage transport and normal-return write-back, the
+exact physical endpoint for a physical mode, cleanup condition, and alias class.
 Its terminal is always `PassArgument`; storage-read and storage-write terminals belong only to
 chapter 7's standalone storage-access query.
 Candidate evaluation interns the complete `AccessEnvironment`, stores its ID on both the candidate
@@ -630,9 +715,15 @@ recovered-candidate or rejection path instead of masquerading as applicable plan
 `OVL-MODE-001`: Direction failure is distinct from type-conversion failure and names the parameter,
 required mode, and actual value category/access.
 
-`OVL-MODE-002`: Temporary/write-back is permitted only by a named language rule for an
-`AbstractOperand` mode and conversion. Neither physical mode ever materializes a copy or invokes a
-getter/setter merely to make a call applicable.
+`OVL-MODE-002`: `OutMode` and `InOutMode` select `ExactStorageIdentity` and require storage whose
+value type is exactly the substituted parameter value type. Ordinary conversion search, a conversion
+temporary, and materialization of an rvalue are forbidden. An abstract property/subscript may use an
+exact-type transport buffer as the
+operational implementation of its selected getter/setter plan; this does not make a non-storage
+argument applicable and is not a conversion. `OutMode` does not read before the call. `InOutMode`
+reads exactly once before the call. Both commit through the selected abstract destination only on
+normal return and never on an exceptional exit. Neither physical mode ever materializes a copy or
+invokes a getter/setter merely to make a call applicable.
 
 `OVL-MODE-003`: For a physical mode, let `pc = resolve(context)`,
 `input = callSlotInput(binding)`, `environment = resolve(pc.accessEnvironment)`, and
@@ -733,14 +824,20 @@ The enclosing candidate and call-slot plan store the identical environment. The 
 one physical-storage runtime argument carrying this proof and stores no unused value-conversion plan.
 
 `OVL-MODE-006`: `PlanArgumentAdaptationAt<S>` and `PlanArgumentAccessAt<S>` are the only ordered
-parameter-planning pair. The first returns `AbstractConversion` only for `AbstractOperand` and
-`PhysicalIdentity` only after selecting/proving a physical endpoint for `PhysicalOperand`. The
-abstract branch constructs one `ConversionRequest` from `callSlotInput(binding)`, the substituted
-parameter value type, `Argument`, `Implicit`, and the exact conversion environment in `context`.
+parameter-planning pair. For `InMode`, the first constructs one `ConversionRequest` from
+`callSlotInput(binding)`, the substituted parameter value type, `Argument`, `Implicit`, and the exact
+conversion environment in `context`.
 `Applicable(plan, rank)` becomes `AbstractConversion(ApplicableAbstractConversionAt(plan, rank))`;
 `Inapplicable(failure)` becomes `AbstractConversionInapplicable(failure)`; and
 `Recovered(plan, error)` becomes `AbstractConversionRecovered(plan, error)`. An inapplicable or
 recovered conversion can therefore never inhabit `AbstractConversion`.
+
+For `OutMode` or `InOutMode`, it never constructs a conversion request. It requires a physical or
+abstract `Storage` classifier and a non-recovery type-equality proof with the substituted parameter
+value type, producing `ExactStorageIdentity`; the subsequent access plan records
+`ConsumedWithoutStorageCoercion(ExactStorageIdentityPassingRule)` and comparison rank `zeroRank`.
+For `ConstRefMode` or `RefMode`, it produces `PhysicalIdentity` only after selecting and proving the
+physical endpoint described above. Any other adaptation/mode pairing is invalid.
 
 The second primitive consumes only the byte-identical successful adaptation returned for the same
 slot, binding, parameter, and context; a domain mismatch is a closed
@@ -768,6 +865,12 @@ not accepted merely because its getter reads from memory. An explicitly checked 
 applicable because it already produced a distinct proof-carrying `PhysicalStorage`; a bare reference
 handle is not a storage and is inapplicable.
 
+`OVL-MODE-012`: `RefMode(r)` is the canonical checked mode for source `__ref`. It requires the
+same physical identity, lifetime, address-space, and source-provenance proof as the instantiated
+physical requirement, supplies `ReadWriteAccess`, and establishes exclusive mutable access for the
+invocation lifetime. It cannot be formed from a value conversion, temporary, getter/setter pair, or
+write-back plan.
+
 `OVL-MODE-008`: An abstract property or subscript may satisfy a physical mode only through
 `AccessorProducedPhysicalParameterSource`. The selected accessor key equals `mode.access` exactly:
 source `constref` contributes `RefAccessor(ReadAccess)` for `ConstRefMode`, and source `ref`
@@ -792,21 +895,19 @@ omitted access/lifetime/address/source proof rejects the candidate before compar
 order. `InMode` contributes no live call claim. `ConstRefMode` contributes
 `SharedPhysicalRead(ReadAccess)`; `OutMode` and `InOutMode` contribute
 `ExclusiveAbstractAccess` with their exact required access; and `RefMode` contributes
-`AliasablePhysicalAccess(ReadWriteAccess, rule)` with the versioned compatibility rule selected from the
-plan's `AccessEnvironment`. Every claim uses `aliasClassProvenance(plan.aliasClass)` and the exact
-invocation lifetime. A `UniqueAlias` is accepted only when its stored proof derives that exact
-provenance under `TYP-ALS-004`.
+`ExclusivePhysicalAccess(ReadWriteAccess)`. Every claim uses
+`aliasClassProvenance(plan.aliasClass)` and the exact invocation lifetime. A `UniqueAlias` is accepted
+only when its stored proof derives that exact provenance under `TYP-ALS-004`.
 
 The checker visits every unordered pair. `ProvenDisjoint` from `CompareAliasOverlap` always yields
 `DisjointAliasPair`. For a `MayOverlap` pair, two `SharedPhysicalRead` claims are universally
-compatible. Every pair containing an `ExclusiveAbstractAccess` conflicts. Every other pair
-containing `AliasablePhysicalAccess` is decided entirely by the stored versioned physical-reference
-alias rule or rules over the two exact access modes and disciplines. In particular, overlap between
-`ConstRefMode` read access and `RefMode` read/write access is neither universally accepted nor
-hard-coded as a conflict; the rule returns and stores an explicit allow proof or structured reject
-reason. Different registered rules must themselves have a versioned compatibility bridge.
-`UnknownAliasRoot` therefore does not fail by itself, but it forces this conservative `MayOverlap`
-rule evaluation. The selected candidate stores the complete successful
+compatible. `CommonAliasRegion` is a statically proved overlap and conflicts whenever either claim
+is `ExclusiveAbstractAccess` or `ExclusivePhysicalAccess`, including a `ConstRefMode`/`RefMode` pair
+on the same physical region. `OneUnknownAlias` and `BothUnknownAliases` do not prove an overlap and
+therefore do not by themselves reject the call. Instead the successful comparison records
+`UnprovenDisjointUnderExclusiveContract`; the call is accepted under the source-language
+exclusivity contract and has undefined behavior if the arguments overlap at runtime. The selected
+candidate stores the complete successful
 `CompatibleCallAliasClaims`; a conflict rejects it with both slots, claims, overlap reason, and precise
 `ParamPassingModeFailure` whose reason is
 `AliasClaimConflict(theExactConflictingCallAliasClaims)`. Because that record stores an
@@ -858,7 +959,8 @@ are keyed by `ConstraintKey` and produced only by solving.
 explicit optional absence into one `SpecializationFrame`. A call, declaration reference, or
 partial generic value cannot retain the argument substitution while dropping its evidence.
 
-`GEN-MAP-004`: `MapGenericArguments` first resolves `binder` in `binderTable` under
+`GEN-MAP-004`: `MapGenericArguments` first resolves `binder` with `GetGenericBinder` in the
+request's semantic environment under
 `TYP-BND-004`; every produced `GenericParameterKey` names exactly one parameter in that binder.
 Each checked argument's `value` satisfies its stored `sort`, and successful mapping additionally
 requires that sort to equal the resolved `GenericParam.sort` after substituting any already mapped
@@ -982,8 +1084,13 @@ ConstraintFailureReason =
 A full pass with no progress invokes `ExplainBlockedInference`; it does not loop or silently pick a
 default that conflicts with pending required evidence.
 
-`GEN-SLV-001`: Success requires every non-residual generic parameter to be bound, every required
-constraint to have typed evidence, and every pack shape/count equation to be solved.
+`GEN-SLV-001`: A `CompleteGenericSolution` requires every generic parameter to be bound, every
+required constraint to have typed evidence, every optional constraint to have evidence or a
+replayable absence, and every pack shape/count equation to be solved. A
+`ResidualGenericSolution` is permitted only when the requested context admits a generic value; every
+unbound parameter and every unresolved constraint is transferred through the unique derivation in
+`TYP-BND-002c` to its `residual` binder. If that derivation has no residual parameter or constraint,
+the result is complete rather than an empty partial solution.
 
 `GEN-SLV-002`: The inference trace records the source of every bound candidate, merge, rejected
 alternative, query dependency, and evidence proof. Diagnostic replay uses this same trace; it does
@@ -1045,8 +1152,10 @@ The solver handles the constraint constructors in chapter 5:
 - pack count/nonempty uses symbolic integer/shape reasoning; and
 - differentiability information requests the standard environment's declared evidence query.
 
-Optional constraints may remain residual only when the owning generic construct explicitly supports
-partial application. Required constraints cannot be inferred from a witness argument's physical
+Required or optional constraints may remain residual only when their unsolved predicates are
+well-formed under the residual parameters and the owning generic construct explicitly supports
+partial application. A required constraint with no residual dependency must be proved before either
+solution constructor succeeds. Constraints cannot be inferred from a witness argument's physical
 position.
 
 `GEN-CON-001`: Solver query dependencies that are pending produce `Blocked`. A semantic negative
@@ -1088,6 +1197,18 @@ sourceAdaptationRank(plan) =
     ConversionFreeAccessRank(rule)
         when plan.rankingCoercion = Some(ConsumedWithoutStorageCoercion(rule))
 
+CandidateConversionRank = {
+    maximum: ConversionCost,
+    bySource: NodeMap<SourceCallRole, SourceAdaptationRank>
+}
+
+candidateConversionRank(candidate) = {
+    bySource: comparedSourceAdaptations(candidate),
+    maximum: max({ comparisonRank(r) |
+                   (_, r) in comparedSourceAdaptations(candidate) },
+                 default = zeroRank)
+}
+
 PackPreference = {
     parameter: SourceParameterKey,
     consumed: NodeList<SourceArgumentId>,
@@ -1109,8 +1230,10 @@ same facts produces byte-identical traces, while diagnostics select trace events
 the solver.
 
 `CandidateRank` is not a scalar score. It is an immutable, serializable cache of the non-conversion
-facts whose pairwise proof is defined below. Conversion comparison projects only candidate
-`callSlots` carrying `ComparedCallSource`, keyed by their stored `SourceCallRole`; defaulted slots
+facts whose pairwise proof is defined below. `CandidateConversionRank.maximum` is the one normative
+aggregate conversion rank. Its `bySource` map is retained to validate that maximum and explain which
+source adaptations produced it; it is not a second comparison order. Conversion comparison projects
+only candidate `callSlots` carrying `ComparedCallSource`, keyed by their stored `SourceCallRole`; defaulted slots
 are excluded and are compared by the later default-parameter relation. Thus candidates with
 different parameter identities still compare corresponding source inputs. `ArgumentMap` owns
 source-to-parameter binding and each
@@ -1120,7 +1243,8 @@ that candidate plan has `Some(rankingCoercion)`; `None` makes a call-slot plan i
 conversion-free rule remains in `ConversionFreeAccessRank` so validators can prove why no converted
 input exists even though its comparison projection is `zeroRank`.
 `PhysicalParameterIdentityPassingRule` is the only conversion-free rule admitted for a
-physical-domain parameter plan. No candidate stores or accepts an independently supplied
+physical-domain parameter plan; `ExactStorageIdentityPassingRule` is admitted only for an abstract
+`OutMode`/`InOutMode` plan. No candidate stores or accepts an independently supplied
 `SourceAdaptationRank`.
 `rankOf(candidate)` constructs `defaultsUsed` only as
 `defaultedParameters(candidate.argumentMap)` and constructs the other fields from the specialized
@@ -1129,24 +1253,27 @@ this projection; comparison proofs retain it only so a validator can compare it 
 
 For each lookup candidate:
 
-1. obtain its checked `CallableSignature`, bound use/receiver path, and pre-inference selection
-   contract;
+1. obtain its checked declaration header, `CandidateDeclUseAt<S>`/receiver path, and pre-inference
+   selection contract;
 2. map checked explicit generic arguments into partial specialization frames;
 3. map receiver and source arguments to identities;
 4. generate inference constraints from receiver, arguments, and expected result;
 5. solve generic variables and required evidence;
-6. freeze complete `SpecializationFrame` values and substitute them into the function type;
-7. intern one `ConversionEnvironment` and one `AccessEnvironment` for this candidate, then intern a
+6. require a complete solution and invoke chapter 5's
+   `FreezeDeclUse(candidateUse, genericSolution)`, producing the one `BoundDeclUseAt<S>` that every
+   applicable/selected call retains;
+7. project the checked `CallableSignature` through that bound use's complete specialization spine;
+8. intern one `ConversionEnvironment` and one `AccessEnvironment` for this candidate, then intern a
    closed `ArgumentPlanningContext` per receiver/argument slot from those IDs, the exact signature,
    call input, argument map, expression context, and authenticated slot site. Pass that context first
    to `PlanArgumentAdaptation` and then to `PlanArgumentAccess`; only their nested successful
    alternatives construct an `ApplicableCallSlotPlan`. Every slot stores the shared access-environment
    ID and its complete `StorageAccessPlan` determines its `SourceAdaptationRank`;
-8. validate `selectionEffects` and visibility; construct the direct call's exact keyed use for
+9. validate `selectionEffects` and visibility; construct the direct call's exact keyed use for
    `inferredCapabilities`, resolve every source in the optional callable `concreteAvailability` set,
    and merge it with the ordinary-use sidecar and concrete applicability selection of every
    `ExtensionFacetUseAt<S>` on the bound use, under the request's exact boolean world assumption; and
-9. construct an immutable `OverloadCandidateResult`.
+10. construct an immutable `OverloadCandidateResult`.
 
 The candidate stores that exact `AccessEnvironmentId`; neither it nor a slot repeats an ambient
 invocation lifetime. The candidate-evaluation and `ResolveCall` query keys contain the complete
@@ -1257,31 +1384,42 @@ cannot be made applicable with an authority supplied by the call site, and equal
 result types do not permit reusing another declaration's authority.
 
 `OVL-CAN-005`: `FailedConversion` and `ArgumentConversionFailure` are reachable only while
-constructing `AbstractConversion` for an `AbstractOperand` mode. Failure to select/prove a physical
+constructing `AbstractConversion` for `InMode`. Failure to prove exact storage identity for
+`OutMode`/`InOutMode`, or to select/prove a physical
 endpoint or physical identity is `FailedParamPassingMode` with the structured `ParamPassingModeFailureReason`;
 ordinary coercion search is never run merely to populate a physical-mode rejection trace.
+
+`OVL-CAN-006`: No `ApplicableOverloadCandidate`, `Selected` result, or typed call contains a
+`DeclRefCandidate`. Candidate evaluation calls `FreezeDeclUse(candidateUse, genericSolution)` after
+inference and before signature substitution or argument planning. It accepts only
+`CompleteGenericSolution` and stores the returned `BoundDeclUseAt<S>` unchanged. A
+`ResidualGenericSolution` constructs a `PartiallyAppliedGenericValue` in a generic-value context and
+is a `FailedInference` call candidate; it cannot become an incomplete `DeclRef` or be repaired while
+committing the winner.
 
 ## Semantic comparison of applicable candidates
 
 Candidate `noWorse` is a preorder; semantically equivalent candidates form its equivalence classes.
 The induced order on those classes is partial, and `strictlyBetter` is its strict relation. First
-compare receiver/argument adaptations pointwise through `comparisonRank`:
+compare the maximum receiver/source-argument adaptation cost:
 
 ```text
-A noWorse B  iff every corresponding
-                 comparisonRank(sourceAdaptationRank(callSlot.access)) in A
-                 is ≤ the corresponding value in B
-A convBetter B iff A noWorse B and at least one rank is strictly smaller
+A convRank B = compare(candidateConversionRank(A).maximum,
+                       candidateConversionRank(B).maximum)
+A convBetter B iff A convRank B = Less
 ```
 
-Defaults and absent receiver slots are represented explicitly so vectors correspond by source
-argument/receiver role, not parameter array position.
+Defaults and absent receiver slots are represented explicitly so diagnostic/proof vectors correspond
+by source argument/receiver role, not parameter array position. They do not alter which supplied
+source adaptations enter the maximum.
 
-`OVL-RANK-001`: `convBetter` uses pointwise adaptation dominance. Total conversion-cost sums are not normative;
-one dramatically bad conversion cannot be hidden by several identity conversions.
+`OVL-RANK-001`: The conversion rank of a candidate is exactly the maximum `comparisonRank` over its
+receiver and supplied source-argument adaptations, with `zeroRank` for an empty set. Costs are never
+summed. The per-source vector is proof and diagnostic data only; pointwise dominance is not a
+semantic candidate-ranking relation.
 
-If neither candidate adaptation-dominates the other, they remain incomparable. If adaptations tie,
-apply these proposed specificity relations in order, only while the preceding relation ties:
+If one maximum is smaller, that candidate wins conversion comparison. If the maxima tie, apply these
+specificity relations in order, only while the preceding relation ties:
 
 1. a candidate whose parameter/receiver types are a strict specialization of the other's after
    substitution;
@@ -1301,9 +1439,9 @@ selection under chapter 10. Filtering those alternatives uses only their concret
 their ordinary/transitive `inferredCapabilities` contribute the selected call's capability use and
 never act as a specificity rank or an implicit availability predicate.
 
-This ranking intentionally replaces the current scalar-cost sum and heuristic tail. Each numbered
-specificity rule must be accepted or revised through the compatibility ledger before implementation
-is frozen.
+This accepted ranking intentionally replaces the current scalar-cost sum and heuristic tail. The
+maximum conversion rank followed by the numbered specificity relations is the semantic order;
+diagnostic ranking remains separate.
 
 Every comparison is retained as a proof object:
 
@@ -1311,10 +1449,11 @@ Every comparison is retained as a proof object:
 CandidateComparisonOutcome = LeftBetter | RightBetter |
                              SemanticallyEquivalent | Incomparable
 
-PointwiseConversionComparison = {
-    bySource: NodeMap<SourceCallRole, Less | Equal | Greater>,
-    leftNoWorse: Bool,
-    rightNoWorse: Bool
+CandidateConversionComparison = {
+    leftMaximum: ConversionCost,
+    rightMaximum: ConversionCost,
+    result: Less | Equal | Greater,
+    bySource: NodeMap<SourceCallRole, Less | Equal | Greater>
 }
 
 GenericConstraintImplicationProof = {
@@ -1351,7 +1490,7 @@ CandidateComparisonProof = {
     right: DeclRef,
     leftRank: CandidateRank,
     rightRank: CandidateRank,
-    conversions: PointwiseConversionComparison,
+    conversions: CandidateConversionComparison,
     specificity: NodeList<SpecificityComparisonProof>,
     outcome: CandidateComparisonOutcome
 }
@@ -1430,41 +1569,61 @@ It never reruns generic inference or coercion under a different algorithm.
 
 ## Partial generic application
 
-A generic value may be partially applied only when the grammar/context expects a generic value and
-the remaining parameters/constraints can be represented as a new binder:
+A generic function or generic type may be partially applied whenever the grammar/context admits a
+generic value and the remaining parameters/constraints can be represented as a new binder. A
+partially applied generic type remains a generic value until its residual binder is discharged; it
+does not masquerade as a complete `TypeId`:
 
 ```text
 PartiallyAppliedGenericValueId = ContentId<PartiallyAppliedGenericValue>
 
 PartiallyAppliedGenericValue = {
-    declaration: DeclRef,
-    partialFrame: CanonicalPartialSpecializationFrame,
-    callable: Option<CallableValue>
+    target: UnappliedDeclRef,
+    residual: CanonicalPartialSpecializationFrame,
+    classification: PartiallyAppliedGenericValueClassification
 }
 
-CanonicalPartialSpecializationFrame = {
-    role: LexicalBinder | TypeBinder | CallableBinder | MemberOwnerBinder,
-    owner: DeclId,
-    sourceBinder: CanonicalGenericBinder,
-    boundArguments: NodeMap<UInt32, GenericArg>,
-    provenEvidence: NodeMap<CanonicalConstraintSlot, ConstraintEvidence>,
-    optionalEvidence: NodeMap<CanonicalConstraintSlot, OptionalEvidence>,
-    residualBinder: CanonicalGenericBinder,
-    residualParameterForSourceOrdinal: NodeMap<UInt32, UInt32>,
-    residualEffects: EffectRequirement,
-    residualCapabilities: CapabilityRequirement
-}
+PartiallyAppliedGenericValueClassification =
+    PartiallyAppliedCallableGenericValue(signature: CallableSignatureId,
+                                         resultAuthority: CallableResultAuthorityId,
+                                         residualEffects: EffectRequirement,
+                                         residualCapabilities: CapabilityRequirement)
+  | PartiallyAppliedTypeConstructorGenericValue(resultKind: Kind)
 ```
+
+`GEN-PART-000`: Partial application is supported uniformly for generic callable and non-callable
+type declarations. Further generic application consumes the prior `residual`, adds arguments and
+evidence by residual parameter identity, and either produces another partial value or freezes a
+complete specialization frame. The implementation cannot restrict this operation to functions or
+require all generic type arguments at the first application site.
 
 `GEN-PART-001`: Ordinary call resolution requires a complete solution. A residual generic cannot
 reach elaborated call or IR accidentally; it must be an explicit `PartiallyAppliedGenericValue`.
 
-`GEN-PART-002`: The outer `DeclRef` owns only complete specialization frames.
-`partialFrame` is the single authority for supplied arguments/evidence and the alpha-normalized
-residual binder; its source/residual ordinal map is total exactly on unbound source parameters.
-For a callable partial value, `callable` is present and its contract is
-`ResidualContract(partialFrame.residualEffects, partialFrame.residualCapabilities)`; for a
-non-callable generic it is absent.
+`GEN-PART-002`: `target` is an `UnappliedDeclRef`, never a complete `DeclRef` with a missing direct
+frame. Its `completed` prefix contains only fully applied owner frames, and its sole pending direct
+binder equals `residual.binder.sourceBinder`; that pending frame's `suppliedArguments` map is empty.
+Creating a partial value transfers every supplied or deduced direct-binder argument out of the
+lookup candidate and into `residual.boundArguments`. `residual.binder` is a `CanonicalBinderRef`, so the
+binder's only nominal identity is `GenericBinderOf(target.declaration)`; lexical/type/callable/member
+role tags and a second owner field are forbidden. `residual` is the single authority for supplied
+arguments/evidence and the alpha-normalized residual binder; all parameter/constraint maps and the
+derived residual signature satisfy `TYP-BND-002c`.
+
+`GEN-PART-002a`: A `PartiallyAppliedGenericValue` is constructed only from
+`ResidualGenericSolution(completed, residual, ...)`. Its target's `completed` prefix is byte-identical
+to that solution prefix and its stored `residual` is byte-identical to the solution residual; the
+empty pending source map preserves only declaration/binder identity. Applying more generic
+arguments solves the residual binder, maps its result back through the source-ordinal/source-slot
+maps, and derives either a new partial frame or one total direct `SpecializationFrame`. It never
+merges two independently serialized residual binders.
+
+`GEN-PART-003`: `classification` is total and exclusive. A generic function uses
+`PartiallyAppliedCallableGenericValue`, which stores its residual effect/capability contract; it does
+not embed a `CallableValue`, whose direct dispatch would require a complete `ResolvedDeclRef`. A
+generic type uses `PartiallyAppliedTypeConstructorGenericValue` and remains a type constructor of the
+stated result kind, not a `TypeId`. No `Option<CallableValue>` or declaration-kind rediscovery
+distinguishes the cases.
 No residual constraint, evidence, or capability scheme is reconstructed from the declaration at
 elaboration time.
 
@@ -1479,7 +1638,9 @@ The current implementation provides valuable behavior but not the normative deco
 
 The replacement deliberately changes positional witness arguments, mutable trial/commit checking,
 conversion recursion sentinels, summed scalar costs, and diagnostic-time re-inference. Differential
-tests will expose observable ranking changes for review rather than concealing them.
+tests expose the accepted observable ranking changes rather than concealing them. Conversion paths
+and call candidates use maxima over the existing cost-category order; no conversion-cost number is
+an ABI commitment.
 
 One current helper, `canConvertImplicitly(Type*, QualType)` in
 `source/slang/slang-check-conversion.cpp`, appears to invert a scalar predicate; its behavior must be

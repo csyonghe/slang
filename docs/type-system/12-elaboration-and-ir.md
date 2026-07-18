@@ -71,17 +71,13 @@ CallableDispatch<S: WitnessTableState> =
 
 CallableContractStateAt<Construction> =
     Selection(contract: PreInferenceCallableContract)
-  | ResidualContract(effects: EffectRequirement,
-                     capabilities: CapabilityRequirement)
   | Effective(contract: EffectiveCallableContract)
   | SelectedVariant(set: CallableVariantSetId,
                     proof: CapabilityVariantSelectionProof,
                     contract: EffectiveCallableContract)
 
 CallableContractStateAt<Published> =
-    ResidualContract(effects: EffectRequirement,
-                     capabilities: CapabilityRequirement)
-  | Effective(contract: EffectiveCallableContract)
+    Effective(contract: EffectiveCallableContract)
   | SelectedVariant(set: CallableVariantSetId,
                     proof: CapabilityVariantSelectionProof,
                     contract: EffectiveCallableContract)
@@ -628,7 +624,8 @@ imply that every access plan contains a call.
 `PassArgument(PhysicalStorageArgument(p, binding))` terminal. `binding.mode` is the slot's complete
 substituted `ParamPassingMode`, whose domain is `PhysicalOperand(_)`; its access is `ReadAccess` for
 `ConstRefMode` and `ReadWriteAccess` for `RefMode`. The plan has no temporary extent, conversion,
-write-back, borrow step, or cleanup step. The physical storage `p` is produced in exactly one of two
+write-back, access-retention step, or cleanup step. The physical storage `p` is produced in exactly
+one of two
 ways. For `DirectPhysicalParameterSource`, `ProjectPhysicalStorage` discharges the stored physical
 obligation for the source's existing `PhysicalStorage`. For
 `AccessorProducedPhysicalParameterSource`, `ProjectAbstractStorage` is followed by exactly one
@@ -652,7 +649,7 @@ argument or escape the plan.
 `ELB-ACC-012`: `aliasClass` is derived from the executable endpoint. A physical-domain plan stores
 `SharedAlias(physicalParameterStorage(binding).alias)` for both access modes; the orthogonal
 call-alias claim records `SharedPhysicalRead(ReadAccess)` for `ConstRefMode` and
-`AliasablePhysicalAccess(ReadWriteAccess, rule)` for `RefMode`. `UniqueAlias(FreshTemporaryAlias(t,
+`ExclusivePhysicalAccess(ReadWriteAccess)` for `RefMode`. `UniqueAlias(FreshTemporaryAlias(t,
 i))` is valid only when the same abstract-domain plan
 defines temporary `t` with identity `i`, its descriptor has
 `alias = ExactAliasRoot(temporaryStorageAliasRoot(i))`, and no operation publishes an alias to it.
@@ -686,12 +683,14 @@ For every descriptor `d`, `d.site = d.initialization.site`,
 `d.identity = d.initialization.identity = temporaryStorageIdentity(d.site.site)`, and
 `d.alias = ExactAliasRoot(temporaryStorageAliasRoot(d.identity))`. Thus neither plan ordinals nor
 initialization-storage content IDs become ownership/alias identities.
-`StorageAccessLifetime.temporary` has exactly the domain of the plan's initialized temporary; an immediate
-or physical-domain plan has none. Abstract `OutMode`/`InOutMode` write-back reads an initialized
-temporary/value, targets a defined physical or abstract storage, and precedes destruction of its
-source. Completion order cannot use a destroyed temporary or a value/storage outside its declared
-access lifetime. The validator symbolically checks the terminal-relative normal and exceptional
-paths from `ELB-ACC-010`.
+`StorageAccessLifetime.temporary` has exactly the domain of the plan's initialized transport buffer;
+an immediate or physical-domain plan has none. An abstract `OutMode`/`InOutMode` transport has the
+exact parameter/storage value type and exists only to execute the selected abstract-storage
+accessor contract; it is not a conversion temporary. Write-back reads its initialized value,
+targets the selected physical or abstract storage, precedes destruction, and occurs only on normal
+completion. Exceptional paths destroy any live buffer without writing the destination. Completion
+order cannot use destroyed storage or a value outside its declared access lifetime. The validator
+symbolically checks the terminal-relative normal and exceptional paths from `ELB-ACC-010`.
 
 `ELB-ACC-003`: `Some(AppliedStorageCoercion(...))` selects one existing `ApplyCoercion`, a conversion at the
 `InitializationPath` stored by an `InitializeTemporary` application, or a terminal
@@ -923,10 +922,17 @@ projects away only its resolution sidecar. It otherwise preserves the exact disp
 shown above. A
 `Selection(pre)` state must find one completion under `(subject, contractContext)` whose signature
 and stabilized effect/capability facts validate against `pre`; publication replaces it with the corresponding
-`Effective` or `SelectedVariant` value. Existing completed states are revalidated. A residual state
-may publish only on a partially applied generic callable value and is rejected in an
-`ElaboratedCallAt<Published>`. Thus contract completion is part of the atomic stage transform, not
-an ambient mutation after publication.
+`Effective` or `SelectedVariant` value. Existing completed states are revalidated. A partially
+applied generic callable stores its residual contract in `PartiallyAppliedCallableGenericValue` and
+is not a `CallableValue` or `ElaboratedCallAt<S>`. Thus contract completion is part of the atomic stage
+transform, not an ambient mutation after publication.
+
+`ELB-GEN-001`: A `PartiallyAppliedGenericValue` for either a function or a type is a valid published
+elaborated compile-time value. Elaboration preserves its `UnappliedDeclRef`, canonical residual
+specialization, residual binder, and explicit callable/type-constructor classification; another
+generic application may consume it without reconstructing source binders or declaration kind. It
+produces no runtime IR merely by existing. Only a completed callable may become an `ElaboratedCall`,
+and only a completed generic type specialization may become a runtime `TypeId` use requiring layout.
 
 The optional concrete world is present exactly when target-specific variant selection is required;
 `SelectedVariant` requires it and its proof's world must equal it. The Boolean assumption records
@@ -939,16 +945,18 @@ elaborated value/storage or to a projection of one explicitly evaluated capture 
 `BoundStorageAccessPlan`; it does not rerun applicability or change the recipe. This allows the same plan
 algebra to be unit-tested without either a full typed expression tree or generated adapter body.
 
-Default arguments and named/positional reordering are already reflected by `parameter`. Every
-temporary, post-conversion, and write-back for an abstract-domain mode is explicit. `InMode`
-prepares an ordinary value; `OutMode` and `InOutMode` may use their named temporary/write-back
-policies and an abstract destination may invoke its getter/setter contract as those policies
-require. `ConstRefMode` and `RefMode` instead pass only the exact physical endpoint retained by
+Default arguments and named/positional reordering are already reflected by `parameter`. `InMode`
+prepares an ordinary abstract immutable value and may use an implicit conversion. `OutMode` and
+`InOutMode` require exact-type mutable storage; an abstract destination may use an explicit
+same-type transport buffer and its getter/setter contract, but no conversion or rvalue
+materialization. Their write-back is present only on normal return. `ConstRefMode` and `RefMode`
+instead pass only the exact physical endpoint retained by
 `PhysicalParameterBindingProofAt<S>`: either an existing `PhysicalStorage` or the result of the exact
 access-indexed reference-accessor call and stored dereference. Neither physical mode admits an
-rvalue, ordinary getter/setter path, conversion, temporary, or write-back. The checker validates
-all simultaneous `aliasClass` values and mode-specific claims before the call. A different
-throw/write-back policy must be a named language rule, never an incidental lowering choice.
+rvalue, ordinary getter/setter path, conversion, temporary, or write-back. The checker diagnoses a
+provable incompatible alias and otherwise preserves the exclusive `RefMode`/`OutMode`/`InOutMode`
+contract; a runtime overlap not proved statically is undefined behavior. No alternative
+throw/write-back policy is permitted.
 
 Dispatch is a property of `CallableValue`: a direct symbol, witness method
 `(SubtypeWitnessRef<S>, RuntimeInterfaceRequirementKey)`, dynamic slot, lambda invocation, or builtin.
@@ -981,8 +989,7 @@ effect use and every effect use in a call-slot plan enter effect inference exact
 retained extension uses, and every conversion/access-plan use and enters capability inference
 exactly once. Its concrete sources and region proof do not enter that graph; they remain selection
 evidence. An `ElaboratedCallAt<Published>` permits only
-`Effective` or `SelectedVariant` contract state; `Selection` is a pre-inference typed fact and
-`ResidualContract` belongs only to a partially applied generic callable value. Generated calls may
+`Effective` or `SelectedVariant` contract state; `Selection` is a pre-inference typed fact. Generated calls may
 temporarily carry `Selection` in `ElaboratedCallAt<Construction>` while their group's use graphs
 participate in those fixpoints; `publishElaboratedDecl` consumes the stabilized
 `ContractCompletionMap`. Thus a published elaboration cannot enter the inference SCC, and the
@@ -1174,7 +1181,8 @@ does not rediscover it:
 
 ```text
 DiscoverFreeVariables(lambda, boundBody) -> FreeVariableSet
-AnalyzeTypedCaptures(lambda, lambda.info.freeVariables, lambda.info.captureUseFacts) -> CaptureSet
+AnalyzeTypedCaptures(lambda, lambda.info.freeVariables, lambda.info.captureUseFacts)
+    -> CheckResult<CaptureSet>
 BuildLambdaSynthesis(lambda, captureSet, signature)
     -> LambdaSynthesisResultAt<Construction>
 RewriteLambdaBody(lambda, synthesis)
@@ -1189,12 +1197,15 @@ CapturePlan = {
           | ReceiverCapture
           | ForwardedCapture(ForwardedCaptureIdentity),
     type: TypeId,
-    mode: ByValue | BorrowedReadCapture | BorrowedReadWriteCapture |
-          RefCapture(access: StorageAccessMode),
-    lifetime: CaptureLifetime,
-    lifetimeProof: Option<CaptureLifetimeProof>,
+    initialization: CopyCapture | MoveCapture,
     firstUse: Origin
 }
+
+CaptureFailure =
+    BorrowedCaptureNotSupported(source: CaptureIdentity,
+                                requiredAccess: StorageAccessMode,
+                                origin: Origin)
+  | CaptureCannotBeOwned(source: CaptureIdentity, type: TypeId, origin: Origin)
 
 CaptureSet = {
     byIdentity: NodeMap<CaptureIdentity, CapturePlan>,
@@ -1216,14 +1227,6 @@ CaptureIdentity = {
     source: DeclRef | ReceiverCapture | ForwardedCaptureIdentity
 }
 
-CaptureLifetime = OwnedByLambda | BorrowedUntil(LifetimeId)
-
-CaptureLifetimeProof = {
-    capturedSource: CaptureIdentity,
-    sourceLifetime: LifetimeId,
-    requiredLifetime: LifetimeId,
-    outlives: OutlivesProof
-}
 ```
 
 `ELB-LAM-001`: `lambda.info.captureUseFacts` is the sole typed-body projection consumed by capture
@@ -1238,10 +1241,11 @@ lambda nesting depth and terminates at a declaration or receiver capture. Captur
 are keyed by the complete identity, so equal source declarations captured through different parent
 chains cannot alias accidentally.
 
-`ELB-LAM-003`: For every `CaptureLifetimeProof`, `outlives.longer = sourceLifetime` and
-`outlives.shorter = requiredLifetime`. A borrowed capture's `BorrowedUntil` lifetime equals
-`requiredLifetime`; an owned capture does not carry a borrowed-lifetime proof. Forwarding may reuse
-an enclosing proof only when both endpoint IDs remain exactly equal.
+`ELB-LAM-003`: Every capture is owned by the synthesized lambda environment and has exactly one
+checked copy or move initialization. A typed use that would require a borrowed read, borrowed write,
+or reference capture produces `BorrowedCaptureNotSupported`; capture analysis never shortens a
+lifetime or emits a borrowed environment field. Forwarding an owned capture preserves its
+`CaptureIdentity` chain and performs another checked owning initialization when required.
 
 Unqualified `CallableValue`/`CallableDispatch` mean the `<Published>` forms. Generated bodies may
 use `<Construction>` only inside the draft/synthesis scope defined in chapter 9; atomic freeze
@@ -1249,11 +1253,11 @@ rewrites every operational reference before an `ElaboratedCall` or IR node is pu
 
 Binding discovers only which lexical declarations are free. Capture order is the lexical order of
 first source use with stable declaration identity as a tie-breaker. Nested-lambda capture forwarding
-is explicit in `source`. Capture mode and lifetime are inferred from the typed uses and type
-properties; they cannot be decided from a merely bound body. A non-copyable value cannot silently
-become a by-value capture, and a borrowing/ref capture must carry a lifetime proof that covers every
-lambda-environment use. Whether escaping borrowed captures are supported is an explicit language
-decision in chapter 13.
+is explicit in `source`. The owning initialization choice is inferred from the typed uses and type
+properties; it cannot be decided from a merely bound body. The resulting plan must own the value:
+a copyable source uses `CopyCapture`, an explicitly consumable source may use `MoveCapture`, and a
+source that can only be borrowed is rejected. Borrowed lambda captures are not supported, whether
+or not escape analysis could prove a particular lambda non-escaping.
 
 `CaptureSet.order` is a duplicate-free bijection onto `byIdentity` keys in that semantic order;
 `CaptureLayout.order` is byte-identical and is a duplicate-free bijection onto `fields` keys. The
@@ -1304,11 +1308,10 @@ rewritten body.
 path before lambda-environment synthesis. A mutable “first return fills the type” protocol is
 forbidden.
 
-`SYN-LAM-004`: Capture identity excludes discovery/task order. A non-owned capture's lifetime proof
-must name the same capture, source lifetime, and every lambda-environment-use requirement;
-validators reject a missing/mismatched proof before assigning `CaptureLayout`.
-`RefCapture(access)` preserves the exact read/write/atomic access mode established by typed use
-analysis.
+`SYN-LAM-004`: Capture identity excludes discovery/task order. Each layout field's initializer is
+the exact checked `CopyCapture` or `MoveCapture` operation from the corresponding `CapturePlan`.
+Validators reject borrowed/reference capture requests and missing, mismatched, or duplicated owning
+initializers before assigning `CaptureLayout`.
 
 `SYN-LAM-005`: `environmentType` resolves to a `DeclRefType` whose `DeclRef` names
 `lambdaDecl` under the synthesis group's canonical specialization, and that declaration resolves
@@ -1364,22 +1367,22 @@ constructor; they do not share a large branch that mutates arbitrary AST fields.
 
 The `IRReady` node family has these explicit forms:
 
-| Typed/elaborated form            | IRReady form                                                    |
-| -------------------------------- | --------------------------------------------------------------- |
-| operator syntax                  | direct call or declared primitive operation                     |
-| property/subscript read          | explicit getter call                                            |
-| property/subscript write         | getter/setter access plan with explicit write-back              |
-| initialization syntax            | the distinct operation selected by `InitializationPlan`         |
-| implicit conversion              | `Convert(plan, value)`                                          |
-| existential conversion           | `PackExistential(value, type, witness)`                         |
-| existential member use           | `OpenExistential` region plus witness lookup                    |
-| `fwd_diff` / `bwd_diff`          | selected provider plus `DerivativeSignatureMapId`               |
-| `no_diff`                        | explicit `DetachExpr` boundary                                  |
-| `defer`                          | explicit cleanup regions on every exiting edge                  |
-| lambda                           | lambda-environment declaration plus construction                |
-| default argument                 | expression cloned through provenance-preserving substitution    |
-| target/stage switch              | conditional IRReady regions with capability presence formulas   |
-| compile-time loop/pack expansion | explicit expansion nodes or materialized sequence after solving |
+| Typed/elaborated form            | IRReady form                                                        |
+| -------------------------------- | ------------------------------------------------------------------- |
+| operator syntax                  | direct call or declared primitive operation                         |
+| property/subscript read          | getter call, or exact `constref` accessor plus dereference fallback |
+| property/subscript write         | setter call, or exact `ref` accessor plus dereference fallback      |
+| initialization syntax            | the distinct operation selected by `InitializationPlan`             |
+| implicit conversion              | `Convert(plan, value)`                                              |
+| existential conversion           | `PackExistential(value, type, witness)`                             |
+| existential member use           | `OpenExistential` region plus witness lookup                        |
+| `fwd_diff` / `bwd_diff`          | selected provider plus `DerivativeSignatureMapId`                   |
+| `no_diff`                        | explicit `DetachExpr` boundary                                      |
+| `defer`                          | explicit cleanup regions on every exiting edge                      |
+| lambda                           | lambda-environment declaration plus construction                    |
+| default argument                 | expression cloned through provenance-preserving substitution        |
+| target/stage switch              | conditional IRReady regions with capability presence formulas       |
+| compile-time loop/pack expansion | explicit expansion nodes or materialized sequence after solving     |
 
 Desugaring order is defined by dependencies between lowering queries, not by a mutable visitor's
 incidental traversal. A lowering query consumes only the node forms listed in its input schema and
@@ -1599,6 +1602,13 @@ IRReadyGenericInputs = {
     constraintEvidence: NodeMap<CanonicalConstraintSlot, IRReadyValueId>
 }
 
+conformanceInputsByWitness(inputs, binder) =
+    checkedUniqueMap {
+        ContentId(CanonicalSubtypeWitness(targetOf(slot))) -> inputs.constraintEvidence[slot]
+        | slot in binder.constraints,
+          slot.kind = ConformsKind
+    }
+
 IRReadyWitnessOperation =
     WitnessTableReference(definition: ValidatedWitnessTableRef)
   | SpecializeWitness(generic: IRReadyValueId,
@@ -1708,8 +1718,8 @@ IR lowering; only genuine physical storage carries mutability and a physical add
 Abstract properties and declared subscripts have already become accessor call regions. High-level
 structured control remains where useful, but its exit and cleanup behavior is explicit.
 
-`ELB-IRDY-001`: IRReady validation rejects unresolved names, overload sets, partial generic
-applications, implicit receivers, unplanned conversions, raw lambdas, and incomplete
+`ELB-IRDY-001`: Executable IRReady validation rejects unresolved names, overload sets, unconsumed
+partial generic values, implicit receivers, unplanned conversions, raw lambdas, and incomplete
 `RequirementDictionary` values.
 
 `ELB-IRDY-002`: `LowerNodeToIRReady` first lowers every access plan's preparation in order, then dispatches
@@ -1723,13 +1733,16 @@ result's explicit `evaluation` to exactly one IRReady producer in its stored ord
 `CapturedSourceProjection` reads that producer. Thus no source capture, preparation, terminal, or
 completion behavior remains hidden inside a call opcode or inferred from the consuming syntax.
 
-Lowering an abstract `OutMode`/`InOutMode` temporary creates one `IRReadyTemporaryStorage` whose
-descriptor is byte-identical to the access-plan descriptor and whose chapter 16 initialization is
-the descriptor's exact plan application. This IRReady node projects that application's unique
+Lowering an abstract `OutMode`/`InOutMode` transport buffer creates one
+`IRReadyTemporaryStorage` whose value type is exactly both the parameter and abstract-storage value
+type, whose descriptor is byte-identical to the access-plan descriptor, and whose chapter 16
+initialization is the descriptor's exact plan application. This IRReady node projects that application's unique
 `CreatePlanStorage` transition rather than allocating a second object. The nested IRReady
 initialization owns pre-checkpoint exceptional cleanup; only its normal checkpoint produces the
-temporary value. Every later write-back and `IRReadyDestroyTemporary` carries the checked conversion
-or destruction execution from the plan, and no operation chooses either from the IRReady value type.
+transport value. A later write-back exists only on the enclosing call's normal-return edge and
+carries the selected setter/store execution; exceptional edges perform destruction without
+write-back. No pre- or post-conversion exists, and no operation chooses cleanup from the IRReady
+value type.
 Its `IRReadyTemporaryStorageShape.identity` is the descriptor's nominal
 `TemporaryStorageIdentity`, and its alias is the matching `temporaryStorageAliasRoot`; IRReady removes
 the site from the runtime value shape after checking that equation, while the selected
@@ -1755,7 +1768,7 @@ plan.
 `ConstRefMode` receiver/parameter uses its nominal `ConstRefFormalRoot`, has `ReadAccess`,
 `UnknownMutability`, `CallableActivationLifetime(signature)`, and cannot be stored through. A
 `RefMode` role uses its nominal `RefFormalRoot`, has `ReadWriteAccess`, `Mutable`, and may be read or
-written subject to its checked contract. Both use the entry proof's formal address space, source
+written under its exclusive invocation contract. Both use the entry proof's formal address space, source
 facts, and `UnknownAliasRoot`. Physical projections preserve those facts and may not amplify
 access. There is no borrowed formal category or hidden conversion between the two roots.
 
@@ -1827,8 +1840,8 @@ requirement and proof all revalidate under `CAP-SEL-003`. IRReady construction c
 from `effective`, a flat capability set, or the dispatch target.
 
 `ELB-IRDY-005`: A direct target resolves to the stored signature; a witness target consumes a
-`SubtypeWitnessValueShape(ConcreteSubtypeWitness(target))` whose target interface owns the exact
-runtime-entry key and resolves that
+`SubtypeWitnessValueShape` whose non-error form is `ConcreteSubtypeWitness(target)` or
+`AbstractSubtypeWitness(target)` and whose target interface owns the exact runtime-entry key and resolves that
 entry to the signature; a dynamic slot and lambda invocation resolve through their registered
 owner/invoke declaration; and a primitive rule resolves in the versioned standard environment.
 These are validation operations, not overload or conformance search. A target that resolves to a
@@ -1999,7 +2012,7 @@ FunctionAbiInputRole =
   | ReceiverAbiInput
   | ParameterAbiInput(parameter: ParameterKey)
   | GenericAbiInput(variable: CanonicalBoundVariable)
-  | WitnessAbiInput(slot: CanonicalConstraintSlot)
+  | WitnessAbiInput(witness: SubtypeWitnessId)
 
 AbiPointerLikeAddressSpaceSelection = {
     formal: AddressSpace,
@@ -2814,10 +2827,11 @@ inputs after this shape projection: runtime input becomes `RuntimeValueShape(typ
 `PhysicalStorageAbiInput(contract)` becomes
 `PhysicalStorageValueShape(contract.formalShape)`, generic input becomes
 `GenericMetadataShape(role.variable, shape.sort)`, an initialization target becomes
-`InitializationTargetShape(shape.target)`, and an subtype-witness input becomes
-`SubtypeWitnessValueShape(ConcreteSubtypeWitness(shape.target))`, and other constraint evidence becomes
-`OtherConstraintEvidenceShape(shape.kind)`. The `WitnessAbiInput(slot)` role retains the canonical
-constraint slot independently of the endpoint-shaped value. A global initializer has no entry
+`InitializationTargetShape(shape.target)`, a subtype-witness input becomes
+`SubtypeWitnessValueShape(AbstractSubtypeWitness(shape.target))`, and other constraint evidence becomes
+`OtherConstraintEvidenceShape(shape.kind)`. The `WitnessAbiInput(witness)` role equals
+`ContentId(CanonicalSubtypeWitness(shape.target))`; the source constraint slot remains binder
+provenance and cannot create a second ABI role for the same endpoint pair. A global initializer has no entry
 parameters and every normal
 return supplies one runtime value of the declared global type. A conformance body is validated by
 `IR-CON-001`. These endpoint checks prevent a structurally valid body from being attached to the
@@ -3245,6 +3259,17 @@ signature has a receiver, one initialization-target role exactly when its purpos
 yields that declaration/registered anchor and the same signature. A map builder never takes an
 authority override and never infers one from `results`.
 
+`IR-ABI-001a`: For each active `Conforms` constraint slot, ABI construction computes
+`w = ContentId(CanonicalSubtypeWitness(targetOf(slot)))`, inserts exactly one
+`WitnessAbiInput(w)` with `SubtypeWitnessAbiInput(targetOf(slot))`, and records the source slot only
+in diagnostic/binder provenance. Duplicate insertion is the same
+`DuplicateDeclaredConformance` error as chapter 15. The function-body generic-evidence environment
+maps `w` directly to that formal IR value, so lowering `DeclaredSubtypeWitness(target)` requires no
+ordinal search. `conformanceInputsByWitness` performs the corresponding checked projection for
+slot-keyed specialization evidence; its value at `w` must have
+`SubtypeWitnessValueShape` with target `targetOf(slot)`. Thus source constraint mapping stays keyed
+for generic application while proof/ABI identity stays pair-keyed.
+
 ```text
 context.activationLifetime =
     ContentId(CallableActivationLifetime(FunctionAbiMap.signature))
@@ -3311,8 +3336,10 @@ exact mode and logical type from the signature. The initialization target repeat
 target slot.
 Residual generic variables and required constraint evidence contribute their keyed roles; a closed
 specialization contributes neither. A `Conforms` slot has
-`SubtypeWitnessAbiInput(targetOf(slot))`; other evidence uses
-`OtherConstraintEvidenceAbiInput(slot.kind)`. Input ordinals are a bijection onto
+`SubtypeWitnessAbiInput(targetOf(slot))` under
+`WitnessAbiInput(ContentId(CanonicalSubtypeWitness(targetOf(slot))))`; inserting a second
+`Conforms` slot with the same witness role is an invalid duplicate rather than another input. Other
+evidence uses `OtherConstraintEvidenceAbiInput(slot.kind)`. Input ordinals are a bijection onto
 `0 .. inputs.count-1` in initialization-target, receiver, parameter-slot, residual-generic, then
 canonical-constraint order.
 
@@ -3385,9 +3412,9 @@ alias for call-alias checking. Neither an abstract storage, ordinary runtime val
 nor temporary can satisfy a physical input, regardless of equal `TypeId` or layout.
 `aliasCompatibility` is then revalidated against the admitted operands' preserved alias
 provenances, mode-specific access claims, and bound caller invocation extent. Only two overlapping
-`SharedPhysicalRead` claims are unconditionally compatible; every overlap involving
-`AliasablePhysicalAccess` replays its stored versioned rule set. Abstract exclusive claims retain
-their ordinary conflict rules.
+`SharedPhysicalRead` claims are unconditionally compatible. A proved common alias region involving
+an abstract or physical exclusive claim is rejected; unknown provenance records the accepted
+exclusive source contract and is undefined behavior if it overlaps at runtime.
 
 `IR-ABI-004`: `AbiCallInstantiation.results` has exactly the roles of the reusable ABI result map,
 and every entry repeats its formal contract. A runtime contract instantiates to the identical
@@ -3424,8 +3451,9 @@ assert:
   policies, including substitution, inclusion admission, and rejection of body-entry invention;
 - rejection of getter-only properties, wrong-access reference accessors, nonidentity conversions,
   rvalues, and temporary-backed physical arguments;
-- preservation and replay of overlapping constref-read proofs and versioned ref/constref alias
-  decisions from overload selection through IRReady and call-local ABI admission;
+- preservation and replay of overlapping constref-read proofs, statically proved exclusive-access
+  conflicts, and unknown-overlap exclusivity contracts from overload selection through IRReady and
+  call-local ABI admission;
 - abstract `OutMode`/`InOutMode` temporary initialization, write-back, and destruction cleanup on
   every selected exit, nominal site-derived temporary identity/alias preservation, and rejection of
   that storage as a physical-mode operand;

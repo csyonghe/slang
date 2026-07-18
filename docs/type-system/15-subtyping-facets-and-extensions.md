@@ -37,17 +37,31 @@ facet.
 
 ## First-class subtype witnesses
 
-A type-to-interface `SubtypeWitness` is an immutable semantic value. It can be stored in generic
-arguments, substituted, serialized, reflected through the node schema, passed as a runtime generic
-argument, and lowered independently of any declaration that happens to use it. This chapter reuses
+A type-to-interface `SubtypeWitness` is an immutable semantic value. It can be stored as keyed
+generic constraint evidence, substituted with a specialization frame, serialized, reflected through
+the node schema, passed as a runtime generic witness argument, and lowered independently of any
+declaration that happens to use it. This chapter reuses
 chapter 9's `SubtypeWitnessTarget` for both witness-table forms and operational witness values;
 there is no separate conformance-endpoint product.
 
+In schema terms, `SubtypeWitnessRecordAt<S>` is a checked `Val`-family alternative. A generic
+witness table is therefore a genuine generic witness value with a canonical binder and abstract
+target, and `SpecializedWitnessTable` is the ordinary specialization operation on that value. It is
+not a declaration reference, a mutable side table, or a special case recoverable only during IR
+generation.
+
 ```text
+SubtypeWitnessIdentity =
+    CanonicalSubtypeWitness(target: SubtypeWitnessTarget)
+  | ErrorSubtypeWitnessIdentity(error: ErrorId)
+
+SubtypeWitnessId = ContentId<SubtypeWitnessIdentity>
+
 SubtypeWitnessForm =
     ConcreteSubtypeWitness(target: SubtypeWitnessTarget)
   | GenericSubtypeWitness(binder: CanonicalGenericBinder,
                           targetPattern: SubtypeWitnessTarget)
+  | AbstractSubtypeWitness(target: SubtypeWitnessTarget)
   | ErrorSubtypeWitnessForm(error: ErrorId)
 
 WitnessTableDefinitionRefAt<Construction> =
@@ -65,29 +79,77 @@ SubtypeWitnessOperation =
   | GenericWitnessTable(provider: WitnessTableId)
   | SpecializedWitnessTable(generic: SubtypeWitnessId,
                             specialization: CanonicalSpecializationSpine)
-  | DeclaredSubtypeWitness(binder: CanonicalBinderRef,
-                           slot: CanonicalConstraintSlot)
+  | DeclaredSubtypeWitness(target: SubtypeWitnessTarget)
   | LookupSubtypeWitness(base: SubtypeWitnessId,
                          key: SubtypeWitnessLookupKey)
   | ExtractExistentialSubtypeWitness(opening: OpenedTypeId,
-                            source: AnyASTNodeId<Typed>)
+                             source: AnyASTNodeId<Typed>)
   | ErrorSubtypeWitness(error: ErrorId)
 
-SubtypeWitnessKey = {
+SubtypeWitnessCandidateAt<S: WitnessTableState> = {
+    identity: SubtypeWitnessIdentity,
     form: SubtypeWitnessForm,
-    operation: SubtypeWitnessOperation
-}
-
-SubtypeWitnessId = ContentId<SubtypeWitnessKey>
-
-SubtypeWitnessRecordAt<S: WitnessTableState> = {
-    id: SubtypeWitnessId,
-    key: SubtypeWitnessKey,
+    operation: SubtypeWitnessOperation,
     resolutions: WitnessResolutionSetAt<S>,
     origin: Origin
 }
 
+SubtypeWitnessRecordAt<S: WitnessTableState> = {
+    id: SubtypeWitnessId,
+    identity: SubtypeWitnessIdentity,
+    form: SubtypeWitnessForm,
+    operation: SubtypeWitnessOperation,
+    resolutions: WitnessResolutionSetAt<S>,
+    origins: OriginSet where origins.count >= 1
+}
+
 SubtypeWitness = SubtypeWitnessRecordAt<Published>
+
+SubtypeWitnessRegistryAt<S: WitnessTableState> =
+    CanonicallyOrderedMap<SubtypeWitnessId, SubtypeWitnessRecordAt<S>>
+
+SubtypeWitnessPublicationFailure =
+    ConflictingSelectedWitnessDefinition(
+        id: SubtypeWitnessId,
+        existing: SubtypeWitnessOperation,
+        incoming: SubtypeWitnessOperation,
+        environments: NonEmpty<SemanticEnvironmentId>)
+
+MergeSubtypeWitnessRegistriesAt<S>(
+    inputs: NonEmpty<SubtypeWitnessRegistryAt<S>>)
+        -> Result<SubtypeWitnessRegistryAt<S>, SubtypeWitnessPublicationFailure>
+
+SubtypeWitnessCandidateComparison =
+    SameWitnessCandidate
+  | PreferWitnessLeft(proof: SubtypeWitnessSpecificityProof)
+  | PreferWitnessRight(proof: SubtypeWitnessSpecificityProof)
+  | IncomparableWitnessCandidates(reason: SubtypeWitnessIncomparability)
+
+SubtypeWitnessSpecificityProof =
+    MoreSpecificConformanceProvider(proof: ConformanceProviderSpecificityProof)
+  | MoreSpecificSuperFacetRoute(proof: FacetPriorityProof)
+  | RegisteredWitnessPriority(rule: RuleId, inputs: CanonicalArguments)
+
+SubtypeWitnessIncomparability =
+    EqualTargetDuplicateProviders(left: SubtypeWitnessOperation,
+                                  right: SubtypeWitnessOperation)
+  | IncomparableProviderSpecificity(left: SubtypeWitnessOperation,
+                                    right: SubtypeWitnessOperation)
+  | ConflictingCanonicalPaths(left: SubtypeWitnessOperation,
+                              right: SubtypeWitnessOperation)
+  | ConflictingWitnessPriorityProofs(NonEmpty<SubtypeWitnessSpecificityProof>)
+
+SelectCanonicalSubtypeWitness(
+    environment: SemanticEnvironmentId,
+    target: SubtypeWitnessTarget,
+    candidates: NonEmpty<SubtypeWitnessCandidateAt<S>>)
+        -> QueryStep<CanonicalSubtypeWitnessSelectionAt<S>>
+
+CanonicalSubtypeWitnessSelectionAt<S: WitnessTableState> =
+    SelectedCanonicalWitness(record: SubtypeWitnessRecordAt<S>,
+                             comparisons: NodeList<SubtypeWitnessCandidateComparison>)
+  | AmbiguousCanonicalWitness(maximal: NonEmpty<SubtypeWitnessCandidateAt<S>>,
+                              comparisons: NodeList<SubtypeWitnessCandidateComparison>)
 
 TypePackSubtypeWitnessForm =
     ConcreteWitnessTargets(targets: NodeList<SubtypeWitnessTarget>)
@@ -121,8 +183,9 @@ WitnessFormResult =
 WitnessValidationFailure =
     WitnessTableFormMismatch(provider: WitnessTableId)
   | IncompleteWitnessSpecialization(generic: SubtypeWitnessId)
-  | BoundSlotIsNotConformance(binder: CanonicalBinderRef,
-                              slot: CanonicalConstraintSlot)
+  | DeclaredConformanceNotActive(target: SubtypeWitnessTarget)
+  | DuplicateDeclaredConformance(target: SubtypeWitnessTarget,
+                                 slots: NonEmpty<CanonicalConstraintSlot>)
   | InterfaceRequirementUnavailable(base: SubtypeWitnessId,
                                     key: InterfaceRequirementKey)
   | InvalidExistentialOpening(opening: OpenedTypeId)
@@ -134,8 +197,8 @@ deriveSubtypeWitnessForm(GenericWitnessTable(p)) =
     genericFormOfWitnessTable(p)
 deriveSubtypeWitnessForm(SpecializedWitnessTable(g, s)) =
     specializeGenericForm(formOf(g), s)
-deriveSubtypeWitnessForm(DeclaredSubtypeWitness(b, k)) =
-    formOfConformsConstraint(resolveBinder(b).constraints[k])
+deriveSubtypeWitnessForm(DeclaredSubtypeWitness(t)) =
+    AbstractSubtypeWitness(t)
 deriveSubtypeWitnessForm(LookupSubtypeWitness(w, k)) =
     formOfInterfaceRequirement(formOf(w), k)
 deriveSubtypeWitnessForm(ExtractExistentialSubtypeWitness(o, n)) =
@@ -143,12 +206,26 @@ deriveSubtypeWitnessForm(ExtractExistentialSubtypeWitness(o, n)) =
 deriveSubtypeWitnessForm(ErrorSubtypeWitness(e)) =
     ErrorSubtypeWitnessForm(e)
 
+deriveSubtypeWitnessTarget(WitnessTable(p)) =
+    targetOfConcreteWitnessTable(p)
+deriveSubtypeWitnessTarget(GenericWitnessTable(p)) =
+    targetPatternOfGenericWitnessTable(p)
+deriveSubtypeWitnessTarget(SpecializedWitnessTable(g, s)) =
+    apply(s, targetOf(g))
+deriveSubtypeWitnessTarget(DeclaredSubtypeWitness(t)) = t
+deriveSubtypeWitnessTarget(LookupSubtypeWitness(w, k)) =
+    targetOfInterfaceRequirement(targetOf(w), k)
+deriveSubtypeWitnessTarget(ExtractExistentialSubtypeWitness(o, n)) =
+    targetOfExistentialOpening(o, n)
+
 requiredDefinitions(WitnessTable(p)) = {p}
 requiredDefinitions(GenericWitnessTable(p)) = {p}
 requiredDefinitions(SpecializedWitnessTable(g, s)) =
-    requiredDefinitions(g) union directWitnessDefinitions(s)
-requiredDefinitions(DeclaredSubtypeWitness(_, _)) = {}
-requiredDefinitions(LookupSubtypeWitness(w, _)) = requiredDefinitions(w)
+    requiredDefinitions(resolve(g).operation) union directWitnessDefinitions(s)
+requiredDefinitions(DeclaredSubtypeWitness(_)) = {}
+requiredDefinitions(LookupSubtypeWitness(w, k)) =
+    requiredDefinitions(resolve(w).operation) union
+    directDefinitionsOfLookedUpWitness(w, k)
 requiredDefinitions(ExtractExistentialSubtypeWitness(_, _)) = {}
 requiredDefinitions(ErrorSubtypeWitness(_)) = {}
 ```
@@ -157,26 +234,59 @@ requiredDefinitions(ErrorSubtypeWitness(_)) = {}
 separate proof. Its stable operation names the `WitnessTableId`; the stage-specific resolution set
 names the exact complete definition used to validate or lower it. A generic table is a generic
 semantic value whose witness-table form contains a binder and target pattern. Applying
-`SpecializedWitnessTable` produces the concrete witness for the substituted target. For example,
+`SpecializedWitnessTable` produces a candidate operation for the substituted target. For example,
 the conformance declared by `S<T> : IBase<T>` is represented once as a `GenericWitnessTable`; the
 evidence for `S<float> : IBase<float>` is its specialization, not a fresh nongeneric table or a
-decl-ref with hidden substitution state.
+decl-ref with hidden substitution state. After coherence selection, the table or specialization is
+itself the selected proof value; no assertion wrapper is added around it.
 
-`SUB-WIT-000`: Witness semantic identity is `ContentId<SubtypeWitnessKey>` and excludes
-origins and definition revisions. Construction-to-publication changes an
+`SUB-WIT-000`: Every non-recovery witness has identity
+`ContentId(CanonicalSubtypeWitness(target))`. Thus there is exactly one `SubtypeWitnessId` for a
+`(subtype, superInterface)` pair; provider, semantic environment, inheritance path, operation,
+origin, and definition revision do not create competing IDs. They are candidate-discovery or
+selected-definition facts. A semantic snapshot publishes at most one selected definition for that
+ID. Combining modules or environments that selected incompatible definitions is a coherence error,
+not permission to mint another witness ID. Construction-to-publication changes an
 `OperationalWitnessDefinition` resolution into a `FrozenWitnessDefinition` for the same
-`WitnessTableId`; it cannot change any witness ID. Every provider reachable from the witness key has
+`WitnessTableId`; it cannot change any witness ID. Every provider reachable from the selected operation has
 exactly one resolution of the permitted stage, and no unrelated resolution may be retained.
 
 `SUB-WIT-008`: `deriveSubtypeWitnessForm` is a total constructor-by-constructor validation query.
 The two table constructors require the matching concrete/generic witness-table form;
-specialization is total and kind-correct; a bound slot is exactly `Conforms(sub, interface)`;
+specialization is total and kind-correct; declared generic evidence has exactly one active
+`Conforms(sub, interface)` slot keyed by the pair-only witness ID;
 lookup uses the stored active entry key; and existential opening proves the package contains the
-requested interface. `record.key.form` equals its `Classified` result,
-`record.id = ContentId(record.key)`, and the domain of `record.resolutions` equals
+requested interface. `record.form` equals its `Classified` result,
+`deriveSubtypeWitnessTarget(record.operation)` equals the target in `record.identity`,
+`record.id = ContentId(record.identity)`, and the domain of `record.resolutions` equals
 `requiredDefinitions(record.operation)`. Every resolution map key equals the identity inside its
 definition ref. Missing, extra, stage-invalid, or target-mismatched resolutions fail validation;
 they are not recovered by ambient conformance search.
+`directDefinitionsOfLookedUpWitness(base, key)` is the exact resolution set stored on the
+kind-correct nested witness payload at that entry; it does not rerun conformance search. This makes
+a lookup record retain both the table needed to perform the lookup and any table definitions needed
+when the looked-up witness is later materialized.
+
+`SUB-WIT-010`: `SelectCanonicalSubtypeWitness` compares every pair of target-equal candidates and
+selects one unique strict maximum under explicit specificity proofs. Two byte-equal candidate
+operations discovered through the same provider and path are duplicate discovery of the same
+candidate, not two witnesses. Distinct source providers or operational paths for the same endpoint
+remain distinct even when their output types or lowering results happen to match; one must strictly
+dominate every other candidate through a named provider/path specificity proof. Otherwise the
+maximal candidates are a compile-time ambiguity. Source order, import order, task completion, hash
+order, arbitrary shortest-path choice, and a post-hoc equivalence assertion are never selection
+rules. The selected record's `origins` is exactly the canonical union of origins from candidates
+whose identity, form, operation, and resolution set are byte-identical to the winner; a distinct
+shadowed provider/path is retained in comparisons, not relabeled as winner provenance.
+
+`SUB-WIT-011`: A `SubtypeWitnessRegistryAt<S>` key equals its record's `id`, and every non-error
+record ID is the content identity of only its endpoint target. Merging semantic environments accepts
+duplicate records only when identity, selected operation, stage-correct resolution set, and form are
+byte-identical; it unions their canonical nonempty `origins` sets. Origins diagnose where the same
+proof value was used or rediscovered and never distinguish witnesses. Any different semantic record
+for the same ID returns `ConflictingSelectedWitnessDefinition`; the merge cannot choose by
+environment order, retain two records, or salt the ID with an environment. Provider specificity
+must be resolved before publication by `SelectCanonicalSubtypeWitness`.
 
 `SUB-WIT-009`: `directWitnessDefinitions(specialization)` traverses every type/value argument and
 keyed constraint evidence in the canonical spine. It unions the recorded definition dependencies
@@ -189,23 +299,35 @@ operand; it cannot disappear merely because the outer generic table has a differ
 `WitnessTable` resolves a definition whose target equals the concrete form's target.
 `GenericWitnessTable` contains precisely the free variables of its binder. A specialization is
 total, kind-correct, and applies ordinary arguments and constraint evidence together to the target,
-requirements, inherited entries, and dependencies in the resolved definition.
+requirements, inherited entries, and dependencies in the resolved definition. Constructing any of
+these operations creates or contributes a candidate; only canonical selection publishes the
+pair-identified witness record.
 
-`SUB-WIT-002`: `DeclaredSubtypeWitness(binder, slot)` is valid only when `slot` denotes the active
-`Conforms` constraint in that canonical binder. Its target is the binder-relative constraint
-predicate. This value is the semantic and IR-level witness parameter; a synthetic
-`ValidatedWitnessTableRef` must not be invented for it.
+`SUB-WIT-002`: `DeclaredSubtypeWitness(target)` is the canonical open proof value for a generic
+context's active `Conforms(target)` evidence. The operation repeats only the endpoint pair and
+therefore cannot distinguish two alpha-equivalent proofs by source-binder identity or constraint
+ordinal. At a use, the generic-evidence environment must contain exactly one active conformance
+slot whose substituted predicate is that target; absence is `DeclaredConformanceNotActive` and a
+duplicate is `DuplicateDeclaredConformance`. Generic IR parameters and specialization evidence are
+projected to the resulting pair-only `SubtypeWitnessId`; source `SpecializationFrame` and IR-ready
+specialization maps remain keyed by `CanonicalConstraintSlot` but each `Conforms` value must have
+that exact witness ID. Function ABI construction rejects duplicate projections and keys its witness
+input role by the pair-only ID, while the source slot remains diagnostic/mapping provenance. A
+synthetic `ValidatedWitnessTableRef` must not be invented for it.
 
 `SUB-WIT-003`: `LookupSubtypeWitness(base, key)` is valid only when `key` is either a base-interface
 entry or a conformance-requirement entry, the base table contains that exact active key, and its
 payload is a `SubtypeWitness`. Its result target is the payload
 target. Requirement declaration identity, source position, or the desired result interface cannot
-stand in for `key`.
+stand in for `key`. The result ID is the canonical pair-only ID for that target; the selected
+definition retains this exact `LookupSubtypeWitness(base, key)` operation.
 
 `SUB-WIT-004`: There is no general transitive-witness constructor. Composing `A <: B` with a
 declared `B <: C` projection means `LookupSubtypeWitness(aToB, keyOfBToC)`. A longer route is a
 left-to-right spine of lookup nodes, one for each semantic witness-table lookup. The spine is the
-proof and the operational plan at the same time.
+candidate proof and operational plan at the same time. If another spine reaches the same `A <: C`
+endpoint, canonical selection must prefer one by a named specificity rule or diagnose ambiguity;
+it cannot collapse distinct operations by asserted equivalence or publish a second witness ID.
 
 `SUB-WIT-005`: A witness table, bound witness parameter, specialization, lookup result, or opened
 existential witness may satisfy a `Conforms` constraint when its target matches. Static conformance
@@ -257,13 +379,21 @@ parameter, specialization, lookup result, and existential extraction use the sam
 The call operation does not require an `IRSymbolRef` where a runtime witness value is semantically
 required.
 
-`SUB-IR-003`: Associated type/value and other all-kind requirement lookup use
+`SUB-IR-002a`: Lowering `DeclaredSubtypeWitness(target)` resolves the current generic IR
+environment by `ContentId(CanonicalSubtypeWitness(target))` and emits that exact witness parameter.
+Constraint declaration order and source binder identity cannot choose the operand. Binder lowering
+rejects duplicate `Conforms` constraints that would insert two parameters under the same key, so
+semantic validation and IR lookup enforce the same pair-only uniqueness rule.
+
+`SUB-IR-003`: Every chapter 9 `LookupRequirement<K>` specialization uses
 `IRLookupWitnessMethod` (`lookupWitness`) with the same table operand and complete
 `SomeInterfaceRequirementKey`. A conformance-requirement
 projection used as subtype evidence instead constructs `LookupSubtypeWitness` and therefore emits
-the same operation. Only callable-like entries are projected to runtime callable slots.
+the same operation. The associated-type specialization remains a `Type` constructor, the
+constant-associated-value specialization remains a `ConstValue`, and only callable-like entries are
+projected to runtime callable slots; lowering correspondence does not erase their frontend domains.
 
-## Aggregate clauses and deprecated struct inheritance
+## Aggregate clauses and excluded struct inheritance
 
 The written colon syntax is classified by aggregate kind; there is no common semantic
 “inheritance clause” constructor:
@@ -286,11 +416,12 @@ one `ClassBase` and zero or more interface conformances. An interface accepts on
 clauses. An enum accepts its registered tag-type form and any separately
 declared interface conformances.
 
-`SUB-AGG-002`: Concrete struct inheritance is excluded from the proposed language. Compatibility
-parsing may retain the source tokens and issue a versioned migration diagnostic, but no checked
-`LegacyStructBase`, representation proof, base facet, base subobject, aggregate-initialization slot,
-or IR base conversion is constructed. Standard-library relationships that need representation
-semantics are registered standard-environment rules, not exemptions based on source module name.
+`SUB-AGG-002`: Concrete struct inheritance is excluded from the proposed language. A Slang 2026
+parse/check diagnoses the clause and constructs no checked `LegacyStructBase`, representation
+proof, base facet, base subobject,
+aggregate-initialization slot, or IR base conversion. Standard-library relationships that need
+representation semantics are registered standard-environment rules, not exemptions based on source
+module name.
 
 `SUB-AGG-003`: An invalid clause produces `ErrorAggregateClause` only for recovery. It contributes
 no member provider or successful proof and cannot make a later lookup or conversion succeed.
@@ -333,7 +464,8 @@ A facet is one member-providing view reached through an explicit route:
 FacetRouteStep =
     RepresentationBaseRoute(step: RepresentationAdjustmentStep)
   | InterfaceConformanceRoute(witness: SubtypeWitnessId)
-  | BaseInterfaceRoute(key: SubtypeWitnessLookupKey)
+  | BaseInterfaceRoute(key: SubtypeWitnessLookupKey,
+                       projected: SubtypeWitnessId)
   | ExtensionRoute(evidence: ExtensionApplicabilityEvidenceId)
   | ExistentialOpeningRoute(evidence: ExistentialOpeningEvidence)
 
@@ -352,23 +484,46 @@ FacetKey = {
 
 FacetKind = SelfFacet | RepresentationBaseFacet | ConformanceFacet |
             BaseInterfaceFacet | ExtensionFacet | OpenedExistentialFacet
+
+CanonicalSuperFacetKey = {
+    root: TypeId,
+    superInterface: InterfaceInstanceKey
+}
+
+CanonicalSuperFacetSelection = {
+    key: CanonicalSuperFacetKey,
+    facet: FacetKey,
+    witness: SubtypeWitnessId,
+    comparisons: NodeList<SubtypeWitnessCandidateComparison>
+}
 ```
 
 `SUB-FAC-001`: Folding a facet route from its root produces the facet owner and evidence. A
-base-interface route step applies exactly one `LookupSubtypeWitness` with the stored key. The facet's
-witness value is therefore a derived view of its route, never independently composed side state.
+base-interface route step applies exactly one `LookupSubtypeWitness` with the stored key. Its
+`projected` ID is the canonical ID for the resulting endpoint, and that ID's selected operation is
+exactly `LookupSubtypeWitness(previousWitness, key)`. The facet's witness value is therefore a
+validated view of its route, never independently composed side state.
 
-`SUB-FAC-002`: Path-distinct diamond facets have distinct `FacetRouteKey` values even when they end
-at the same interface declaration. They remain representable simultaneously. Sharing is permitted
-only after a proof shows their witness values and requirement transports are equivalent.
+`SUB-FAC-002`: Path-distinct diamond routes are representable as construction candidates, but they
+do not become two published super-interface facets for the same `CanonicalSuperFacetKey`.
+Byte-identical rediscovery of the same provider/path is deduplicated; genuinely distinct routes
+require one route to be strictly preferred by a named priority rule or produce an ambiguity. The
+selected route and pair-identified witness then form the sole canonical super facet. Thus a member
+lookup, associated-type projection, and IR lowering all observe the same path.
 
-`SUB-FAC-003`: A facet key never omits a semantic route and then relies on map-insertion conflict
-handling to recover it. `FacetSet.byKey` can hold every semantically distinct path.
+`SUB-FAC-003`: A facet key never omits its selected semantic route and then relies on map-insertion
+conflict handling to recover it. `FacetSet.byKey` may retain unrelated representation and extension
+facets, but its `canonicalSuperFacets` map contains exactly one entry for every reachable
+`CanonicalSuperFacetKey`. A second non-equivalent route is an error result, not another successful
+map entry.
 
 `SUB-FAC-004`: `Facet.witnessResolutions` is a dependency sidecar, not route identity. It is the
 minimal canonical union required by every witness ID in the route and folded member evidence.
-`FacetSet.equivalence` persists every nontrivial proof used to identify route classes; a producer
-cannot merge facets using a transient comparison result and then discard the proof.
+`FacetSet.equivalence` persists every nontrivial proof used for general member-provider route
+classes, but cannot equate operationally distinct subtype-witness paths. Each
+`CanonicalSuperFacetSelection.comparisons` persists the duplicate-discovery or strict-priority proof
+for its witness/path choice; a producer cannot merge facets using a transient comparison result and
+then discard the proof.
 
 `SUB-FAC-005`: An extension route contains the context-dependent
 `ExtensionApplicabilityEvidenceId`, not merely its intrinsic target/reachability evidence. The
@@ -432,6 +587,10 @@ ExtensionIntrinsicMismatch =
   | UnsatisfiedExtensionConstraints(NodeList<Constraint>)
   | ExtensionNotReachable(ReachabilityFailure)
 
+InvalidExtensionTarget =
+    InterfaceExtensionTarget(interface: DeclId)
+  | ExistentialExtensionTarget(type: TypeId)
+
 ExtensionSelectionMismatch =
     ConcreteExtensionAvailabilityUnsatisfied(
         sources: NonEmpty<ResolvedConcreteAvailability>,
@@ -485,6 +644,25 @@ environment-scoped member/conformance provider whose evidence is captured by use
 source order. One may dominate another only through a named semantic priority proof, such as strict
 target-pattern specialization plus constraint implication. Otherwise their same-name candidates
 remain jointly visible.
+
+`SUB-EXT-006`: The target of a source extension cannot be an interface declaration or existential
+container; in particular, `extension IFoo` is rejected while checking the extension header and
+produces no intrinsic-applicability result, member facet, or conformance provider. A generic
+extension may target a concrete nominal pattern and constrain its parameters by interfaces, but the
+matched target remains that concrete pattern rather than “all values of an interface.” This is a
+source-language rule, not an interpretation chosen later by member lookup.
+
+The compatibility inventory for extension priority is
+`SemanticsVisitor::CompareLookupResultItems` in `source/slang/slang-check-overload.cpp`: it currently
+prefers declared members over extensions, ordinary extension targets over the free-form
+`extension<T : IFoo> T` pattern, nongeneric over generic extensions, and requirements from more
+derived interfaces. The normative relation here states the common principle explicitly: the
+preferred candidate's applicability set must be a strict subset of the shadowed candidate's set,
+proved by target-pattern matching plus generic-constraint implication. The parameter-count
+heuristic in `compareOverloadCandidateSpecificity` and the relaxed-C3/list order in
+`source/slang/slang-check-inheritance.cpp` are implementation evidence, not semantic tie-breakers.
+When applicability-set inclusion proves neither candidate more specific, witness-provider
+selection diagnoses ambiguity and ordinary member lookup retains both candidates as applicable.
 
 ## Lookup priority is a partial order
 
@@ -597,8 +775,9 @@ base-interface declaration shadows an inherited requirement only through
 `ExplicitOverrideShadows`, whose provider and declaration endpoints validate the exact two
 same-name candidates. Such a proof is never inserted as a global `FacetSet.priority` edge and
 cannot affect other member names. Merely reaching the same declaration by a shorter interface
-diamond arm does not erase the other witness route. Callable specificity is evaluated only after
-lookup forms the overload set; it is not a facet-priority proof.
+diamond arm is not a specificity proof: canonical super-facet construction must apply a named
+strict priority rule or diagnose ambiguity. Callable
+specificity is evaluated only after lookup forms the overload set; it is not a facet-priority proof.
 
 `SUB-PRI-003`: Lexical/import proximity decides whether an extension is reachable and supplies
 diagnostic context. It is not a silent semantic tie-break between otherwise incomparable extension
@@ -606,8 +785,9 @@ members. Stable source order is used only to render deterministic ambiguity diag
 
 `SUB-PRI-004`: A total C3 sequence is not applied across class representation bases, interface
 base interfaces, conformances, and extensions as if they were one relation. The class representation
-base is a single chain. Interface and extension candidates retain path identity and use the partial
-priority relation above. A `RepresentationRoutePrefixProof` is valid only when its two routes have
+base is a single chain. Interface route candidates retain path identity until canonical
+super-facet/witness selection; extension candidates use the partial priority relation above. A
+`RepresentationRoutePrefixProof` is valid only when its two routes have
 the same root and
 `full.steps = prefix.steps ++ map(RepresentationBaseRoute, representationSuffix)`. Consequently
 `ShorterRepresentationPathHasPriority(preferred, shadowed, proof)` additionally requires
@@ -619,13 +799,17 @@ step.
 
 Generated validators and unit suites cover:
 
-- every witness-operation/form pair, substitution, serialization, and invalid endpoint;
+- every witness-operation/form pair, substitution, serialization, invalid endpoint, and the invariant
+  that one semantic snapshot resolves one endpoint pair to one witness ID/selected definition and
+  rejects incompatible definitions while composing environments;
 - generic witness abstraction/specialization with type, value, pack, and witness arguments;
 - one semantic `LookupSubtypeWitness` value/operation to one frontend-IR
   `IRLookupWitnessMethod`;
 - static, generic-parameter, specialized, nested-lookup, and existential witness calls;
-- diamonds with equal endpoints but distinct keys, and proved reuse where permitted;
+- diamonds with equal endpoints, strict route specificity, same-provider/path deduplication, and
+  rejection of incomparable paths or duplicate maximal providers;
 - class representation chains and rejection of every concrete struct-base spelling;
+- rejection of every interface/existential extension target, including `extension IFoo`;
 - extension target mismatch, blocked constraints, reachability, concrete availability, and
   specificity; reuse of intrinsic evidence across regions; region-sensitive facet IDs that remain
   independent of caller use origin; and exact once-only committed extension/target ordinary uses;

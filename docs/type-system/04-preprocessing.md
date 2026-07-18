@@ -51,6 +51,15 @@ BuildLexedCST(tokens: TokenListId, lexicalContext: LexicalContextId)
 StructurePreprocessor(input: CSTSnapshot<Lexed>, options: PreprocessorOptions)
     -> CheckResult<CSTSnapshot<PreprocessorStructured>>
 
+ReadFileLanguageHeader(input: CSTSnapshot<PreprocessorStructured>,
+                       moduleSelection: ModuleLanguageSelection)
+    -> CheckResult<FileLanguageSelection>
+
+ValidateModuleLanguageSelections(module: ModuleId,
+                                 expected: ModuleLanguageSelection,
+                                 files: NodeMap<SourceFileId, FileLanguageSelection>)
+    -> CheckResult<ValidatedModuleLanguageSelections>
+
 ExpandPreprocessor(unit: PreprocessorUnitInput,
                    includeSystem: IncludeSystem,
                    includeSystemRevision: IncludeSystemRevision,
@@ -66,7 +75,8 @@ ExpandPreprocessor(unit: PreprocessorUnitInput,
 
 PreprocessorUnitInput = {
     snapshot: CSTSnapshot<PreprocessorStructured>,
-    uniqueIdentity: IncludeUniqueIdentity
+    uniqueIdentity: IncludeUniqueIdentity,
+    language: FileLanguageSelection
 }
 
 PreprocessorExpansionResult = {
@@ -76,7 +86,33 @@ PreprocessorExpansionResult = {
     exitState: PreprocessorStateId,
     finalPersistentState: PreprocessorPersistentStateId,
     interpretedViews: NodeMap<SourceViewId, SourceViewId>,
+    fileLanguages: NodeMap<SourceViewId, FileLanguageSelection>,
     dependencies: CanonicallyOrderedSet<PreprocessorDependency>
+}
+
+SlangLanguageVersion = Slang2026
+
+ModuleLanguageSelection = {
+    module: ModuleId,
+    language: Slang,
+    version: SlangLanguageVersion,
+    rules: LanguageRuleSetId,
+    origin: CompilationOption | ModuleManifest
+}
+
+FileLanguageSelection = {
+    sourceView: SourceViewId,
+    language: Slang,
+    version: SlangLanguageVersion,
+    rules: LanguageRuleSetId,
+    origin: ExplicitLanguageHeader(LanguageDirectiveCSTNodeId)
+          | InheritedModuleSelection(ModuleId)
+}
+
+ValidatedModuleLanguageSelections = {
+    module: ModuleId,
+    selection: ModuleLanguageSelection,
+    files: NodeMap<SourceFileId, FileLanguageSelection>
 }
 
 PreprocessorOptions = {
@@ -120,7 +156,14 @@ lexer does not attach comments to AST nodes, discard whitespace, or identify mac
 conditional groups, and ordinary text into typed terminal and non-terminal nodes. It preserves the
 same flat list and does not decide which identifiers name macros.
 
-`ExpandPreprocessor` performs the source-ordered, stateful scan. When the current environment says
+`ReadFileLanguageHeader` then validates the one file-level language selection before expansion. The
+module selection supplied to `Lex` is already the lexical rule set; a matching header confirms it
+and an omitted header inherits it. A header never changes the interpretation of a suffix of the
+file. `ValidateModuleLanguageSelections` checks the complete set of module files before any checked
+module interface is published.
+
+`ExpandPreprocessor` performs the source-ordered, stateful scan under that fixed file selection.
+When the current environment says
 that an identifier is a macro, invocation recognition first publishes a small immutable
 `PreprocessorStructured` CST fragment rooted at `MacroInvocation`, with exact name, delimiter, and
 argument terminals from the stream being scanned. Expansion then publishes a `MacroExpansion`,
@@ -197,8 +240,13 @@ The core directive names are:
 #if #ifdef #ifndef #elif #else #endif
 #include #define #undef
 #warning #error #line #pragma
-#language #lang #version #extension
+#language #lang #version
 ```
+
+`#language` and its accepted abbreviation `#lang` are Slang file-header directives. `#version` is
+structured as the corresponding header form so misplaced legacy input receives a precise
+diagnostic, but the Slang 2026 profile does not give GLSL `#version` operands a successful language
+meaning. `#extension` is likewise not a core directive of the Slang profile.
 
 An unrecognized name after a directive introducer forms `UnknownDirective`; a missing or invalid
 name forms `PreprocessorRecovery`. Known pragmas include `once` and `warning`, while other pragma
@@ -423,7 +471,7 @@ PreprocessorRecoveryFields = {
 present, must use `ElseDirective`; and `endifDirective.form` must be `EndifDirective`. The grouped
 shape gives every delimiter one structural parent, so the terminal projection does not duplicate
 the opening or closing directive. `diagnosticKeyword` is constrained to `warning` or `error`, and
-`languageKeyword` to `language`, `lang`, `version`, or `extension`. No directive is stored as an
+`languageKeyword` to `language`, `lang`, or `version`. No directive is stored as an
 untyped string.
 
 `StructurePreprocessor` recognizes a directive introducer only when `#` is the first non-trivia
@@ -458,6 +506,54 @@ otherwise `first` exists and every comma is paired with exactly one following pa
 `MacroDefinitionParam.form` is exactly one of ordinary, named variadic, or anonymous variadic, so
 neither an absent name-and-ellipsis pair nor an independent optional-field combination is
 representable.
+
+## File language header
+
+Language selection is file metadata, not an ordered preprocessor variable. WhiteSpace, newlines,
+line continuations, and line/block comments are header-ignorable. The first terminal that is not
+one of those trivia kinds is the file's first non-comment thing.
+
+```text
+FileLanguageHeaderInspection =
+    NoExplicitHeader
+  | ExplicitSlangHeader(directive: LanguageDirectiveCSTNodeId,
+                        requestedVersion: SlangLanguageVersion)
+  | LegacyVersionHeader(directive: LanguageDirectiveCSTNodeId)
+  | MisplacedOrDuplicateHeader(
+        directives: NonEmpty<LanguageDirectiveCSTNodeId>)
+
+InspectFileLanguageHeader(root: PreprocessorUnitCSTNodeId)
+    -> FileLanguageHeaderInspection
+
+ResolveFileLanguageSelection(inspection: FileLanguageHeaderInspection,
+                             expected: ModuleLanguageSelection)
+    -> CheckResult<FileLanguageSelection>
+```
+
+`PP-LNG-001`: A `#language` or `#lang` directive is valid only when its `#` terminal is the first
+non-comment thing in its physical file. At most one language-header directive may occur in a file.
+A later occurrence is diagnosed even in an inactive conditional branch, because conditional
+evaluation must not control the file's grammar. Its CST remains lossless but it has no state effect.
+
+`PP-LNG-002`: The accepted Slang header operands are `2026`, `slang 2026`, and versioned successors
+explicitly admitted by a later edition. The resolved language and version must equal the enclosing
+`ModuleLanguageSelection`; an explicit header cannot override that selection. Omitting the header
+inherits the module selection. Header operands are not macro-expanded.
+
+`PP-LNG-003`: A structurally recognized `#version` is subject to the same first-non-comment and
+single-header placement rule, but is rejected by this Slang-only edition as a legacy non-Slang
+language selector. This preserves a precise source diagnostic without importing GLSL version or
+extension semantics into Slang.
+
+`PP-LNG-004`: Every physical source file that contributes to one module has the same resolved
+`language`, `version`, and `LanguageRuleSetId`. `ValidateModuleLanguageSelections` diagnoses every
+mismatching file before publishing a module interface. An included file with no explicit header
+inherits the including module's selection; an explicit included-file header must match it.
+
+`PP-LNG-005`: Once `ReadFileLanguageHeader` returns, no directive, macro expansion, include, or
+registered handler can change the selection for that file or a following file. The selection is an
+input to lexing, preprocessing contexts, parsing, and checking; it is not stored in
+`PreprocessorDirectiveState` and does not flow outward through include state.
 
 ## Immutable environment and complete preprocessing state
 
@@ -677,6 +773,7 @@ PreprocessorInputFrame = {
     sourceView: SourceViewId,
     uniqueIdentity: IncludeUniqueIdentity,
     structuredRoot: NonTerminalNodeId<PreprocessorStructured, PreprocessorUnit>,
+    language: FileLanguageSelection,
     includedFrom: Option<
         NonTerminalNodeId<PreprocessorStructured, IncludeDirective>>
 }
@@ -718,7 +815,6 @@ PreprocessorLogicalLocationStateId = ContentId<PreprocessorLogicalLocationState>
 
 PreprocessorDirectiveState = {
     warningState: WarningStateTrackerId,
-    languageRules: LanguageRuleSetId,
     logicalLocations: PreprocessorLogicalLocationStateId,
     registeredDirectiveState: NodeMap<RegisteredDirectiveStateSlot, SchemaValue>
 }
@@ -810,7 +906,7 @@ LeaveIncludedPreprocessorUnit(boundary: IncludedUnitBoundary,
 
 PreprocessorUnitEntryFailure =
     InputRootMismatch
-  | LexicalLanguageMismatch
+  | FileLanguageSelectionMismatch
   | InvalidPrimaryUniqueIdentity
   | PrimarySnapshotConflict
 
@@ -857,7 +953,8 @@ directive to equal `LookupRegisteredDirective` at the supplied revisions. `Expan
 performs this validation before beginning the unit; a mismatch is an infrastructure task failure,
 not a source diagnostic. `BeginPreprocessorUnit` derives the primary
 `sourceView` from `unit.snapshot.lexicalContext`, pushes exactly one input frame for
-`unit.uniqueIdentity`, freezes or validates the source-view snapshot in
+`unit.uniqueIdentity` with `unit.language`, requires that selection's source view and rules to match
+the snapshot's lexical context, freezes or validates the source-view snapshot in
 `loadedSources[unit.uniqueIdentity]`, and starts with empty conditional and busy stacks.
 `EndPreprocessorUnit` requires exactly that frame and empty conditional/busy stacks, removes the
 frame, and returns the
@@ -865,7 +962,8 @@ six persistent fields from the exit state. Thus a reusable seed never contains a
 frame, conditional, or busy invocation.
 
 `EnterIncludedPreprocessorUnit` records the three parent stack depths and pushes exactly the given
-child frame. The child's conditional-stack suffix is initially empty; the parent's conditional
+child frame after requiring its language/version/rules to equal the parent's selection. The child's
+conditional-stack suffix is initially empty; the parent's conditional
 prefix stays present and determines whether the include directive itself was active. The parent's
 busy prefix likewise remains present so macros active at the include site remain suppressed in the
 included file. `LeaveIncludedPreprocessorUnit` requires the exact child frame and requires both
@@ -878,8 +976,8 @@ caller intends a single chained preprocessing session. Starting an independent t
 uses a newly built seed. No final state is installed into a process-global preprocessor by
 convention.
 
-`PreprocessorOptions` supplies fixed expansion policy and limits. Language rules come from
-`PreprocessorPersistentState.directiveState` and must agree with the input lexical context.
+`PreprocessorOptions` supplies fixed expansion policy and limits. Language rules come from the
+current input frame's immutable `FileLanguageSelection` and must agree with the input lexical context.
 `IncludeSystem`, `BuiltinMacroProvider`, feature availability, and registered directive handlers are explicit,
 versioned query inputs, not hidden global state. A diagnostic sink is an observer of the returned
 diagnostic set and cannot change evaluation.
@@ -896,9 +994,8 @@ order, and cache hits do not participate.
 
 `PP-STA-004`: At primary-unit entry, the sole input frame's `structuredRoot` is the input
 snapshot's root,
-its `sourceView` equals `resolve(input.lexicalContext).sourceView`, and
-`directiveState.languageRules` equals
-`resolve(input.lexicalContext).options.languageRules`. At an included-unit entry, the new frame is
+its `sourceView` equals `resolve(input.lexicalContext).sourceView`, and its
+`language.rules` equals `resolve(input.lexicalContext).options.languageRules`. At an included-unit entry, the new frame is
 the last input frame and the conditional/busy prefixes equal those captured in
 `IncludedUnitBoundary`. Only suffixes created by that included unit may be popped within it.
 
@@ -911,6 +1008,10 @@ constructs or pops an input frame by convention.
 state slots satisfy their declared schemas and every builtin binding is equal to the definition
 served at the query's `BuiltinMacroProviderRevision`. Provider rebinding is an input-version change,
 never mutation of an existing preprocessing state.
+
+`PP-STA-007`: Every `languageRules` field in a feature, conditional, macro-expansion, paste-lexing,
+or registered-directive request equals `state.inputStack.last.language.rules`. It is a convenient
+request projection, not an independently mutable setting.
 
 ## Ordered scan and activity
 
@@ -1260,10 +1361,12 @@ diagnostics, and later location queries use that state. Physical `SourceRange` v
 
 Known `#pragma` forms update their declared part of `directiveState`; `#pragma once` adds the
 current input frame's `uniqueIdentity` to `pragmaOnceUniqueIdentities`. Unknown pragmas are
-preserved and ignored unless a registered handler claims them. `#language`, `#lang`, `#version`,
-and `#extension` update only schema-declared language state after validating their exact operands.
-Changing lexical treatment cannot reinterpret elements already lexed in the current snapshot; a
-language feature that needs different tokenization must be selected before `Lex`.
+preserved and ignored unless a registered handler claims them. `#language`, `#lang`, and
+`#version` have already been consumed as immutable file-header metadata by `ReadFileLanguageHeader`;
+the ordered scan preserves their expansion node with no state transition. A misplaced or duplicate
+header was already diagnosed and likewise has no state effect. `#extension` is not a Slang 2026 core
+directive. A language feature that changes tokenization must be selected in the module/file language
+input before `Lex`.
 
 `PP-DIR-003`: Each registered directive declares its operand grammar, state field, behavior in an
 inactive branch, serialization schema, and dependency revision. A callback with undeclared mutable
@@ -1704,7 +1807,7 @@ CreateIncludedSourceView(
 
 CreateIncludedLexicalContext(parent: LexicalContextId,
                              includedView: SourceViewId,
-                             languageRules: LanguageRuleSetId,
+                             expectedLanguage: FileLanguageSelection,
                              policy: IncludeLexPolicy)
     -> Result<LexicalContext, IncludedLexicalContextFailure>
 
@@ -1727,10 +1830,9 @@ directive's range already contains `includingView`; supplying a different view i
 two uses of the same resolved source through distinct including views or directive occurrences
 produce distinct view identities without making file resolution depend on expansion history.
 `CreateIncludedLexicalContext` installs `includedView` as `LexicalContext.sourceView`, copies the
-parent `LexOptions`, and applies only language-rule changes declared not to alter tokenization. It
-checks the two `IncludeLexPolicy` constraints explicitly. A rule that would require reinterpreting
-the already structured including file fails rather than silently lexing the child under an
-incompatible language.
+parent `LexOptions`, and requires their language rules to equal `expectedLanguage.rules`. It checks
+the two `IncludeLexPolicy` constraints explicitly. The child is not allowed to select different
+rules after lexing.
 
 For a resolved include:
 
@@ -1739,8 +1841,9 @@ For a resolved include:
 2. If it appears in `inputStack`, publish `FailedIncludeExpansion(Cycle)` and produce no tokens.
 3. Freeze or validate `loadedSources[uniqueIdentity] = source`.
 4. Create the distinct included `SourceView` with `CreateIncludedSourceView`; construct a
-   `LexicalContext` with `CreateIncludedLexicalContext`; lex and structure it;
-   then enter it with `EnterIncludedPreprocessorUnit`.
+   `LexicalContext` with `CreateIncludedLexicalContext`; lex and structure it; run
+   `ReadFileLanguageHeader` against the including module's selection; then enter it with
+   `EnterIncludedPreprocessorUnit`.
 5. Scan the included unit with the caller's current environment, pragma-once set, loaded sources,
    registered-directive catalog, directive state, and remaining resource budget. Conditional and
    busy stacks are scoped as described below.
@@ -1785,8 +1888,9 @@ The caller's busy prefix is restored exactly; include directives cannot leak or 
 invocations. The child's final macro environment, pragma-once additions, loaded-source selections,
 declared directive-state
 changes, and resource usage flow outward. Source-view-specific logical-line entries remain keyed by
-their source view. This field-by-field rule, rather than a generic "copy state back," defines include
-scope.
+their source view. The child's file-language selection is recorded in
+`PreprocessorExpansionResult.fileLanguages` and does not flow as mutable state. This field-by-field
+rule, rather than a generic "copy state back," defines include scope.
 
 Each non-suppressed, non-cyclic include use that reaches lexing has its own `SourceView` and staged
 CST chain even when decoded file bytes and `SourceFileSnapshot` are shared. This distinction
@@ -1984,9 +2088,9 @@ Limits are immutable `PreprocessorOptions`. Charging is defined by semantic even
 implementation happens to loop:
 
 | event                                               | exact charge                                                                                                                                                                |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| advance a scan level past input                     | one inspected element for each `Token                                                                                                                                       | Trivia` element consumed at that scan level; lookahead without commitment is free                                |
-| collect a macro argument                            | one argument element for each `Token                                                                                                                                        | Trivia`added to a lexical`MacroInvocationArg`; separators and a derived variadic aggregate range are not charged |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| advance a scan level past input                     | one inspected element for each `Token \| Trivia` element consumed at that scan level; lookahead without commitment is free                                                  |
+| collect a macro argument                            | one argument element for each `Token \| Trivia` added to a lexical `MacroInvocationArg`; separators and a derived variadic aggregate range are not charged                  |
 | begin playback of a well-formed non-busy invocation | one expanded invocation and observed expansion depth `length(busyMacros) + 1`                                                                                               |
 | enter an included unit                              | observed include depth `length(inputStack)` before the child push, so the primary unit has depth zero and its first include has depth one                                   |
 | materialize expansion output                        | one emitted token for each new active token terminal produced by macro playback, parameter copying, stringization, paste, a builtin, or conditional-predicate normalization |
@@ -2041,6 +2145,8 @@ type checker, file system, or diagnostic-text renderer:
 
 ```text
 StructurePreprocessor
+ReadFileLanguageHeader / ResolveFileLanguageSelection
+ValidateModuleLanguageSelections
 CompileMacroDefinition
 ClassifyDefinitionFlavor
 CollectMacroInvocationArguments
@@ -2086,6 +2192,8 @@ Representative table-driven tests include:
 - comments and line continuations in stringization;
 - empty, single-token, multi-token, and trivia-forming paste results;
 - inactive definitions, nested conditionals, short-circuit expressions, and malformed groups;
+- a leading, omitted, duplicate, misplaced, and inactive-branch `#language`/`#lang`; a leading or
+  misplaced diagnostic-only `#version`; and equal/mismatching file selections within one module;
 - success, recovered evaluation, and every skipped-branch reason with retained expanded operand and
   parsed-expression artifacts;
 - table-driven `PpExpr` cases shared with chapter 7, proving conditional selection uses the exact

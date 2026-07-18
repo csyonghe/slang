@@ -1,13 +1,16 @@
 (*
-    Slang surface grammar baseline.
+    Slang 2026 surface grammar baseline. Legacy HLSL and GLSL input dialect productions are
+    intentionally outside this grammar.
 
-    Baseline: official master 4f4ec505761e2e56a45da873d5c169ff6e512f52, 2026-07-16.
-    Status: proposed structural EBNF. Contextual spelling is written SOFT("text").
+    Baseline: official master aaa07fe296560ffefeaf2e39d0aed5658b641a21, 2026-07-17.
+    Status: proposed structural EBNF. A word token is written SOFT("text") because the lexer emits
+    identifiers uniformly; 02-syntax.md separately declares whether that spelling is reserved or
+    contextual.
     Builtin type/function names are IDENTIFIERs supplied by the standard environment.
     cst-production-profile.json assigns every symbol occurrence a stable terminal/non-terminal
     field role. generate-cst-production-schema.py checks the pairing and emits NodeSchemaRegistry
     production descriptors; EBNF ordering alone is not a CST.
-    Recovery/version/dialect annotations are a blocking grammar-freeze follow-up in chapter 13.
+    Recovery/language-version annotations are a blocking grammar-freeze follow-up in chapter 13.
 *)
 
 source-file = { top-level-declaration }, END_OF_FILE ;
@@ -24,7 +27,6 @@ declaration = module-declaration
             | property-declaration
             | associated-declaration
             | buffer-declaration
-            | syntax-declaration
             | require-capability-declaration
             | internal-container-declaration
             | c-style-declaration
@@ -55,14 +57,14 @@ typedef-declaration = SOFT("typedef"), type, declarator, ";" ;
 typealias-declaration = SOFT("typealias"), IDENTIFIER, [ generic-parameter-clause ],
                         { where-clause }, "=", type, ";" ;
 
-struct-declaration = SOFT("struct"), { legacy-attribute }, [ IDENTIFIER ],
+struct-declaration = SOFT("struct"), { post-introducer-attribute }, [ IDENTIFIER ],
                      [ generic-parameter-clause ], [ conformance-clause ],
                      { where-clause }, aggregate-tail ;
 aggregate-tail = aggregate-body | ";" | "=", type, ";" ;
 
-(* Current class parser intentionally has no inline generic/where clause. *)
 class-declaration = SOFT("class"), IDENTIFIER,
-                    [ class-base-and-conformance-clause ], aggregate-body ;
+                    [ generic-parameter-clause ], [ class-base-and-conformance-clause ],
+                    { where-clause }, aggregate-body ;
 
 enum-declaration = SOFT("enum"), [ SOFT("class") ], [ IDENTIFIER ],
                    [ generic-parameter-clause ], [ enum-base-clause ],
@@ -201,18 +203,7 @@ where-term = SOFT("nonempty"), "(", expression, ")"
            | type, "(", type, ")", [ SOFT("implicit") ] ;
 
 buffer-declaration = ( SOFT("cbuffer") | SOFT("tbuffer") ), IDENTIFIER,
-                     [ ":", register-suffix ], aggregate-body
-                   | glsl-interface-block ;
-glsl-interface-block = { modifier }, IDENTIFIER, aggregate-body,
-                       [ IDENTIFIER ], { "[", [ expression ], "]" }, ";" ;
-
-syntax-declaration = SOFT("syntax"), IDENTIFIER,
-                     [ ":", IDENTIFIER ], [ "=", IDENTIFIER ], ";"
-                   | SOFT("attribute_syntax"), "[", IDENTIFIER,
-                     [ "(", [ attribute-parameter-list ], ")" ], "]",
-                     ":", IDENTIFIER, ";" ;
-attribute-parameter-list = attribute-parameter, { ",", attribute-parameter } ;
-attribute-parameter = IDENTIFIER, [ ":", type ], [ "=", expression ] ;
+                     aggregate-body ;
 
 require-capability-declaration = SOFT("__require_capability"), IDENTIFIER,
                                  { ( "+" | "," ), IDENTIFIER }, ";" ;
@@ -278,7 +269,7 @@ require-capability-statement = SOFT("__requireCapability"),
 declaration-statement = top-level-declaration ;
 expression-statement = expression, ";" ;
 
-expression = assignment-expression, { ",", assignment-expression } ;
+expression = assignment-expression ;
 assignment-expression = conditional-expression,
                         [ assignment-operator, assignment-expression ] ;
 assignment-operator = "=" | "+=" | "-=" | "*=" | "/=" | "%=" |
@@ -304,6 +295,7 @@ prefix-expression = postfix-expression
                   | SOFT("new"), type, [ argument-list ]
                   | keyword-expression ;
 prefix-operator = "+" | "-" | "!" | "~" | "++" | "--" | "*" | "&" ;
+(* This retained Slang cast production has no special aggregate-zero-initialization case. *)
 c-style-cast-expression = "(", type, ")", prefix-expression ;
 
 postfix-expression = primary-expression, { postfix-suffix } ;
@@ -372,9 +364,8 @@ modifier = attribute
          | complex-modifier ;
 
 simple-modifier = SOFT("in") | SOFT("out") | SOFT("inout") |
-                  SOFT("__ref") | SOFT("__constref") | SOFT("const") |
-                  SOFT("__builtin") | SOFT("highp") | SOFT("lowp") |
-                  SOFT("mediump") | SOFT("__global") | SOFT("inline") |
+                   SOFT("__ref") | SOFT("__constref") | SOFT("const") |
+                   SOFT("__builtin") | SOFT("__global") | SOFT("inline") |
                   SOFT("public") | SOFT("private") | SOFT("internal") |
                   SOFT("require") | SOFT("param") | SOFT("extern") |
                   SOFT("dyn") | SOFT("row_major") | SOFT("column_major") |
@@ -391,25 +382,20 @@ simple-modifier = SOFT("in") | SOFT("out") | SOFT("inout") |
                   SOFT("payload") | SOFT("__prefix") | SOFT("__postfix") |
                   SOFT("__exported") ;
 
-complex-modifier = SOFT("layout"), "(", token-island-balanced, ")"
-                 | SOFT("hitAttributeEXT")
-                 | standard-syntax-modifier ;
+complex-modifier = standard-syntax-modifier ;
 standard-syntax-modifier = IDENTIFIER, syntax-feature-payload ;
 type-modifier = modifier ;
 
 attribute = "[", [ "[" ], attribute-item,
-            { [ "," ], attribute-item }, [ "]" ], "]" ;
+            { ",", attribute-item }, [ "]" ], "]" ;
 attribute-item = attribute-name, [ argument-list ] ;
 attribute-name = [ "::" ], IDENTIFIER, { "::", IDENTIFIER } ;
-legacy-attribute = attribute ;
+post-introducer-attribute = attribute ;
 
 semantic-suffix = ":", semantic-item, { ":", semantic-item } ;
 semantic-item = IDENTIFIER
-              | SOFT("register"), "(", token-island-balanced, ")"
-              | SOFT("packoffset"), "(", token-island-balanced, ")"
               | SOFT("read"), "(", token-island-balanced, ")"
               | SOFT("write"), "(", token-island-balanced, ")" ;
-register-suffix = SOFT("register"), "(", token-island-balanced, ")" ;
 
 spirv-asm-expression = SOFT("spirv_asm"), "{", spirv-asm-token-island, "}" ;
 

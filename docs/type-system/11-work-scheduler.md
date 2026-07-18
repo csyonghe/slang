@@ -407,7 +407,11 @@ Query kinds are split until all values produced by one kind have the same policy
 as `CanonicalType` is invalid because nominal identity, alias expansion, and structural
 canonicalization have different cycle behavior.
 
-The initial policy assignment is normative:
+The table below is the initial proposed policy assignment. The centralized query/scheduler model is
+part of this specification, but the language owner has deferred final review of the per-query cycle
+policies. Until that review closes the corresponding chapter 13 entry, these rows define the
+concrete proposal and its required tests but do not authorize an implementation to freeze a
+different implicit policy:
 
 | Query kind                                                                                                        | Policy                                                                         | Reason/recovery                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
